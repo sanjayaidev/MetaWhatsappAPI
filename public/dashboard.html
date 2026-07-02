@@ -147,7 +147,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="page-header"><div class="page-title">Templates</div><div class="page-sub">Create and manage Meta-approved message templates</div></div>
 <div class="grid-2">
 <div class="card">
-<div class="card-header"><div class="card-title">📋 Your Templates</div><div style="display:flex;gap:8px;"><button class="btn btn-primary btn-sm" onclick="openTemplateBuilder()">+ New</button><button class="btn btn-secondary btn-sm" onclick="fetchApprovedTemplates()" title="Sync approved templates from Meta">🔄 Refresh Meta</button></div></div>
+<div class="card-header"><div class="card-title">📋 Your Templates</div><div style="display:flex;gap:8px;"><button class="btn btn-primary btn-sm" onclick="openTemplateBuilder()">+ New</button><button id="refreshApprovedTemplatesBtn" class="btn btn-secondary btn-sm" onclick="fetchApprovedTemplates()" title="Sync approved templates from Meta">🔄 Refresh Meta</button></div></div>
 <div id="templateList"><div class="empty-state"><div class="empty-icon">📋</div><p>No templates yet</p></div></div>
 <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);"><div class="card-title" style="margin-bottom:12px;font-size:13px;">✅ Approved on Meta</div><div id="metaApprovedList"><div class="empty-state" style="padding:12px 0;"><p style="font-size:12px;">Click refresh to check</p></div></div></div>
 </div>
@@ -319,6 +319,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <button class="header-type-btn active" onclick="setHeaderType('NONE')" data-type="NONE"><span class="hti">🚫</span>None</button>
 <button class="header-type-btn" onclick="setHeaderType('TEXT')" data-type="TEXT"><span class="hti">📝</span>Text</button>
 <button class="header-type-btn" onclick="setHeaderType('IMAGE')" data-type="IMAGE"><span class="hti">🖼️</span>Image</button>
+<button class="header-type-btn" onclick="setHeaderType('VIDEO')" data-type="VIDEO"><span class="hti">🎬</span>Video</button>
+<button class="header-type-btn" onclick="setHeaderType('DOCUMENT')" data-type="DOCUMENT"><span class="hti">📄</span>Document</button>
 </div>
 <div id="headerInputArea" style="margin-top:12px;"></div>
 </div>
@@ -352,6 +354,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 const API_BASE_URL = window.location.origin;
 let authToken = null, currentUser = null, contacts = [], templates = [], campaigns = [];
 let buttonCount = 0, currentHeaderType = 'NONE', sendPollInterval = null, activeSendCampaignId = null;
+let headerMediaId = null, headerMediaName = '', headerMediaMime = '';
 let waConnSelectedNumber = null, waConnNumbersCache = [];
 
 async function apiCall(endpoint, method = 'GET', body = null) {
@@ -382,6 +385,26 @@ function doLogout() {
   authToken = null; currentUser = null; contacts = []; templates = []; campaigns = [];
   localStorage.removeItem('supabase_token');
   window.location.href = '/login.html';
+}
+
+async function apiUploadFile(endpoint, file) {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  try {
+    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Authorization': authToken ? `Bearer ${authToken}` : undefined },
+      body: form
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('File upload error:', err);
+    return { error: err.message };
+  }
+}
+
+function resetHeaderMediaState() {
+  headerMediaId = null; headerMediaName = ''; headerMediaMime = '';
 }
 
 async function loadDashboard() {
@@ -421,23 +444,44 @@ async function loadTemplates() {
 }
 
 async function fetchApprovedTemplates() {
-  const btn = event.target;
-  const originalText = btn.textContent;
-  btn.textContent = '⏳ Fetching...';
-  btn.disabled = true;
+  const btn = document.getElementById('refreshApprovedTemplatesBtn');
+  const originalText = btn?.textContent || 'Refresh Meta';
+  if (btn) {
+    btn.textContent = '⏳ Fetching...';
+    btn.disabled = true;
+  }
   
   const res = await apiCall('/api/templates/meta/approved');
   
   if (res.success) {
+    syncLocalTemplateApprovalStatus(res.templates || []);
     renderMetaApprovedTemplates(res.templates || []);
+    loadTemplatesForCampaignSelect();
     showToast(`Found ${res.templates?.length || 0} approved templates on Meta`);
   } else {
     showToast(res.error || 'Failed to fetch approved templates', true);
     renderMetaApprovedTemplates([]);
   }
   
-  btn.textContent = originalText;
-  btn.disabled = false;
+  if (btn) {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+
+function syncLocalTemplateApprovalStatus(approvedTemplates) {
+  if (!Array.isArray(approvedTemplates) || !approvedTemplates.length) return;
+  let updated = false;
+  approvedTemplates.forEach(metaTpl => {
+    const local = templates.find(t => t.name === metaTpl.name);
+    if (local && local.status !== 'APPROVED') {
+      local.status = 'APPROVED';
+      local.language = metaTpl.language || local.language;
+      local.category = metaTpl.category || local.category;
+      updated = true;
+    }
+  });
+  if (updated) renderTemplates();
 }
 
 function renderMetaApprovedTemplates(templates) {
@@ -480,11 +524,47 @@ function openTemplateBuilder() {
 function sanitizeTemplateName(input) { input.value = input.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'); }
 function setHeaderType(type) {
   currentHeaderType = type;
+  resetHeaderMediaState();
   document.querySelectorAll('.header-type-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.type === type));
   const area = document.getElementById('headerInputArea');
-  if (type === 'TEXT') area.innerHTML = `<input type="text" id="headerText" placeholder="Header text" oninput="updatePreview()">`;
-  else if (type === 'IMAGE') area.innerHTML = `<input type="url" id="headerMediaUrl" placeholder="https://example.com/image.jpg" oninput="updatePreview()">`;
-  else area.innerHTML = '';
+  if (type === 'TEXT') {
+    area.innerHTML = `<input type="text" id="headerText" placeholder="Header text" oninput="updatePreview()">`;
+  } else if (type === 'IMAGE' || type === 'VIDEO' || type === 'DOCUMENT') {
+    const acceptTypes = type === 'IMAGE'
+      ? 'image/*'
+      : type === 'VIDEO'
+      ? 'video/*'
+      : 'application/pdf,image/*,video/*,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    area.innerHTML = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button class="btn btn-secondary btn-sm" type="button" onclick="document.getElementById('tplMediaFile').click()">Choose ${type.toLowerCase()} file</button>
+        <span id="tplMediaStatus" style="font-size:12px;color:var(--text3);">No file selected</span>
+      </div>
+      <input type="file" id="tplMediaFile" accept="${acceptTypes}" style="display:none;" onchange="handleTemplateMediaFile(event)">
+      <div style="margin-top:10px;font-size:12px;color:var(--text2);">Supported file types: ${type === 'IMAGE' ? 'JPEG, PNG, WEBP' : type === 'VIDEO' ? 'MP4, AVI, MOV' : 'PDF, DOC, DOCX, PPTX, XLSX, images, video'}</div>
+    `;
+  } else {
+    area.innerHTML = '';
+  }
+  updatePreview();
+}
+
+async function handleTemplateMediaFile(event) {
+  const file = event.target.files?.[0];
+  const statusEl = document.getElementById('tplMediaStatus');
+  if (!file) return;
+  if (statusEl) statusEl.textContent = 'Uploading file...';
+  const res = await apiUploadFile('/api/templates/media/upload', file);
+  if (res.success && res.media_id) {
+    headerMediaId = res.media_id;
+    headerMediaName = file.name;
+    headerMediaMime = file.type;
+    if (statusEl) statusEl.textContent = `${file.name} uploaded`;
+    showToast('Media uploaded successfully');
+  } else {
+    if (statusEl) statusEl.textContent = 'Upload failed';
+    showToast(res.error || 'Media upload failed', true);
+  }
   updatePreview();
 }
 function onBodyInput() { buildPlaceholderFields(); updatePreview(); }
@@ -514,8 +594,15 @@ function updatePreview() {
 }
 function renderWaPreview(headerType, headerData, body, footer, buttons, containerId, bodyIsHtml=false) {
   let headerHtml = '';
-  if (headerType === 'TEXT') headerHtml = `<div class="wa-bubble-header">${escapeHtml(headerData?.text || '')}</div>`;
-  else if (headerType === 'IMAGE') headerHtml = `<div class="wa-media-placeholder">🖼️ Image</div>`;
+  if (headerType === 'TEXT') {
+    headerHtml = `<div class="wa-bubble-header">${escapeHtml(headerData?.text || '')}</div>`;
+  } else if (headerType === 'IMAGE') {
+    headerHtml = `<div class="wa-media-placeholder">🖼️ Image header selected</div>`;
+  } else if (headerType === 'VIDEO') {
+    headerHtml = `<div class="wa-media-placeholder">🎬 Video header selected</div>`;
+  } else if (headerType === 'DOCUMENT') {
+    headerHtml = `<div class="wa-media-placeholder">📄 Document header selected</div>`;
+  }
   const bodyHtml = bodyIsHtml ? body : escapeHtml(body).replace(/\n/g,'<br>');
   const footerHtml = footer ? `<div class="wa-bubble-footer">${escapeHtml(footer)}</div>` : '';
   const btnsHtml = (buttons||[]).map(b => b.text ? `<div class="wa-bubble-btn">${escapeHtml(b.text)}</div>` : '').join('');
@@ -526,11 +613,30 @@ async function submitTemplate() {
   const category = document.getElementById('tplCategory').value; const language = document.getElementById('tplLanguage').value;
   const footer = document.getElementById('tplFooter').value.trim(); const buttons = collectButtons();
   if (!name || !body) { showToast('Name and body required', true); return; }
+  if ((currentHeaderType === 'IMAGE' || currentHeaderType === 'VIDEO' || currentHeaderType === 'DOCUMENT') && !headerMediaId) {
+    showToast('Please upload a media file for the selected header type', true);
+    return;
+  }
   const btn = document.getElementById('tplSubmitBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Submitting…';
-  const res = await apiCall('/api/templates', 'POST', { name, body, category, language, footer: footer || undefined, buttons: buttons.length ? buttons : undefined, header_type: currentHeaderType, header_text: document.getElementById('headerText')?.value });
+  const payload = {
+    name,
+    body,
+    category,
+    language,
+    footer: footer || undefined,
+    buttons: buttons.length ? buttons : undefined,
+    header_type: currentHeaderType,
+    header_text: document.getElementById('headerText')?.value || undefined,
+    header_media_id: headerMediaId || undefined
+  };
+  const res = await apiCall('/api/templates', 'POST', payload);
   btn.disabled = false; btn.textContent = 'Submit for Review';
-  if (res.success) { showToast('Template submitted!'); loadTemplates(); closeModal('templateModal'); }
-  else showToast(res.error || 'Submission failed', true);
+  if (res.success) {
+    showToast('Template submitted!');
+    resetHeaderMediaState();
+    loadTemplates();
+    closeModal('templateModal');
+  } else showToast(res.error || 'Submission failed', true);
 }
 async function deleteTemplate(id) { if (!confirm('Delete this template?')) return; const res = await apiCall(`/api/templates/${id}`, 'DELETE'); if (res.success) { showToast('Template deleted'); loadTemplates(); } else showToast(res.error || 'Delete failed', true); }
 

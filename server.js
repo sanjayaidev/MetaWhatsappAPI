@@ -11,6 +11,8 @@ const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
 const path = require('path');
 const fetch = require('node-fetch');
+const FormData = require('form-data');
+const multer = require('multer');
 const aiChatRouter = require('./src/routes/ai-chat');
 const { generateReply, DEFAULT_MODEL: DEFAULT_AI_MODEL } = aiChatRouter;
 
@@ -71,6 +73,7 @@ function decryptToken(stored) {
 // ================================================================
 // 3. MIDDLEWARE
 // ================================================================
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 app.use(express.json({ 
   verify: (req, _res, buf) => { req.rawBody = buf; },
   limit: '10mb' 
@@ -80,7 +83,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Auth middleware — verifies Supabase JWT (works for email + Google + FB)
 const verifyUser = async (req, res, next) => {
   const authHeader = req.headers['authorization'] || '';
-  const token = authHeader.replace('Bearer ', '').trim();
+  let token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!token) token = String(req.headers['x-api-key'] || '').trim();
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const { data: { user }, error } = await supabase.auth.getUser(token);
@@ -141,6 +145,21 @@ app.post('/api/admin/create-user', verifyAdmin, async (req, res) => {
 // ================================================================
 // 6. PROFILE ROUTES
 // ================================================================
+app.post('/api/auth/verify', async (req, res) => {
+  const authHeader = req.headers['authorization'] || '';
+  let token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!token) token = String(req.headers['x-api-key'] || '').trim();
+  if (!token) return res.status(401).json({ error: 'Not authenticated' });
+
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) return res.status(401).json({ error: 'Invalid or expired token' });
+    return res.json({ success: true, user: { id: user.id, email: user.email, user_metadata: user.user_metadata } });
+  } catch (err) {
+    return res.status(401).json({ error: 'Auth verification failed' });
+  }
+});
+
 app.get('/api/profile', verifyUser, async (req, res) => {
   // Try to get existing profile
   let { data, error } = await supabase
@@ -205,7 +224,7 @@ app.get('/api/templates', verifyUser, async (req, res) => {
 });
 
 app.post('/api/templates', verifyUser, async (req, res) => {
-  const { name, body, category, language, footer, buttons, header_type, header_text, header_media_url, placeholders } = req.body;
+  const { name, body, category, language, footer, buttons, header_type, header_text, header_media_url, header_media_id, placeholders } = req.body;
   if (!name || !body) return res.status(400).json({ error: 'Name and body required' });
   if (!/^[a-z0-9_]+$/.test(name)) return res.status(400).json({ error: 'Name must be lowercase letters, numbers, underscores only' });
 
@@ -233,7 +252,8 @@ app.post('/api/templates', verifyUser, async (req, res) => {
         header.text = header_text || '';
       } else {
         header.format = header_type;
-        if (header_media_url) header.example = { header_handle: [header_media_url] };
+        const mediaHandle = header_media_id || header_media_url;
+        if (mediaHandle) header.example = { header_handle: [mediaHandle] };
       }
       components.push(header);
     }
@@ -316,6 +336,45 @@ app.delete('/api/templates/:id', verifyUser, async (req, res) => {
     .eq('user_id', req.user.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
+});
+
+app.post('/api/templates/media/upload', verifyUser, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'File upload required' });
+
+  const { data: accounts, error: accountError } = await supabase
+    .from('wa_accounts')
+    .select('access_token, phone_number_id')
+    .eq('user_id', req.user.id)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (accountError) return res.status(500).json({ error: accountError.message });
+  if (!accounts?.length) return res.status(400).json({ error: 'No WhatsApp account connected' });
+
+  const account = accounts[0];
+  const plainToken = decryptToken(account.access_token);
+  try {
+    const form = new FormData();
+    form.append('file', req.file.buffer, {
+      filename: req.file.originalname,
+      contentType: req.file.mimetype
+    });
+
+    const metaRes = await fetch(
+      `https://graph.facebook.com/${META_API_VERSION}/${account.phone_number_id}/media`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${plainToken}` },
+        body: form
+      }
+    );
+    const data = await metaRes.json();
+    if (!metaRes.ok) return res.status(metaRes.status).json({ error: data.error?.message || 'Media upload failed', detail: data });
+
+    res.json({ success: true, media_id: data.id, mime_type: data.mime_type, url: data.url || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/templates/meta/approved', verifyUser, async (req, res) => {
