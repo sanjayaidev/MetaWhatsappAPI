@@ -1,25 +1,14 @@
-databases:
-  - name: wablast-db
-    plan: free # Change to 'starter' if you need more storage
-    ipAllowList:
-      - source: 0.0.0.0/0
-        description: Allow connections from anywhere (useful for local pgAdmin testing)
-
 services:
   - type: web
-    name: wablast-server
+    name: metawhatsappapi
     env: node
-    plan: free # Change to 'starter' to prevent sleeping
+    plan: free # Or 'starter' if you want it to stay awake 24/7
     buildCommand: npm install
     startCommand: node server.js
     envVars:
-      # Database connection string automatically injected by Render
+      # We no longer auto-provision a DB. You manually set DATABASE_URL in the Render dashboard to point to Supabase.
       - key: DATABASE_URL
-        database:
-          name: wablast-db
-          property: connectionString
-      
-      # You must manually set these in the Render Dashboard -> Environment Variables
+        sync: false 
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
@@ -29,6 +18,8 @@ services:
       - key: META_WEBHOOK_VERIFY_TOKEN
         sync: false
       - key: META_APP_SECRET
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
         sync: false
       - key: ADMIN_SECRET
         sync: false
