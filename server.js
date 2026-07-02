@@ -1,4 +1,5 @@
 // server.js — WaBlast Core Server
+require('dns').setDefaultResultOrder('ipv4first');
 require('dotenv').config();
 const express = require('express');
 const { Pool } = require('pg');
