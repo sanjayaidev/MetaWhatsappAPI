@@ -111,6 +111,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="nav-section-label">Account</div>
 <div class="nav-item" data-tab="settings"><span class="nav-icon">⚙️</span> Settings</div>
 <div class="nav-item" data-tab="account"><span class="nav-icon">👤</span> Account</div>
+<div class="nav-item" data-tab="about"><span class="nav-icon">ℹ️</span> About</div>
 </div>
 <div class="sidebar-bottom">
 <div class="user-row">
@@ -286,6 +287,68 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 </div>
 </div>
 </div>
+<div class="tab-panel" id="tab-about">
+<div class="page-header"><div class="page-title">About</div><div class="page-sub">Everything you need to know about using WaBlast</div></div>
+<div class="card">
+<div class="btn-row" style="margin-bottom:18px;flex-wrap:wrap;gap:10px;">
+<a class="btn btn-secondary btn-sm" href="/privacy.html" target="_blank">🔒 Privacy Policy</a>
+<a class="btn btn-secondary btn-sm" href="/terms.html" target="_blank">📋 Terms of Service</a>
+<a class="btn btn-secondary btn-sm" href="mailto:graphicyin@gmail.com?subject=Refund%20Request">💳 Refund Policy</a>
+<a class="btn btn-secondary btn-sm" href="mailto:graphicyin@gmail.com">✉️ Contact Support</a>
+</div>
+<div style="display:grid;gap:18px;">
+<div>
+<div class="card-title" style="margin-bottom:10px;">01 Getting Started</div>
+<p>Set up your account and connect your WhatsApp number.</p>
+<p><strong>👤 Create your account</strong><br>Go to <strong>Account → Connected Numbers</strong> and click <strong>Connect Number</strong>. Paste in your WhatsApp Business Account ID and a System User access token from Meta Business Manager, then select your number and connect.</p>
+<p><strong>📱 Connect your WhatsApp Business Number</strong><br>Go to <strong>Account → Connected Numbers</strong> and click <strong>Connect Number</strong>. A Meta login popup will open — log in with the Facebook account linked to your WhatsApp Business Account and follow the steps. Your number will appear in the list once connected.</p>
+</div>
+<div>
+<div class="card-title" style="margin-bottom:10px;">02 Creating Message Templates</div>
+<p>Templates must be approved by Meta before you can send them.</p>
+<p><strong>⚠️ WhatsApp requires all bulk messages to use pre-approved templates.</strong> You cannot send free-form messages in bulk — only template messages are allowed.</p>
+<p><strong>📝 Open the Template Builder</strong><br>Go to <strong>Templates</strong> in the sidebar and click <strong>+ New</strong>. The template builder opens on the left with a live WhatsApp preview on the right.</p>
+<p><strong>🏷️ Fill in Basic Info</strong><br>Enter a <strong>Template Name</strong> (lowercase, underscores only — e.g. <code>welcome_message</code>), choose a <strong>Category</strong>, and select a <strong>Language</strong>.</p>
+<p><strong>🖼️ Add a Header (Optional)</strong><br>Choose from None, Text, Image, Video, or Document. For media headers, upload a file. This appears at the top of the WhatsApp message bubble.</p>
+<p><strong>💬 Write the Body</strong><br>Type your message in the Body field. Use <code>{{1}}</code>, <code>{{2}}</code> etc. for personalization (e.g. contact name). Supports <strong>bold</strong>, <em>italic</em>, and strikethrough. The preview updates live as you type.</p>
+<p><strong>🔘 Add Buttons (Optional)</strong><br>Add buttons below the message. Buttons appear under the preview.</p>
+<p><strong>🚀 Submit for Review</strong><br>Click <strong>Submit for Review</strong>. Meta typically reviews templates within a few minutes to a few hours. You'll see the status change from PENDING to APPROVED or REJECTED automatically.</p>
+</div>
+<div>
+<div class="card-title" style="margin-bottom:10px;">03 Managing Contacts</div>
+<p>Import your recipient list before creating campaigns.</p>
+<p><strong>📋 Paste CSV</strong><br>Go to <strong>Contacts</strong> and paste contacts directly in the text area in this format: <code>Name, Phone, Message</code> — one per line.</p>
+<p><strong>📁 Import from CSV or Excel</strong><br>Upload a <code>.csv</code> or <code>.xlsx</code> file with columns: <code>name</code>, <code>phone</code>, <code>message</code>.</p>
+<p><strong>💾 Save to Database</strong><br>After importing, click <strong>Save to DB</strong> to permanently store contacts. Unsaved contacts are lost on refresh.</p>
+<p><strong>🚫 Important:</strong> Only message contacts who have explicitly opted in. Sending unsolicited messages violates WhatsApp policy and can get your number banned.</p>
+</div>
+<div>
+<div class="card-title" style="margin-bottom:10px;">04 Running Campaigns</div>
+<p>Send bulk messages to your contact list.</p>
+<p><strong>📣 Create a Campaign</strong><br>Go to <strong>Campaigns</strong>, enter a campaign name, select an APPROVED template, map placeholders to contact fields, and choose contacts. Click <strong>Create Campaign</strong>.</p>
+<p><strong>🗂️ Map Placeholders</strong><br>If your template has <code>{{1}}</code>, <code>{{2}}</code> variables, map each to a contact field. For example, <code>{{1}}</code> → Contact Name will personalize each message.</p>
+<p><strong>▶️ Start the Campaign</strong><br>Once created, the campaign is in draft status. Click <strong>▶ Start</strong> to begin sending. Messages are sent with a delay between each to avoid spam detection.</p>
+<p><strong>📊 Track Delivery</strong><br>Go to <strong>Campaign Logs</strong>, select your campaign, and view per-message status: sent, delivered, read, or failed.</p>
+</div>
+<div>
+<div class="card-title" style="margin-bottom:10px;">05 Settings & Auto-Reply</div>
+<p>Configure sending limits and automated responses.</p>
+<p><strong>⏱️ Sending Limits</strong><br>Set hourly and daily message limits to stay within WhatsApp's messaging tier. Configure min/max gap between messages to space out sends.</p>
+<p><strong>🤖 Auto-Reply</strong><br>Enable auto-reply to automatically respond to incoming messages. Without a Groq key, your System Prompt text is sent as a static reply. Add a Groq API key to enable AI-powered dynamic replies.</p>
+<p><strong>🔑 Groq API Key (AI Replies)</strong><br>Get a free Groq API key at <a href="https://console.groq.com" target="_blank">console.groq.com</a>. Add it in <strong>Account</strong> settings to power auto-reply responses.</p>
+</div>
+<div>
+<div class="card-title" style="margin-bottom:10px;">07 Frequently Asked Questions</div>
+<p><strong>Why was my template rejected?</strong><br>Meta rejects templates that are too promotional or contain prohibited content. Use clear language and avoid all-caps or unnecessary URLs.</p>
+<p><strong>Why are messages sending slowly?</strong><br>WaBlast adds a delay between messages to protect your number from spam flags. This helps maintain your number's quality rating.</p>
+<p><strong>Can I send messages without a template?</strong><br>No. WhatsApp Business API only allows template messages for outbound bulk messaging.</p>
+<p><strong>How many messages can I send per day?</strong><br>Daily limits depend on your WhatsApp Business Account and number quality rating.</p>
+<p><strong>My campaign stopped mid-way, why?</strong><br>Check Campaign Logs for errors — it can be token expiry, API limits, or delivery issues.</p>
+<p><strong>How do I disconnect my WhatsApp number?</strong><br>Go to <strong>Account → Connected Numbers</strong> and click <strong>Disconnect</strong> next to your number.</p>
+</div>
+</div>
+</div>
+</div>
 </div>
 </div>
 <!-- ══ WA CONNECT MODAL ══ -->
@@ -335,6 +398,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="template-section">
 <div class="template-section-title">💬 Body</div>
 <textarea id="tplBody" rows="4" placeholder="Hi {{1}}, your order is ready!" oninput="onBodyInput()"></textarea>
+<div class="template-section-title" style="margin-top:14px;font-size:12px;color:var(--text2);font-weight:600;">Placeholder values</div>
+<div style="font-size:12px;color:var(--text3);margin-bottom:8px;">Enter sample values for each {{placeholder}} to preview personalized text while building the template.</div>
 <div id="placeholderFields" style="margin-top:10px;"></div>
 </div>
 <div class="template-section">
