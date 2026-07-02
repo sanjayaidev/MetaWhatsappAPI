@@ -1046,7 +1046,13 @@ async function updateCampaignProgress(campaignId, sendSuccess) {
 }
 
 // ================================================================
-// 15. START SERVER
+// 15. AI CHAT ROUTES (NVIDIA API)
+// ================================================================
+const aiChatRouter = require('./src/routes/ai-chat');
+app.use('/api/ai', aiChatRouter);
+
+// ================================================================
+// 16. START SERVER
 // ================================================================
 app.listen(PORT, () => {
   console.log(`✅ WaBlast server running on ${SELF_URL}`);
