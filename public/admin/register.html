@@ -4,88 +4,36 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WaBlast Pro | Admin Registration</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Syne:wght@700;800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=Syne:wght@800&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-:root {
-  --bg: #080b10; --surface: #0f1520; --surface2: #141c2a;
-  --border: #1e2d42; --border2: #263550; --text: #e8f0fb;
-  --text2: #7a90b0; --text3: #445570; --green: #22d172;
-  --green-dim: rgba(34,209,114,0.10); --red: #f04f6e;
-  --red-dim: rgba(240,79,110,0.12); --amber: #f5a623;
-  --amber-dim: rgba(245,166,35,0.12);
-}
-body {
-  font-family: 'DM Sans', sans-serif; background: var(--bg);
-  color: var(--text); min-height: 100vh;
-  display: flex; align-items: center; justify-content: center;
-  padding: 20px;
-}
-.auth-card {
-  max-width: 420px; width: 100%; background: var(--surface);
-  border: 1px solid var(--border2); border-radius: 24px;
-  padding: 40px 36px;
-}
-.auth-brand {
-  display: flex; align-items: center; gap: 10px; margin-bottom: 32px;
-}
-.auth-brand-icon {
-  width: 42px; height: 42px; background: var(--red);
-  border-radius: 12px; display: flex; align-items: center;
-  justify-content: center; font-size: 20px;
-}
+body { font-family: 'DM Sans', sans-serif; background: #080b10; color: #e8f0fb; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.auth-card { max-width: 420px; width: 100%; background: #0f1520; border: 1px solid #263550; border-radius: 24px; padding: 40px 36px; }
+.auth-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
+.auth-brand-icon { width: 42px; height: 42px; background: #f04f6e; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
 .auth-brand-name { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; }
-.auth-brand-name span { color: var(--red); }
-.admin-badge {
-  background: var(--red-dim); color: var(--red);
-  border-radius: 8px; padding: 8px 12px; font-size: 11px;
-  font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
-  margin-bottom: 20px; display: flex; align-items: center; gap: 6px;
-}
+.auth-brand-name span { color: #f04f6e; }
+.admin-badge { background: rgba(240,79,110,0.12); color: #f04f6e; border-radius: 8px; padding: 8px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 20px; }
 .auth-card h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
-.auth-card > p { font-size: 13px; color: var(--text2); margin-bottom: 28px; }
-.auth-error {
-  background: var(--red-dim); color: var(--red);
-  border-radius: 10px; padding: 10px 14px;
-  font-size: 13px; margin-bottom: 14px; display: none;
-}
-.auth-success {
-  background: var(--green-dim); color: var(--green);
-  border-radius: 10px; padding: 10px 14px;
-  font-size: 13px; margin-bottom: 14px; display: none;
-}
+.auth-card > p { font-size: 13px; color: #7a90b0; margin-bottom: 28px; }
+.auth-error { background: rgba(240,79,110,0.12); color: #f04f6e; border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 14px; display: none; }
+.auth-success { background: rgba(34,209,114,0.10); color: #22d172; border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 14px; display: none; }
 .fg { margin-bottom: 14px; }
-.fg label {
-  display: block; font-size: 11px; font-weight: 600;
-  color: var(--text2); letter-spacing: .05em;
-  text-transform: uppercase; margin-bottom: 7px;
-}
-.fg input {
-  width: 100%; background: #0c1018;
-  border: 1px solid var(--border2); border-radius: 12px;
-  padding: 12px 14px; color: var(--text);
-  font-family: 'DM Sans', sans-serif; font-size: 14px;
-}
-.fg input:focus { outline: none; border-color: var(--red); }
-.auth-btn {
-  width: 100%; padding: 13px; background: var(--red); color: #fff;
-  font-weight: 700; border: none; border-radius: 12px;
-  cursor: pointer; font-family: 'DM Sans', sans-serif;
-  font-size: 14px; transition: background .15s;
-}
+.fg label { display: block; font-size: 11px; font-weight: 600; color: #7a90b0; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 7px; }
+.fg input { width: 100%; background: #0c1018; border: 1px solid #263550; border-radius: 12px; padding: 12px 14px; color: #e8f0fb; font-family: 'DM Sans', sans-serif; font-size: 14px; }
+.fg input:focus { outline: none; border-color: #f04f6e; }
+.auth-btn { width: 100%; padding: 13px; background: #f04f6e; color: #fff; font-weight: 700; border: none; border-radius: 12px; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 14px; }
 .auth-btn:hover { background: #d93f5c; }
-.auth-btn:disabled { background: var(--border2); color: var(--text3); cursor: not-allowed; }
-.footer-text {
-  text-align: center; font-size: 12px; color: var(--text3); margin-top: 24px;
-}
-.footer-text a { color: var(--green); text-decoration: none; }
+.auth-btn:disabled { background: #263550; color: #445570; cursor: not-allowed; }
+.footer-text { text-align: center; font-size: 12px; color: #445570; margin-top: 24px; }
+.footer-text a { color: #22d172; text-decoration: none; }
 </style>
 </head>
 <body>
 <div class="auth-card">
   <div class="auth-brand">
     <div class="auth-brand-icon">🔐</div>
-    <div class="auth-brand-name">Wa<span>Blast</span> <span style="font-size:13px;font-weight:400;color:var(--text3)">Admin</span></div>
+    <div class="auth-brand-name">Wa<span>Blast</span> <span style="font-size:13px;font-weight:400;color:#445570">Admin</span></div>
   </div>
   <div class="admin-badge">⚠️ Admin Access Only</div>
   <h1>Create User Account</h1>
@@ -97,32 +45,19 @@ body {
   <div class="fg"><label>Email</label><input type="email" id="authEmail" placeholder="user@example.com"></div>
   <div class="fg"><label>Password</label><input type="password" id="authPass" placeholder="••••••••"></div>
   <button class="auth-btn" id="authSubmitBtn">Create Account →</button>
-  <div class="footer-text">
-    <a href="/login.html">← Back to Login</a>
-  </div>
+  <div class="footer-text"><a href="/login.html">← Back to Login</a></div>
 </div>
 
 <script>
 const API_BASE_URL = window.location.origin;
-
-function showAuthError(msg) {
-  const el = document.getElementById('authError');
-  el.textContent = msg; el.style.display = 'block';
-  document.getElementById('authSuccess').style.display = 'none';
-}
-
-function showAuthSuccess(msg) {
-  const el = document.getElementById('authSuccess');
-  el.textContent = msg; el.style.display = 'block';
-  document.getElementById('authError').style.display = 'none';
-}
+function showAuthError(msg) { const el = document.getElementById('authError'); el.textContent = msg; el.style.display = 'block'; document.getElementById('authSuccess').style.display = 'none'; }
+function showAuthSuccess(msg) { const el = document.getElementById('authSuccess'); el.textContent = msg; el.style.display = 'block'; document.getElementById('authError').style.display = 'none'; }
 
 async function handleRegister() {
   const adminSecret = document.getElementById('adminSecret').value.trim();
   const fullName = document.getElementById('fullName').value.trim();
   const email = document.getElementById('authEmail').value.trim();
   const password = document.getElementById('authPass').value;
-  
   if (!adminSecret) { showAuthError('Admin secret required'); return; }
   if (!email || !password) { showAuthError('Email and password required'); return; }
   
@@ -132,33 +67,20 @@ async function handleRegister() {
   try {
     const res = await fetch(`${API_BASE_URL}/api/admin/create-user`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-admin-secret': adminSecret
-      },
+      headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
       body: JSON.stringify({ email, password, full_name: fullName || email.split('@')[0] })
     });
     const data = await res.json();
-    
     if (res.ok && data.success) {
       showAuthSuccess(`✅ User created! ${email} can now sign in.`);
-      document.getElementById('adminSecret').value = '';
-      document.getElementById('fullName').value = '';
-      document.getElementById('authEmail').value = '';
-      document.getElementById('authPass').value = '';
-    } else {
-      showAuthError(data.error || 'Failed to create user');
-    }
-  } catch (err) {
-    showAuthError('Network error: ' + err.message);
-  }
+      document.getElementById('adminSecret').value = ''; document.getElementById('fullName').value = '';
+      document.getElementById('authEmail').value = ''; document.getElementById('authPass').value = '';
+    } else { showAuthError(data.error || 'Failed to create user'); }
+  } catch (err) { showAuthError('Network error: ' + err.message); }
   btn.textContent = 'Create Account →'; btn.disabled = false;
 }
-
 document.getElementById('authSubmitBtn').onclick = handleRegister;
-document.addEventListener('keydown', e => {
-  if (e.key === 'Enter') handleRegister();
-});
+document.addEventListener('keydown', e => { if (e.key === 'Enter') handleRegister(); });
 </script>
 </body>
 </html>
