@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WaBlast Pro</title>
+    <script>
+        // Check if user has a saved session
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+            window.location.href = '/dashboard.html';
+        } else {
+            window.location.href = '/login.html';
+        }
+    </script>
+</head>
+<body>
+    <!-- Blank page, just redirects -->
+    <div style="display:flex;justify-content:center;align-items:center;height:100vh;background:#080b10;color:#7a90b0;font-family:sans-serif;">
+        Loading...
+    </div>
+</body>
+</html>
