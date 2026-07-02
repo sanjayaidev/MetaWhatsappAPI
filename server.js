@@ -140,12 +140,42 @@ app.post('/api/admin/create-user', verifyAdmin, async (req, res) => {
 // 6. PROFILE ROUTES
 // ================================================================
 app.get('/api/profile', verifyUser, async (req, res) => {
-  const { data, error } = await supabase
+  // Try to get existing profile
+  let { data, error } = await supabase
     .from('wb_profiles')
     .select('id, email, full_name')
     .eq('id', req.user.id)
     .single();
-  if (error || !data) return res.status(404).json({ error: 'Profile not found' });
+  
+  // If profile doesn't exist, create it
+  if (error || !data) {
+    const newProfile = {
+      id: req.user.id,
+      email: req.user.email || '',
+      full_name: req.user.user_metadata?.full_name || req.user.email?.split('@')[0] || 'User',
+      credits: 50,
+      free_credits_granted: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    // Create profile
+    await supabase.from('wb_profiles').insert(newProfile);
+    
+    // Create settings if doesn't exist
+    await supabase.from('wb_settings').upsert({
+      user_id: req.user.id,
+      hour_limit: 1000,
+      day_limit: 5000,
+      min_gap: 5,
+      max_gap: 15,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' });
+    
+    data = newProfile;
+  }
+  
   res.json({ success: true, user: data });
 });
 
