@@ -377,6 +377,87 @@ app.post('/api/templates/media/upload', verifyUser, upload.single('file'), async
   }
 });
 
+app.post('/api/templates/meta/sync', verifyUser, async (req, res) => {
+  const { data: accounts, error: accountError } = await supabase
+    .from('wa_accounts')
+    .select('access_token, waba_id')
+    .eq('user_id', req.user.id)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (accountError) return res.status(500).json({ error: accountError.message });
+  if (!accounts?.length) return res.status(400).json({ error: 'No WhatsApp account connected' });
+
+  const account = accounts[0];
+  const plainToken = decryptToken(account.access_token);
+
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/${META_API_VERSION}/${account.waba_id}/message_templates?fields=id,name,status,language,category,components&access_token=${plainToken}`,
+      { method: 'GET' }
+    );
+    if (!response.ok) {
+      const errorData = await response.json();
+      return res.status(response.status).json({ error: errorData.error?.message || 'Failed to fetch from Meta' });
+    }
+
+    const data = await response.json();
+    const approvedTemplates = (data.data || []).filter(t => t.status === 'APPROVED');
+
+    const { data: localTemplates, error: localError } = await supabase
+      .from('wb_templates')
+      .select('id,name,meta_template_id,status')
+      .eq('user_id', req.user.id);
+    if (localError) return res.status(500).json({ error: localError.message });
+
+    const syncPromises = [];
+    for (const tpl of approvedTemplates) {
+      const existing = localTemplates?.find(l => l.meta_template_id === tpl.id) || localTemplates?.find(l => l.name === tpl.name);
+      const bodyComp = (tpl.components || []).find(c => c.type === 'BODY');
+      const footerComp = (tpl.components || []).find(c => c.type === 'FOOTER');
+      const headerComp = (tpl.components || []).find(c => c.type === 'HEADER');
+      const headerType = headerComp?.format || 'NONE';
+      const headerText = headerType === 'TEXT' ? headerComp?.text || null : null;
+
+      if (existing) {
+        const updateData = {};
+        if (existing.status !== 'APPROVED') updateData.status = 'APPROVED';
+        if (!existing.meta_template_id) updateData.meta_template_id = tpl.id;
+        if (Object.keys(updateData).length) {
+          syncPromises.push(
+            supabase.from('wb_templates').update({ ...updateData, updated_at: new Date().toISOString() }).eq('id', existing.id)
+          );
+        }
+      } else {
+        syncPromises.push(
+          supabase.from('wb_templates').insert({
+            user_id: req.user.id,
+            name: tpl.name,
+            body: bodyComp?.text || '',
+            category: tpl.category || 'MARKETING',
+            language: tpl.language || 'en_US',
+            status: 'APPROVED',
+            header_type: headerType,
+            header_text: headerText,
+            header_media_url: null,
+            footer: footerComp?.text || null,
+            buttons: [],
+            placeholders: [],
+            meta_template_id: tpl.id,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+        );
+      }
+    }
+
+    await Promise.all(syncPromises);
+    res.json({ success: true, templates: approvedTemplates, synced: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to sync approved templates: ' + err.message });
+  }
+});
+
 app.get('/api/templates/meta/approved', verifyUser, async (req, res) => {
   // Get user's active WA account
   const { data: accounts } = await supabase
@@ -512,23 +593,35 @@ app.get('/api/campaigns', verifyUser, async (req, res) => {
 });
 
 app.post('/api/campaigns', verifyUser, async (req, res) => {
-  const { name, template_id, group_name } = req.body;
+  const { name, template_id, group_name, schedule_at, start_now, placeholder_mapping } = req.body;
   if (!name) return res.status(400).json({ error: 'Campaign name required' });
   if (!template_id) return res.status(400).json({ error: 'template_id required' });
 
-  // Check for active campaign
-  const { data: activeCampaign } = await supabase
-    .from('wb_campaigns')
-    .select('id, name, status')
-    .eq('user_id', req.user.id)
-    .in('status', ['queued', 'running', 'paused'])
-    .limit(1)
-    .single();
-  if (activeCampaign) {
-    return res.status(400).json({ 
-      error: `Campaign "${activeCampaign.name}" is already ${activeCampaign.status}. Stop it first.`,
-      active_campaign: activeCampaign 
-    });
+  const scheduledAt = schedule_at ? new Date(schedule_at) : null;
+  if (schedule_at && (!scheduledAt || isNaN(scheduledAt.getTime()))) {
+    return res.status(400).json({ error: 'Invalid schedule date' });
+  }
+  if (schedule_at && scheduledAt <= new Date()) {
+    return res.status(400).json({ error: 'Scheduled date must be in the future' });
+  }
+  const isScheduled = scheduledAt && scheduledAt > new Date();
+  let status = isScheduled ? 'scheduled' : 'queued';
+
+  if (!isScheduled) {
+    const { data: activeCampaign } = await supabase
+      .from('wb_campaigns')
+      .select('id, name, status')
+      .eq('user_id', req.user.id)
+      .in('status', ['queued', 'running', 'paused'])
+      .limit(1)
+      .single();
+    if (activeCampaign) {
+      return res.status(400).json({ 
+        error: `Campaign "${activeCampaign.name}" is already ${activeCampaign.status}. Stop it first.`,
+        active_campaign: activeCampaign 
+      });
+    }
+    if (start_now) status = 'running';
   }
 
   // Get template
@@ -547,29 +640,48 @@ app.post('/api/campaigns', verifyUser, async (req, res) => {
   const { data: contacts } = await contactsQuery;
   if (!contacts?.length) return res.status(400).json({ error: 'No contacts found' });
 
-  // Create campaign
+  // Parse and store placeholder mapping if present
+  const insertPayload = {
+    user_id: req.user.id,
+    name,
+    template_id: tpl.id,
+    template_name: tpl.name,
+    group_name: group_name?.trim() || null,
+    status,
+    total_contacts: contacts.length,
+    queue_total: contacts.length,
+    queue_processed: 0,
+    queue_failed: 0,
+    sent_count: 0,
+    failed_count: 0,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  if (isScheduled) insertPayload.schedule_at = scheduledAt.toISOString();
+  if (placeholder_mapping && typeof placeholder_mapping === 'object' && Object.keys(placeholder_mapping).length) {
+    insertPayload.placeholder_mapping = placeholder_mapping;
+  }
+
   const { data: campaign, error: campErr } = await supabase
     .from('wb_campaigns')
-    .insert({
-      user_id: req.user.id, name, template_id: tpl.id,
-      template_name: tpl.name, group_name: group_name?.trim() || null,
-      status: 'queued', total_contacts: contacts.length,
-      queue_total: contacts.length, queue_processed: 0, queue_failed: 0,
-      sent_count: 0, failed_count: 0,
-      created_at: new Date().toISOString(), updated_at: new Date().toISOString()
-    })
+    .insert(insertPayload)
     .select()
     .single();
   if (campErr) return res.status(500).json({ error: 'Failed to create campaign: ' + campErr.message });
 
-  // Create queue items
   const queueItems = contacts.map(c => ({
-    campaign_id: campaign.id, user_id: req.user.id,
-    contact_id: c.id, phone: c.phone, contact_name: c.name || '',
-    template_name: tpl.name, template_language: tpl.language || 'en_US',
-    status: 'pending', attempt_count: 0,
+    campaign_id: campaign.id,
+    user_id: req.user.id,
+    contact_id: c.id,
+    phone: c.phone,
+    contact_name: c.name || '',
+    template_name: tpl.name,
+    template_language: tpl.language || 'en_US',
+    status: 'pending',
+    attempt_count: 0,
     created_at: new Date().toISOString()
   }));
+
   const { error: queueErr } = await supabase.from('wb_send_queue').insert(queueItems);
   if (queueErr) {
     await supabase.from('wb_campaigns').delete().eq('id', campaign.id);
@@ -637,7 +749,7 @@ app.get('/api/campaigns/active', verifyUser, async (req, res) => {
     .from('wb_campaigns')
     .select('*')
     .eq('user_id', req.user.id)
-    .in('status', ['draft', 'queued', 'running', 'paused'])
+    .in('status', ['scheduled', 'draft', 'queued', 'running', 'paused'])
     .order('created_at', { ascending: false })
     .limit(1)
     .single();
@@ -657,7 +769,7 @@ app.get('/api/campaigns/active', verifyUser, async (req, res) => {
 app.get('/api/campaigns/:id/status', verifyUser, async (req, res) => {
   const { data: campaign, error: campErr } = await supabase
     .from('wb_campaigns')
-    .select('id, status, queue_total, queue_processed, queue_failed, sent_count, failed_count, total_contacts, user_id')
+    .select('id, status, queue_total, queue_processed, queue_failed, sent_count, failed_count, total_contacts, user_id, schedule_at')
     .eq('id', req.params.id)
     .eq('user_id', req.user.id)
     .single();
@@ -669,10 +781,13 @@ app.get('/api/campaigns/:id/status', verifyUser, async (req, res) => {
     .eq('campaign_id', req.params.id)
     .eq('status', 'pending');
 
-  // Calculate gap info
   let gap_seconds = 0;
   let next_send_at = null;
-  if (campaign.status === 'running' && campaign.sent_count > 0) {
+  if (campaign.status === 'scheduled' && campaign.schedule_at) {
+    next_send_at = campaign.schedule_at;
+    const scheduledMs = new Date(campaign.schedule_at).getTime() - Date.now();
+    gap_seconds = scheduledMs > 0 ? Math.ceil(scheduledMs / 1000) : 0;
+  } else if (campaign.status === 'running' && campaign.sent_count > 0) {
     const { data: settings } = await supabase
       .from('wb_settings')
       .select('max_gap')
@@ -1006,11 +1121,64 @@ async function handleIncomingMessage(value, msg) {
 // ================================================================
 async function processQueue() {
   try {
-    // Find running campaigns
+    const nowIso = new Date().toISOString();
+    const { data: dueCampaigns } = await supabase
+      .from('wb_campaigns')
+      .select('id, user_id')
+      .eq('status', 'scheduled')
+      .lte('schedule_at', nowIso);
+
+    if (dueCampaigns?.length) {
+      for (const item of dueCampaigns) {
+        const { data: active } = await supabase
+          .from('wb_campaigns')
+          .select('id')
+          .eq('user_id', item.user_id)
+          .in('status', ['queued', 'running', 'paused'])
+          .limit(1)
+          .single();
+        if (!active) {
+          await supabase
+            .from('wb_campaigns')
+            .update({ status: 'running', updated_at: nowIso })
+            .eq('id', item.id);
+        }
+      }
+    }
+
     const { data: runningCampaigns } = await supabase
       .from('wb_campaigns')
       .select('id, user_id')
       .eq('status', 'running');
+
+    if (!runningCampaigns?.length) {
+      const { data: queuedCampaigns } = await supabase
+        .from('wb_campaigns')
+        .select('id, user_id')
+        .eq('status', 'queued')
+        .order('created_at', { ascending: true });
+
+      if (queuedCampaigns?.length) {
+        for (const item of queuedCampaigns) {
+          const { data: active } = await supabase
+            .from('wb_campaigns')
+            .select('id')
+            .eq('user_id', item.user_id)
+            .in('status', ['running', 'paused'])
+            .limit(1)
+            .single();
+          if (!active) {
+            await supabase
+              .from('wb_campaigns')
+              .update({ status: 'running', updated_at: nowIso })
+              .eq('id', item.id);
+            runningCampaigns.push(item);
+            break;
+          }
+        }
+      }
+    }
+
     if (!runningCampaigns?.length) return { processed: 0 };
 
     const runningIds = runningCampaigns.map(c => c.id);
@@ -1080,12 +1248,37 @@ async function processQueue() {
       .update({ status: 'processing', processed_at: new Date().toISOString() })
       .eq('id', queueItem.id);
 
-    // Build payload
+    // Fetch campaign placeholder mapping for this queue item
+    const { data: campaignData } = await supabase
+      .from('wb_campaigns')
+      .select('placeholder_mapping')
+      .eq('id', queueItem.campaign_id)
+      .single();
+
+    let templatePayload = { name: queueItem.template_name, language: { code: queueItem.template_language || 'en_US' } };
+    if (campaignData?.placeholder_mapping && typeof campaignData.placeholder_mapping === 'object') {
+      const params = Object.keys(campaignData.placeholder_mapping)
+        .map(key => ({ position: parseInt(key, 10), mapping: campaignData.placeholder_mapping[key] }))
+        .filter(item => item.position > 0)
+        .sort((a, b) => a.position - b.position)
+        .map(item => {
+          const map = item.mapping;
+          let value = '';
+          if (map.type === 'phone') value = queueItem.phone || '';
+          else if (map.type === 'name') value = queueItem.contact_name || '';
+          else if (map.type === 'custom') value = map.value || '';
+          return { type: 'text', text: value };
+        });
+      if (params.length) {
+        templatePayload.components = [ { type: 'BODY', parameters: params } ];
+      }
+    }
+
     const payload = {
       messaging_product: 'whatsapp',
       to: queueItem.phone,
       type: 'template',
-      template: { name: queueItem.template_name, language: { code: queueItem.template_language || 'en_US' } }
+      template: templatePayload
     };
 
     let sendSuccess = false;

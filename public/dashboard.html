@@ -59,8 +59,10 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
 .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
 .badge-green { background: var(--green-dim); color: var(--green); } .badge-amber { background: var(--amber-dim); color: var(--amber); } .badge-red { background: var(--red-dim); color: var(--red); } .badge-blue { background: var(--blue-dim); color: var(--blue); }
 .badge-APPROVED { background: var(--green-dim); color: var(--green); } .badge-PENDING { background: var(--amber-dim); color: var(--amber); } .badge-REJECTED { background: var(--red-dim); color: var(--red); }
+.badge-scheduled { background: var(--amber-dim); color: var(--amber); }
 .badge-pending { background: var(--amber-dim); color: var(--amber); } .badge-sent { background: var(--green-dim); color: var(--green); } .badge-failed { background: var(--red-dim); color: var(--red); }
 .badge-running { background: var(--blue-dim); color: var(--blue); } .badge-draft { background: var(--surface3); color: var(--text2); } .badge-completed { background: var(--green-dim); color: var(--green); } .badge-paused { background: var(--amber-dim); color: var(--amber); }
+.badge-scheduled { background: var(--amber-dim); color: var(--amber); }
 .data-row { display: flex; align-items: center; justify-content: space-between; background: var(--surface2); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
 .data-row:last-child { margin-bottom: 0; } .data-row-title { font-weight: 600; font-size: 13px; margin-bottom: 2px; } .data-row-sub { font-size: 11px; color: var(--text3); } .data-row-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 .form-label { display: block; font-size: 11px; font-weight: 600; color: var(--text2); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 7px; margin-top: 14px; } .form-label:first-child { margin-top: 0; }
@@ -185,9 +187,15 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="card-title" style="margin-bottom:16px;">📣 New Campaign</div>
 <span class="form-label">Campaign Name</span><input type="text" id="campaignName" placeholder="Summer Sale 2025">
 <span class="form-label">Template (Approved only)</span><select id="campaignTemplateSelect" onchange="loadTemplatePlaceholders()"></select>
-<div id="campaignPlaceholderMapping" style="margin-top:12px;"></div>
+<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:12px;">
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="radio" name="campaignTiming" value="immediate" checked onchange="toggleCampaignScheduleInput()"> Send now</label>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="radio" name="campaignTiming" value="schedule" onchange="toggleCampaignScheduleInput()"> Schedule</label>
+</div>
+<input type="datetime-local" id="campaignScheduleAt" style="margin-top:10px;display:none;width:100%;" />
 <span class="form-label">Contact Group</span><select id="campaignGroupSelect" onchange="updateCampaignContactCount()"><option value="">All Contacts</option></select>
 <div id="campaignGroupCount" style="font-size:13px;font-weight:600;margin-top:8px;padding:8px;background:var(--surface2);border-radius:10px;"><span id="campaignGroupCountNum">0</span> contacts will receive this message</div>
+<div id="campaignPlaceholderNote" style="font-size:12px;color:var(--text2);margin-top:8px;">Use up to 4 placeholders per template. Map each placeholder below.</div>
+<div id="campaignPlaceholderMapping" style="margin-top:12px;"></div>
 <div class="btn-row"><button class="btn btn-primary" onclick="createCampaign()">Create Campaign</button></div>
 </div>
 <div class="card">
@@ -376,7 +384,12 @@ function showToast(msg, isError = false) {
   t.style.display = 'block'; clearTimeout(t._to);
   t._to = setTimeout(() => t.style.display = 'none', 3500);
 }
-function escapeHtml(str) { if (!str) return ''; return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escapeHtml(str) { if (!str) return ''; return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;'); }
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); }
@@ -420,7 +433,10 @@ async function loadDashboard() {
     document.getElementById('profileName').value = name;
     document.getElementById('profileEmail').value = email;
   } else { doLogout(); return; }
-  await Promise.all([ loadDashboardStats(), loadTemplates(), loadContacts(), loadCampaigns(), loadSettings(), loadWaAccounts() ]);
+
+  await loadTemplates();
+  await fetchApprovedTemplates();
+  await Promise.all([ loadDashboardStats(), loadContacts(), loadCampaigns(), loadSettings(), loadWaAccounts() ]);
 }
 
 async function loadDashboardStats() {
@@ -447,19 +463,19 @@ async function fetchApprovedTemplates() {
   const btn = document.getElementById('refreshApprovedTemplatesBtn');
   const originalText = btn?.textContent || 'Refresh Meta';
   if (btn) {
-    btn.textContent = '⏳ Fetching...';
+    btn.textContent = '⏳ Syncing...';
     btn.disabled = true;
   }
   
-  const res = await apiCall('/api/templates/meta/approved');
+  const res = await apiCall('/api/templates/meta/sync', 'POST');
   
   if (res.success) {
-    syncLocalTemplateApprovalStatus(res.templates || []);
+    await loadTemplates();
     renderMetaApprovedTemplates(res.templates || []);
     loadTemplatesForCampaignSelect();
     showToast(`Found ${res.templates?.length || 0} approved templates on Meta`);
   } else {
-    showToast(res.error || 'Failed to fetch approved templates', true);
+    showToast(res.error || 'Failed to sync approved templates', true);
     renderMetaApprovedTemplates([]);
   }
   
@@ -514,6 +530,7 @@ function loadTemplatesForCampaignSelect() {
   if (!select) return;
   const approved = templates.filter(t => t.status === 'APPROVED');
   select.innerHTML = approved.length ? approved.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('') : '<option value="">— No approved templates —</option>';
+  if (select.value) loadTemplatePlaceholders();
 }
 function previewTemplate(id) { const tpl = templates.find(t => t.id === id); if (!tpl) return; renderWaPreview(tpl.header_type, null, tpl.body, tpl.footer, tpl.buttons || [], 'templatePreviewArea'); }
 function openTemplateBuilder() {
@@ -640,13 +657,26 @@ async function submitTemplate() {
 }
 async function deleteTemplate(id) { if (!confirm('Delete this template?')) return; const res = await apiCall(`/api/templates/${id}`, 'DELETE'); if (res.success) { showToast('Template deleted'); loadTemplates(); } else showToast(res.error || 'Delete failed', true); }
 
-async function loadContacts() { const res = await apiCall('/api/contacts'); if (res.success) { contacts = res.contacts || []; renderContacts(); } }
+async function loadContacts() { const res = await apiCall('/api/contacts'); if (res.success) { contacts = res.contacts || []; renderContacts(); renderCampaignGroups(); updateCampaignContactCount(); } }
 function renderContacts() {
   const tbody = document.getElementById('contactsBody'); document.getElementById('contactCount').textContent = `(${contacts.length})`; document.getElementById('dashContacts').textContent = contacts.length;
   if (!contacts.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:24px;">No contacts</td></tr>'; return; }
   tbody.innerHTML = contacts.map((c, i) => `<tr><td>${escapeHtml(c.name)}</td><td style="font-family:'DM Mono',monospace;font-size:12px;">${c.phone}</td><td><span class="badge badge-blue">${escapeHtml(c.group_name||'Default')}</span></td><td style="font-size:11px;color:var(--text3);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(c.message||'—')}</td><td><button onclick="removeContact(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:15px;">×</button></td></tr>`).join('');
 }
-function removeContact(i) { contacts.splice(i, 1); renderContacts(); }
+function renderCampaignGroups() {
+  const select = document.getElementById('campaignGroupSelect');
+  if (!select) return;
+  const groups = [...new Set(contacts.map(c => c.group_name?.trim() || 'Default'))].filter(Boolean);
+  select.innerHTML = '<option value="">All Contacts</option>' + groups.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('');
+}
+function updateCampaignContactCount() {
+  const groupName = document.getElementById('campaignGroupSelect')?.value || '';
+  const count = groupName
+    ? contacts.filter(c => (c.group_name?.trim() || 'Default') === groupName).length
+    : contacts.length;
+  document.getElementById('campaignGroupCountNum').textContent = count;
+}
+function removeContact(i) { contacts.splice(i, 1); renderContacts(); renderCampaignGroups(); updateCampaignContactCount(); }
 function parsePaste() {
   const raw = document.getElementById('pasteInput').value; const group = document.getElementById('pasteGroup').value.trim() || 'Default';
   const lines = raw.split(/\r?\n/); let added = 0;
@@ -676,8 +706,80 @@ async function loadCampaigns() {
     container.innerHTML = campaigns.map(c => { const pct = c.total_contacts > 0 ? Math.round((c.sent_count / c.total_contacts) * 100) : 0; return `<div class="data-row"><div style="flex:1;min-width:0;"><div class="data-row-title">${escapeHtml(c.name)}</div><div class="data-row-sub">${c.template_name || 'No template'} · ${c.sent_count||0}/${c.total_contacts||0} sent</div><div class="mini-bar" style="margin-top:6px;"><div class="mini-bar-fill" style="width:${pct}%"></div></div></div><div class="data-row-actions"><span class="badge badge-${c.status}">${c.status}</span>${c.status === 'draft' ? `<button class="btn btn-primary btn-xs" onclick="sendStartCampaign('${c.id}')">▶ Start</button>` : ''}${c.status === 'running' ? `<button class="btn btn-ghost btn-xs" onclick="sendPauseCampaign('${c.id}')">⏸ Pause</button>` : ''}${['draft','completed','failed'].includes(c.status) ? `<button class="btn btn-danger btn-xs" onclick="deleteCampaignFromList('${c.id}')">🗑</button>` : ''}</div></div>`; }).join('');
   }
 }
-function loadTemplatePlaceholders() { const id = document.getElementById('campaignTemplateSelect').value; const tpl = templates.find(t => t.id === id); const container = document.getElementById('campaignPlaceholderMapping'); if (!tpl?.placeholders?.length) { container.innerHTML = ''; return; } container.innerHTML = tpl.placeholders.sort((a,b)=>a.position-b.position).map(ph => `<div class="ph-row"><span class="ph-tag">{{${ph.position}}}</span><select id="campMap_${ph.position}" style="flex:1;"><option value="name">Contact Name</option><option value="phone">Contact Phone</option><option value="custom">Custom Value</option></select><input type="text" id="campCustom_${ph.position}" placeholder="Custom value" style="flex:1;display:none;"></div>`).join(''); }
-async function createCampaign() { const name = document.getElementById('campaignName').value.trim(); const templateId = document.getElementById('campaignTemplateSelect').value; const groupName = document.getElementById('campaignGroupSelect').value || null; if (!name || !templateId) { showToast('Name and template required', true); return; } const res = await apiCall('/api/campaigns', 'POST', { name, template_id: templateId, group_name: groupName }); if (res.success) { showToast(`✅ Campaign created!`); loadCampaigns(); } else showToast(res.error || 'Create failed', true); }
+function getTemplatePlaceholders(tpl) {
+  if (!tpl) return [];
+  const defined = Array.isArray(tpl.placeholders) && tpl.placeholders.length
+    ? tpl.placeholders.map(p => parseInt(p.position, 10)).filter(Boolean)
+    : [];
+  const body = tpl.body || '';
+  const found = [...new Set((body.match(/\{\{(\d+)\}\}/g) || []).map(m => parseInt(m.match(/\d+/)[0], 10)))].filter(Boolean);
+  const positions = defined.length ? defined : found;
+  return positions.sort((a, b) => a - b).slice(0, 4);
+}
+
+function handleCampaignPlaceholderTypeChange(position, type) {
+  const custom = document.getElementById(`campCustom_${position}`);
+  if (!custom) return;
+  custom.style.display = type === 'custom' ? 'block' : 'none';
+}
+
+function loadTemplatePlaceholders() {
+  const id = document.getElementById('campaignTemplateSelect').value;
+  const tpl = templates.find(t => t.id === id);
+  const positions = getTemplatePlaceholders(tpl);
+  const container = document.getElementById('campaignPlaceholderMapping');
+  if (!positions.length) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = positions.map(pos => `<div class="ph-row"><span class="ph-tag">{{${pos}}}</span><select id="campMap_${pos}" style="flex:1;" onchange="handleCampaignPlaceholderTypeChange(${pos}, this.value)"><option value="name">Contact Name</option><option value="phone">Contact Phone</option><option value="custom">Custom Value</option></select><input type="text" id="campCustom_${pos}" placeholder="Custom value" style="flex:1;display:none;"></div>`).join('');
+}
+
+function toggleCampaignScheduleInput() {
+  const timing = document.querySelector('input[name="campaignTiming"]:checked')?.value;
+  const scheduleInput = document.getElementById('campaignScheduleAt');
+  if (!scheduleInput) return;
+  if (timing === 'schedule') {
+    scheduleInput.style.display = 'block';
+    scheduleInput.required = true;
+  } else {
+    scheduleInput.style.display = 'none';
+    scheduleInput.required = false;
+  }
+}
+
+async function createCampaign() {
+  const name = document.getElementById('campaignName').value.trim();
+  const templateId = document.getElementById('campaignTemplateSelect').value;
+  const groupName = document.getElementById('campaignGroupSelect').value || null;
+  const timing = document.querySelector('input[name="campaignTiming"]:checked')?.value || 'immediate';
+  const scheduleAt = document.getElementById('campaignScheduleAt')?.value || null;
+  if (!name || !templateId) { showToast('Name and template required', true); return; }
+
+  const tpl = templates.find(t => t.id === templateId);
+  const positions = getTemplatePlaceholders(tpl);
+  const placeholder_mapping = {};
+  for (const pos of positions) {
+    const select = document.getElementById(`campMap_${pos}`);
+    if (!select) continue;
+    const type = select.value;
+    const custom = document.getElementById(`campCustom_${pos}`)?.value.trim() || '';
+    if (type === 'custom' && !custom) { showToast(`Custom value required for {{${pos}}}`, true); return; }
+    placeholder_mapping[pos] = { type, value: custom };
+  }
+
+  if (timing === 'schedule' && !scheduleAt) { showToast('Schedule date/time is required for scheduled campaigns', true); return; }
+  const payload = { name, template_id: templateId, group_name: groupName };
+  if (timing === 'schedule') payload.schedule_at = scheduleAt;
+  if (timing === 'immediate') payload.start_now = true;
+  if (Object.keys(placeholder_mapping).length) payload.placeholder_mapping = placeholder_mapping;
+
+  const res = await apiCall('/api/campaigns', 'POST', payload);
+  if (res.success) {
+    showToast(`✅ Campaign created!`);
+    loadCampaigns();
+  } else showToast(res.error || 'Create failed', true);
+}
 async function loadCampaignLogs() { const id = document.getElementById('logCampaignSelect').value; if (!id) return; const res = await apiCall(`/api/campaigns/${id}/logs`); const container = document.getElementById('campaignLogsList'); if (!res.success || !res.logs?.length) { container.innerHTML = '<div class="empty-state"><p>No logs yet</p></div>'; return; } container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Phone</th><th>Name</th><th>Status</th><th>Delivery</th><th>Error</th></tr></thead><tbody>${res.logs.map(l => `<tr><td style="font-family:'DM Mono',monospace;font-size:12px;">${l.phone}</td><td>${escapeHtml(l.contact_name||'')}</td><td><span class="badge badge-${l.status}">${l.status}</span></td><td><span class="badge badge-${l.delivery_status||'sent'}">${l.delivery_status||l.status}</span></td><td style="font-size:11px;color:var(--red);">${escapeHtml(l.error_reason||'—')}</td></tr>`).join('')}</tbody></table></div>`; }
 
 async function loadActiveCampaign() { const res = await apiCall('/api/campaigns/active'); if (res.success && res.campaign) { activeSendCampaignId = res.campaign.id; renderActiveCampaign(res.campaign); document.getElementById('sendStatsCard').style.display = 'block'; pollSendStatus(res.campaign.id); if (['running', 'queued', 'paused'].includes(res.campaign.status)) startSendPolling(res.campaign.id); } else { document.getElementById('sendActiveCampaignInfo').innerHTML = '<div class="empty-state"><div class="empty-icon">🚀</div><p>No active campaign</p></div>'; document.getElementById('sendStatsCard').style.display = 'none'; } }
@@ -728,7 +830,7 @@ if (window.location.hash && window.location.hash.includes('access_token')) {
 const savedToken = localStorage.getItem('supabase_token');
 if (savedToken) { authToken = savedToken; loadDashboard(); } else { window.location.href = '/login.html'; }
 
-window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates;
+window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.toggleCampaignScheduleInput = toggleCampaignScheduleInput; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates; window.updateCampaignContactCount = updateCampaignContactCount; window.renderCampaignGroups = renderCampaignGroups;
 </script>
 </body>
 </html>
