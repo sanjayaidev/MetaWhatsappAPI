@@ -21,8 +21,48 @@ const ALLOWED_MODELS = [
   'abacusai/dracarys-llama-3.1-70b-instruct',
 ];
 
+const DEFAULT_MODEL = 'moonshotai/kimi-k2.6';
+
 function isAllowedModel(modelId) {
   return ALLOWED_MODELS.includes(modelId);
+}
+
+// Reusable helper: send a single-turn (system + user) chat request to NVIDIA
+// and return the assistant's reply text. Used by the webhook auto-reply flow
+// as well as anything else that needs a one-off AI response.
+async function generateReply({ model, systemPrompt, userText, temperature = 0.7, max_tokens = 512 }) {
+  const apiKey = process.env.NVIDIA_API_KEY;
+  if (!apiKey) throw new Error('NVIDIA_API_KEY not configured');
+
+  const chosenModel = isAllowedModel(model) ? model : DEFAULT_MODEL;
+
+  const messages = [];
+  if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+  messages.push({ role: 'user', content: userText });
+
+  const response = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: chosenModel,
+      messages,
+      temperature,
+      max_tokens,
+      top_p: 1,
+      stream: false,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData?.error?.message || `NVIDIA API error (${response.status})`);
+  }
+
+  const data = await response.json();
+  return data?.choices?.[0]?.message?.content?.trim() || '';
 }
 
 // GET /api/ai/models - List available models
@@ -117,3 +157,6 @@ router.post('/chat', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.generateReply = generateReply;
+module.exports.DEFAULT_MODEL = DEFAULT_MODEL;
+module.exports.ALLOWED_MODELS = ALLOWED_MODELS;

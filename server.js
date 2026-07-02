@@ -11,6 +11,8 @@ const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
 const path = require('path');
 const fetch = require('node-fetch');
+const aiChatRouter = require('./src/routes/ai-chat');
+const { generateReply, DEFAULT_MODEL: DEFAULT_AI_MODEL } = aiChatRouter;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -427,6 +429,7 @@ app.post('/api/settings', verifyUser, async (req, res) => {
   if (req.body.max_gap !== undefined) update.max_gap = parseInt(req.body.max_gap) || 15;
   if (req.body.auto_reply !== undefined) update.auto_reply = req.body.auto_reply;
   if (req.body.auto_reply_prompt !== undefined) update.auto_reply_prompt = req.body.auto_reply_prompt;
+  if (req.body.auto_reply_model !== undefined) update.auto_reply_model = req.body.auto_reply_model;
   if (req.body.groq_key !== undefined && req.body.groq_key !== '••••••••') update.groq_key = req.body.groq_key;
 
   const { error } = await supabase
@@ -841,6 +844,13 @@ app.post('/webhook', async (req, res) => {
       const value = change.value;
 
       if (field === 'messages') {
+        // Incoming messages from customers (trigger auto-reply if enabled)
+        for (const msg of (value?.messages || [])) {
+          handleIncomingMessage(value, msg).catch((err) => {
+            console.error('[webhook] auto-reply error:', err.message);
+          });
+        }
+
         // Delivery statuses
         for (const status of (value?.statuses || [])) {
           if (status.id) {
@@ -873,6 +883,64 @@ app.post('/webhook', async (req, res) => {
     }
   }
 });
+
+// Auto-reply: handle a single incoming WhatsApp message.
+// Looks up which account/user it belongs to, checks their auto-reply
+// setting, asks the configured AI model for a reply, and sends it back.
+async function handleIncomingMessage(value, msg) {
+  // Only handle plain text messages for now
+  if (msg.type !== 'text' || !msg.text?.body) return;
+
+  const phoneNumberId = value?.metadata?.phone_number_id;
+  if (!phoneNumberId) return;
+
+  const { data: waAccount } = await supabase
+    .from('wa_accounts')
+    .select('*')
+    .eq('phone_number_id', phoneNumberId)
+    .eq('is_active', true)
+    .single();
+  if (!waAccount) return;
+
+  const { data: settings } = await supabase
+    .from('wb_settings')
+    .select('auto_reply, auto_reply_prompt, auto_reply_model')
+    .eq('user_id', waAccount.user_id)
+    .single();
+  if (!settings?.auto_reply) return;
+
+  let replyText;
+  try {
+    replyText = await generateReply({
+      model: settings.auto_reply_model || DEFAULT_AI_MODEL,
+      systemPrompt: settings.auto_reply_prompt || 'You are a helpful business assistant.',
+      userText: msg.text.body,
+    });
+  } catch (err) {
+    console.error('[webhook] AI generation failed:', err.message);
+    return;
+  }
+  if (!replyText) return;
+
+  try {
+    const plainToken = decryptToken(waAccount.access_token);
+    await fetch(
+      `https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${plainToken}` },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: msg.from,
+          type: 'text',
+          text: { body: replyText },
+        }),
+      }
+    );
+  } catch (err) {
+    console.error('[webhook] failed to send auto-reply:', err.message);
+  }
+}
 
 // ================================================================
 // 14. QUEUE PROCESSOR (Native — runs every 3 seconds)
@@ -1048,7 +1116,6 @@ async function updateCampaignProgress(campaignId, sendSuccess) {
 // ================================================================
 // 15. AI CHAT ROUTES (NVIDIA API)
 // ================================================================
-const aiChatRouter = require('./src/routes/ai-chat');
 app.use('/api/ai', aiChatRouter);
 
 // ================================================================
