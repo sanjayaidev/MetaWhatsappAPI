@@ -377,7 +377,7 @@ function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('o
 
 function doLogout() {
   authToken = null; currentUser = null; contacts = []; templates = []; campaigns = [];
-  localStorage.removeItem('auth_token');
+  localStorage.removeItem('supabase_token');
   window.location.href = '/login.html';
 }
 
@@ -570,12 +570,12 @@ if (window.location.hash && window.location.hash.includes('access_token')) {
   const params = new URLSearchParams(window.location.hash.substring(1));
   const hashToken = params.get('access_token');
   if (hashToken) {
-    localStorage.setItem('auth_token', hashToken);
+    localStorage.setItem('supabase_token', hashToken);
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 }
 
-const savedToken = localStorage.getItem('auth_token');
+const savedToken = localStorage.getItem('supabase_token');
 if (savedToken) { authToken = savedToken; loadDashboard(); } else { window.location.href = '/login.html'; }
 
 window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign;
