@@ -75,7 +75,7 @@ async function handleEmailAuth() {
     
     if (error) { showAuthError(error.message); }
     else if (data.session) {
-      localStorage.setItem('auth_token', data.session.access_token);
+      localStorage.setItem('supabase_token', data.session.access_token);
       window.location.href = '/dashboard.html';
     }
   } catch (err) { showAuthError(err.message); }
