@@ -565,77 +565,18 @@ function waResetConnectModal() { document.getElementById('waConnectStep2').style
 async function switchTab(tabName) { document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); const panel = document.getElementById(`tab-${tabName}`); const nav = document.querySelector(`[data-tab="${tabName}"]`); if (panel) panel.classList.add('active'); if (nav) nav.classList.add('active'); if (window.innerWidth <= 860) document.getElementById('sidebar').classList.remove('open'); if (tabName === 'send') loadActiveCampaign(); if (tabName === 'templates') renderTemplates(); if (tabName === 'contacts') renderContacts(); if (tabName === 'campaigns') { loadCampaigns(); loadTemplatesForCampaignSelect(); } if (tabName === 'logs') loadCampaigns(); if (tabName === 'settings') loadSettings(); if (tabName === 'account') loadWaAccounts(); }
 
 document.querySelectorAll('.nav-item').forEach(n => n.addEventListener('click', () => switchTab(n.dataset.tab)));
-// NEW FIXED CODE — uses REST API instead of Edge Function
-const savedToken = localStorage.getItem('auth_token')
-if (savedToken) {
-  authToken = savedToken
-  
-  // Catch OAuth hash if redirected from Google/FB
-  if (window.location.hash && window.location.hash.includes('access_token')) {
-    const params = new URLSearchParams(window.location.hash.substring(1))
-    const accessToken = params.get('access_token')
-    if (accessToken) {
-      authToken = accessToken
-      localStorage.setItem('auth_token', accessToken)
-      window.history.replaceState({}, document.title, window.location.pathname)
-    }
+// Catch OAuth hash if redirected from Google/FB (e.g. #access_token=...)
+if (window.location.hash && window.location.hash.includes('access_token')) {
+  const params = new URLSearchParams(window.location.hash.substring(1));
+  const hashToken = params.get('access_token');
+  if (hashToken) {
+    localStorage.setItem('auth_token', hashToken);
+    window.history.replaceState({}, document.title, window.location.pathname);
   }
-
-  // Use new REST API to verify session and load data
-  fetch('/api/profile', {
-    headers: { 'Authorization': `Bearer ${authToken}` }
-  })
-  .then(res => {
-    if (!res.ok) throw new Error('Invalid session')
-    return res.json()
-  })
-  .then(async (profileData) => {
-    if (profileData.success) {
-      // Build the data object that showDashboard() expects
-      const data = {
-        user: {
-          id: profileData.user.id,
-          email: profileData.user.email,
-          user_metadata: { full_name: profileData.user.full_name }
-        },
-        profile: { credits: 0 },
-        contacts: [],
-        templates: [],
-        wa_accounts: []
-      }
-      
-      // Load remaining data in parallel
-      const [creditsRes, contactsRes, templatesRes, campaignsRes, settingsRes, waRes] = await Promise.all([
-        fetch('/api/credits', { headers: { 'Authorization': `Bearer ${authToken}` } }).then(r => r.json()).catch(() => ({ success: false })),
-        fetch('/api/contacts', { headers: { 'Authorization': `Bearer ${authToken}` } }).then(r => r.json()).catch(() => ({ success: false, contacts: [] })),
-        fetch('/api/templates', { headers: { 'Authorization': `Bearer ${authToken}` } }).then(r => r.json()).catch(() => ({ success: false, templates: [] })),
-        fetch('/api/campaigns', { headers: { 'Authorization': `Bearer ${authToken}` } }).then(r => r.json()).catch(() => ({ success: false, campaigns: [] })),
-        fetch('/api/settings', { headers: { 'Authorization': `Bearer ${authToken}` } }).then(r => r.json()).catch(() => ({ success: false, settings: {} })),
-        fetch('/api/wa/accounts', { headers: { 'Authorization': `Bearer ${authToken}` } }).then(r => r.json()).catch(() => ({ success: false, accounts: [] }))
-      ])
-
-      if (creditsRes.success) data.profile.credits = creditsRes.credits || 0
-      if (contactsRes.success) data.contacts = contactsRes.contacts || []
-      if (templatesRes.success) data.templates = templatesRes.templates || []
-      if (campaignsRes.success) data.campaigns = campaignsRes.campaigns || []
-      if (settingsRes.success) data.settings = settingsRes.settings || {}
-      if (waRes.success) data.wa_accounts = waRes.accounts || []
-
-      showDashboard(data)
-    } else {
-      throw new Error('Profile load failed')
-    }
-  })
-  .catch((err) => {
-    console.error('Auth failed:', err)
-    localStorage.removeItem('auth_token')
-    document.getElementById('app').style.display = 'none'
-    document.getElementById('authOverlay').style.display = 'flex'
-  })
-} else {
-  document.getElementById('app').style.display = 'none'
-  document.getElementById('authOverlay').style.display = 'flex'
 }
+
+const savedToken = localStorage.getItem('auth_token');
+if (savedToken) { authToken = savedToken; loadDashboard(); } else { window.location.href = '/login.html'; }
 
 window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign;
 </script>
