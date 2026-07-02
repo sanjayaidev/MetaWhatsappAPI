@@ -6,6 +6,7 @@ require('dns').setDefaultResultOrder('ipv4first');
 require('dotenv').config();
 
 const express = require('express');
+const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
 const crypto = require('crypto');
 const path = require('path');
@@ -23,7 +24,8 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY, // service_role bypasses RLS
   {
-    auth: { autoRefreshToken: false, persistSession: false }
+    auth: { autoRefreshToken: false, persistSession: false },
+    realtime: { transport: WebSocket }
   }
 );
 
