@@ -316,6 +316,53 @@ app.delete('/api/templates/:id', verifyUser, async (req, res) => {
   res.json({ success: true });
 });
 
+app.get('/api/templates/meta/approved', verifyUser, async (req, res) => {
+  // Get user's active WA account
+  const { data: accounts } = await supabase
+    .from('wa_accounts')
+    .select('access_token, waba_id, phone_number_id')
+    .eq('user_id', req.user.id)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  
+  if (!accounts?.length) {
+    return res.status(400).json({ error: 'No WhatsApp account connected' });
+  }
+
+  const account = accounts[0];
+  const plainToken = decryptToken(account.access_token);
+
+  try {
+    // Fetch approved templates from Meta
+    const response = await fetch(
+      `https://graph.facebook.com/${META_API_VERSION}/${account.waba_id}/message_templates?fields=name,status,language,category,components&access_token=${plainToken}`,
+      { method: 'GET' }
+    );
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      return res.status(response.status).json({ error: errorData.error?.message || 'Failed to fetch from Meta' });
+    }
+
+    const data = await response.json();
+    const approvedTemplates = (data.data || []).filter(t => t.status === 'APPROVED');
+
+    res.json({
+      success: true,
+      templates: approvedTemplates.map(t => ({
+        name: t.name,
+        status: t.status,
+        language: t.language || 'en_US',
+        category: t.category || 'MARKETING',
+        components: t.components || []
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch approved templates: ' + err.message });
+  }
+});
+
 // ================================================================
 // 8. CONTACTS ROUTES
 // ================================================================

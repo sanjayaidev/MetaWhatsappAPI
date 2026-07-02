@@ -147,8 +147,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="page-header"><div class="page-title">Templates</div><div class="page-sub">Create and manage Meta-approved message templates</div></div>
 <div class="grid-2">
 <div class="card">
-<div class="card-header"><div class="card-title">📋 Your Templates</div><button class="btn btn-primary btn-sm" onclick="openTemplateBuilder()">+ New</button></div>
+<div class="card-header"><div class="card-title">📋 Your Templates</div><div style="display:flex;gap:8px;"><button class="btn btn-primary btn-sm" onclick="openTemplateBuilder()">+ New</button><button class="btn btn-secondary btn-sm" onclick="fetchApprovedTemplates()" title="Sync approved templates from Meta">🔄 Refresh Meta</button></div></div>
 <div id="templateList"><div class="empty-state"><div class="empty-icon">📋</div><p>No templates yet</p></div></div>
+<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);"><div class="card-title" style="margin-bottom:12px;font-size:13px;">✅ Approved on Meta</div><div id="metaApprovedList"><div class="empty-state" style="padding:12px 0;"><p style="font-size:12px;">Click refresh to check</p></div></div></div>
 </div>
 <div><div class="card"><div class="card-title" style="margin-bottom:14px;">👁️ Preview</div><div id="templatePreviewArea" class="wa-preview-wrap"><div class="empty-state" style="padding:20px 10px;"><p>Select a template to preview</p></div></div></div></div>
 </div>
@@ -416,6 +417,45 @@ async function loadTemplates() {
   const res = await apiCall('/api/templates');
   if (res.success) { templates = res.templates || []; renderTemplates(); }
 }
+
+async function fetchApprovedTemplates() {
+  const btn = event.target;
+  const originalText = btn.textContent;
+  btn.textContent = '⏳ Fetching...';
+  btn.disabled = true;
+  
+  const res = await apiCall('/api/templates/meta/approved');
+  
+  if (res.success) {
+    renderMetaApprovedTemplates(res.templates || []);
+    showToast(`Found ${res.templates?.length || 0} approved templates on Meta`);
+  } else {
+    showToast(res.error || 'Failed to fetch approved templates', true);
+    renderMetaApprovedTemplates([]);
+  }
+  
+  btn.textContent = originalText;
+  btn.disabled = false;
+}
+
+function renderMetaApprovedTemplates(templates) {
+  const container = document.getElementById('metaApprovedList');
+  if (!templates?.length) {
+    container.innerHTML = '<div class="empty-state" style="padding:12px 0;"><p style="font-size:12px;">No approved templates</p></div>';
+    return;
+  }
+  
+  container.innerHTML = templates.map(t => `
+    <div class="data-row" style="margin-bottom:8px;">
+      <div style="flex:1;">
+        <div class="data-row-title">${escapeHtml(t.name)}</div>
+        <div class="data-row-sub">${t.category} · ${t.language || 'en_US'}</div>
+      </div>
+      <span class="badge badge-green">✓ Approved</span>
+    </div>
+  `).join('');
+}
+
 function renderTemplates() {
   const container = document.getElementById('templateList');
   document.getElementById('dashTemplates').textContent = templates.length;
@@ -578,7 +618,7 @@ if (window.location.hash && window.location.hash.includes('access_token')) {
 const savedToken = localStorage.getItem('supabase_token');
 if (savedToken) { authToken = savedToken; loadDashboard(); } else { window.location.href = '/login.html'; }
 
-window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign;
+window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates;
 </script>
 </body>
 </html>
