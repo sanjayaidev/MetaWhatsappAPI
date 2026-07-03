@@ -849,6 +849,38 @@ app.get('/api/campaigns/:id/logs', verifyUser, async (req, res) => {
 });
 
 // ================================================================
+// 10b. RECEIVED MESSAGES (inbound, via /webhook)
+// ================================================================
+app.get('/api/messages/received', verifyUser, async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+  const { data, error } = await supabase
+    .from('wb_inbound_messages')
+    .select('*')
+    .eq('user_id', req.user.id)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const { count: unread } = await supabase
+    .from('wb_inbound_messages')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', req.user.id)
+    .eq('is_read', false);
+
+  res.json({ success: true, messages: data || [], unread: unread || 0 });
+});
+
+app.post('/api/messages/received/mark-read', verifyUser, async (req, res) => {
+  const { error } = await supabase
+    .from('wb_inbound_messages')
+    .update({ is_read: true })
+    .eq('user_id', req.user.id)
+    .eq('is_read', false);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+// ================================================================
 // 11. WA ACCOUNTS ROUTES
 // ================================================================
 app.get('/api/wa/accounts', verifyUser, async (req, res) => {
@@ -1059,13 +1091,41 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Auto-reply: handle a single incoming WhatsApp message.
-// Looks up which account/user it belongs to, checks their auto-reply
-// setting, asks the configured AI model for a reply, and sends it back.
-async function handleIncomingMessage(value, msg) {
-  // Only handle plain text messages for now
-  if (msg.type !== 'text' || !msg.text?.body) return;
+// Pulls a readable preview + type out of any inbound WhatsApp message payload,
+// not just text (images, documents, locations, buttons, etc. all show up in
+// the Received tab, they just don't trigger the AI auto-reply).
+function extractMessagePreview(msg) {
+  switch (msg.type) {
+    case 'text':
+      return { message_type: 'text', message_body: msg.text?.body || '' };
+    case 'image':
+      return { message_type: 'image', message_body: msg.image?.caption || '📷 Image' };
+    case 'video':
+      return { message_type: 'video', message_body: msg.video?.caption || '🎥 Video' };
+    case 'audio':
+      return { message_type: 'audio', message_body: '🎵 Audio message' };
+    case 'document':
+      return { message_type: 'document', message_body: msg.document?.filename || '📄 Document' };
+    case 'sticker':
+      return { message_type: 'sticker', message_body: '🩹 Sticker' };
+    case 'location':
+      return { message_type: 'location', message_body: `📍 Location (${msg.location?.latitude}, ${msg.location?.longitude})` };
+    case 'button':
+      return { message_type: 'button', message_body: msg.button?.text || 'Button reply' };
+    case 'interactive':
+      return {
+        message_type: 'interactive',
+        message_body: msg.interactive?.button_reply?.title || msg.interactive?.list_reply?.title || 'Interactive reply'
+      };
+    default:
+      return { message_type: msg.type || 'unknown', message_body: `[${msg.type || 'unsupported'} message]` };
+  }
+}
 
+// Handles a single incoming WhatsApp message: logs it (all types, so it shows
+// up in the Received tab) and, for plain text only, checks the account's
+// auto-reply setting, asks the configured AI model for a reply, and sends it back.
+async function handleIncomingMessage(value, msg) {
   const phoneNumberId = value?.metadata?.phone_number_id;
   if (!phoneNumberId) return;
 
@@ -1077,21 +1137,38 @@ async function handleIncomingMessage(value, msg) {
     .single();
   if (!waAccount) return;
 
-  // Store incoming message in wb_campaign_logs (reusing table for inbound messages)
+  // Try to match the sender to a saved contact so the Received tab can show a name.
+  let contactName = '';
   try {
-    await supabase.from('wb_campaign_logs').insert({
-      campaign_id: null,
-      queue_id: null,
+    const { data: contact } = await supabase
+      .from('wb_contacts')
+      .select('name')
+      .eq('user_id', waAccount.user_id)
+      .eq('phone', msg.from)
+      .single();
+    if (contact?.name) contactName = contact.name;
+  } catch (_) { /* no matching contact, that's fine */ }
+
+  const { message_type, message_body } = extractMessagePreview(msg);
+
+  // Store the inbound message so it shows up in the Received tab.
+  try {
+    await supabase.from('wb_inbound_messages').insert({
+      user_id: waAccount.user_id,
+      wa_account_id: waAccount.id,
       phone: msg.from,
-      contact_name: '',
-      status: 'inbound',
-      delivery_status: 'received',
+      contact_name: contactName,
+      message_type,
+      message_body,
       wa_message_id: msg.id || null,
       created_at: new Date().toISOString()
     });
   } catch (e) {
     console.error('[webhook] failed to store inbound message:', e.message);
   }
+
+  // Only plain text messages trigger the AI auto-reply.
+  if (msg.type !== 'text' || !msg.text?.body) return;
 
   const { data: settings } = await supabase
     .from('wb_settings')
