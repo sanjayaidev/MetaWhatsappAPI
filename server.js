@@ -605,9 +605,9 @@ app.post('/api/campaigns', verifyUser, async (req, res) => {
     return res.status(400).json({ error: 'Scheduled date must be in the future' });
   }
   const isScheduled = scheduledAt && scheduledAt > new Date();
-  let status = isScheduled ? 'scheduled' : 'queued';
+  let status = isScheduled ? 'scheduled' : (start_now ? 'running' : 'draft');
 
-  if (!isScheduled) {
+  if (!isScheduled && start_now) {
     const { data: activeCampaign } = await supabase
       .from('wb_campaigns')
       .select('id, name, status')
@@ -621,7 +621,6 @@ app.post('/api/campaigns', verifyUser, async (req, res) => {
         active_campaign: activeCampaign 
       });
     }
-    if (start_now) status = 'running';
   }
 
   // Get template
@@ -823,7 +822,7 @@ app.get('/api/campaigns/:id/status', verifyUser, async (req, res) => {
 app.get('/api/campaigns/:id/logs', verifyUser, async (req, res) => {
   const { data, error } = await supabase
     .from('wb_send_queue')
-    .select('phone, contact_name, status, wa_message_id, error_reason, created_at')
+    .select('phone, contact_name, status, wa_message_id, error_reason, created_at, delivery_status')
     .eq('campaign_id', req.params.id)
     .eq('user_id', req.user.id)
     .order('created_at', { ascending: true });
@@ -839,9 +838,11 @@ app.get('/api/campaigns/:id/logs', verifyUser, async (req, res) => {
         .eq('wa_message_id', log.wa_message_id)
         .single();
       if (deliveryLog) {
-        log.delivery_status = deliveryLog.delivery_status || log.status;
+        log.delivery_status = deliveryLog.delivery_status || log.delivery_status || log.status;
         if (deliveryLog.error_reason) log.error_reason = deliveryLog.error_reason;
       }
+    } else if (!log.delivery_status) {
+      log.delivery_status = log.status;
     }
   }
   res.json({ success: true, logs });
@@ -1075,6 +1076,22 @@ async function handleIncomingMessage(value, msg) {
     .eq('is_active', true)
     .single();
   if (!waAccount) return;
+
+  // Store incoming message in wb_campaign_logs (reusing table for inbound messages)
+  try {
+    await supabase.from('wb_campaign_logs').insert({
+      campaign_id: null,
+      queue_id: null,
+      phone: msg.from,
+      contact_name: '',
+      status: 'inbound',
+      delivery_status: 'received',
+      wa_message_id: msg.id || null,
+      created_at: new Date().toISOString()
+    });
+  } catch (e) {
+    console.error('[webhook] failed to store inbound message:', e.message);
+  }
 
   const { data: settings } = await supabase
     .from('wb_settings')

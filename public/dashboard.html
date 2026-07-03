@@ -189,7 +189,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <span class="form-label">Campaign Name</span><input type="text" id="campaignName" placeholder="Summer Sale 2025">
 <span class="form-label">Template (Approved only)</span><select id="campaignTemplateSelect" onchange="loadTemplatePlaceholders()"></select>
 <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:12px;">
-  <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="radio" name="campaignTiming" value="immediate" checked onchange="toggleCampaignScheduleInput()"> Send now</label>
+  <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="radio" name="campaignTiming" value="draft" checked onchange="toggleCampaignScheduleInput()"> Save as draft</label>
   <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="radio" name="campaignTiming" value="schedule" onchange="toggleCampaignScheduleInput()"> Schedule</label>
 </div>
 <input type="datetime-local" id="campaignScheduleAt" style="margin-top:10px;display:none;width:100%;" />
@@ -817,7 +817,7 @@ async function createCampaign() {
   const name = document.getElementById('campaignName').value.trim();
   const templateId = document.getElementById('campaignTemplateSelect').value;
   const groupName = document.getElementById('campaignGroupSelect').value || null;
-  const timing = document.querySelector('input[name="campaignTiming"]:checked')?.value || 'immediate';
+  const timing = document.querySelector('input[name="campaignTiming"]:checked')?.value || 'draft';
   const scheduleAt = document.getElementById('campaignScheduleAt')?.value || null;
   if (!name || !templateId) { showToast('Name and template required', true); return; }
 
@@ -836,7 +836,7 @@ async function createCampaign() {
   if (timing === 'schedule' && !scheduleAt) { showToast('Schedule date/time is required for scheduled campaigns', true); return; }
   const payload = { name, template_id: templateId, group_name: groupName };
   if (timing === 'schedule') payload.schedule_at = scheduleAt;
-  if (timing === 'immediate') payload.start_now = true;
+  if (timing === 'running') payload.start_now = true;
   if (Object.keys(placeholder_mapping).length) payload.placeholder_mapping = placeholder_mapping;
 
   const res = await apiCall('/api/campaigns', 'POST', payload);
