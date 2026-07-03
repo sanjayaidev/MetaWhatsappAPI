@@ -744,16 +744,23 @@ app.delete('/api/campaigns/:id', verifyUser, async (req, res) => {
 });
 
 app.get('/api/campaigns/active', verifyUser, async (req, res) => {
-  const { data } = await supabase
+  // Prefer whichever campaign is actually mid-flight. Ordering purely by
+  // created_at could hand back a newer draft/scheduled campaign instead of
+  // the one that's actually running, which left the Send tab pointed at the
+  // wrong campaign (and stuck at 0/0/0/0) whenever more than one existed.
+  const statusPriority = ['running', 'paused', 'queued', 'scheduled', 'draft'];
+  const { data: candidates } = await supabase
     .from('wb_campaigns')
     .select('*')
     .eq('user_id', req.user.id)
-    .in('status', ['scheduled', 'draft', 'queued', 'running', 'paused'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
-  if (data) return res.json({ success: true, campaign: data });
-  
+    .in('status', statusPriority)
+    .order('created_at', { ascending: false });
+
+  if (candidates?.length) {
+    candidates.sort((a, b) => statusPriority.indexOf(a.status) - statusPriority.indexOf(b.status));
+    return res.json({ success: true, campaign: candidates[0] });
+  }
+
   const { data: last } = await supabase
     .from('wb_campaigns')
     .select('*')
