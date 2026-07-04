@@ -89,6 +89,29 @@ const verifyUser = async (req, res, next) => {
   }
 };
 
+// Gate for anything under the "API" surface (key management routes, the
+// api-keys.html page). This is separate from and on top of per-key
+// permissions (can_send_messages, etc.) on wb_api_keys — it's an
+// account-level master switch stored on wb_profiles. A user can have a
+// perfectly valid dashboard login (or even a valid sk_live_ key) and still
+// be blocked here if api_access is false on their profile.
+const requireApiAccess = async (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  const { data: profile, error } = await supabase
+    .from('wb_profiles')
+    .select('api_access')
+    .eq('id', req.user.id)
+    .single();
+  if (error) {
+    console.error('[requireApiAccess] profile lookup failed', req.user.id, error);
+    return res.status(500).json({ error: 'Could not verify API access' });
+  }
+  if (!profile?.api_access) {
+    return res.status(403).json({ error: 'API access is not enabled for this account' });
+  }
+  next();
+};
+
 // Admin middleware — protects user creation endpoint
 const verifyAdmin = (req, res, next) => {
   const adminSecret = req.headers['x-admin-secret'] || req.body?.admin_secret;
@@ -138,6 +161,46 @@ app.post('/api/admin/create-user', verifyAdmin, async (req, res) => {
 // ================================================================
 // 6. PROFILE ROUTES
 // ================================================================
+// Dedicated login for the API surface — deliberately separate from the
+// dashboard's session flow (public/login.html -> /dashboard.html). Same
+// underlying Supabase credentials, but this endpoint additionally requires
+// wb_profiles.api_access = true before it will hand back a usable token.
+// Valid dashboard credentials alone are NOT enough to pass this endpoint.
+app.post('/api/auth/api-login', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error || !data?.session) {
+      return res.status(401).json({ error: error?.message || 'Invalid credentials' });
+    }
+
+    const { data: profile, error: profileErr } = await supabase
+      .from('wb_profiles')
+      .select('api_access')
+      .eq('id', data.user.id)
+      .single();
+
+    if (profileErr) {
+      console.error('[api-login] profile lookup failed', data.user.id, profileErr);
+      return res.status(500).json({ error: 'Could not verify API access' });
+    }
+    if (!profile?.api_access) {
+      // Valid credentials, but this account isn't allowed onto the API surface.
+      return res.status(403).json({ error: 'API access is not enabled for this account' });
+    }
+
+    res.json({
+      success: true,
+      token: data.session.access_token,
+      user: { id: data.user.id, email: data.user.email }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/auth/verify', async (req, res) => {
   const authHeader = req.headers['authorization'] || '';
   let token = authHeader.replace(/^Bearer\s+/i, '').trim();
@@ -151,6 +214,13 @@ app.post('/api/auth/verify', async (req, res) => {
   } catch (err) {
     return res.status(401).json({ error: 'Auth verification failed' });
   }
+});
+
+// Used by api-keys.html on page load: confirms the token is valid AND the
+// account has API access, in one call. verifyUser already ran (via app.use
+// or explicit middleware) to populate req.user by the time this runs.
+app.get('/api/auth/api-verify', verifyUser, requireApiAccess, (req, res) => {
+  res.json({ success: true, user: { id: req.user.id, email: req.user.email } });
 });
 
 app.get('/api/profile', verifyUser, async (req, res) => {
@@ -1615,7 +1685,7 @@ app.use('/api/ai', aiChatRouter);
 // ================================================================
 
 // Get all API keys for current user
-app.get('/api/api-keys', verifyUser, async (req, res) => {
+app.get('/api/api-keys', verifyUser, requireApiAccess, async (req, res) => {
   try {
     const keys = await apiKeys.listApiKeys(req.user.id);
     res.json({ success: true, keys });
@@ -1625,7 +1695,7 @@ app.get('/api/api-keys', verifyUser, async (req, res) => {
 });
 
 // Create a new API key
-app.post('/api/api-keys', verifyUser, async (req, res) => {
+app.post('/api/api-keys', verifyUser, requireApiAccess, async (req, res) => {
   const { name, permissions, rateLimits, scopedPhoneNumberId, description, expiresAt } = req.body;
   
   if (!name) {
@@ -1660,7 +1730,7 @@ app.post('/api/api-keys', verifyUser, async (req, res) => {
 });
 
 // Revoke an API key
-app.delete('/api/api-keys/:id', verifyUser, async (req, res) => {
+app.delete('/api/api-keys/:id', verifyUser, requireApiAccess, async (req, res) => {
   try {
     const success = await apiKeys.revokeApiKey(req.params.id, req.user.id);
     if (success) {
