@@ -552,6 +552,9 @@ app.post('/api/contacts', verifyUser, async (req, res) => {
     phone: String(c.phone).replace(/\D/g, ''),
     group_name: c.group_name || 'Default',
     message: c.message || null,
+    custom_fields: (c.custom_fields && typeof c.custom_fields === 'object' && Object.keys(c.custom_fields).length)
+      ? c.custom_fields
+      : null,
     status: 'pending', optin: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
@@ -675,13 +678,16 @@ app.post('/api/campaigns', verifyUser, requirePermission('canManageCampaigns'), 
       if (keyStyles.size > 1) {
         return res.status(400).json({ error: 'placeholder_mapping keys must be all numeric ("1","2",...) or all named ("a","b",...), not mixed' });
       }
-      const validTypes = new Set(['phone', 'name', 'custom']);
+      const validTypes = new Set(['phone', 'name', 'message', 'field', 'custom']);
       for (const [key, map] of entries) {
         if (typeof map !== 'object' || map === null || !validTypes.has(map.type)) {
-          return res.status(400).json({ error: `placeholder_mapping["${key}"] must have a type of "phone", "name", or "custom"` });
+          return res.status(400).json({ error: `placeholder_mapping["${key}"] must have a type of "phone", "name", "message", "field", or "custom"` });
         }
         if (map.type === 'custom' && typeof map.value !== 'string') {
           return res.status(400).json({ error: `placeholder_mapping["${key}"] with type "custom" requires a string "value"` });
+        }
+        if (map.type === 'field' && (typeof map.field !== 'string' || !map.field.trim())) {
+          return res.status(400).json({ error: `placeholder_mapping["${key}"] with type "field" requires a "field" name (matching a custom column from your CSV)` });
         }
       }
     }
@@ -721,6 +727,8 @@ app.post('/api/campaigns', verifyUser, requirePermission('canManageCampaigns'), 
     contact_id: c.id,
     phone: c.phone,
     contact_name: c.name || '',
+    contact_message: c.message || null,
+    contact_custom_fields: c.custom_fields || null,
     template_name: tpl.name,
     template_language: tpl.language || 'en_US',
     status: 'pending',
@@ -1432,6 +1440,8 @@ async function processQueue() {
       const resolveValue = (map) => {
         if (map.type === 'phone') return queueItem.phone || '';
         if (map.type === 'name') return queueItem.contact_name || '';
+        if (map.type === 'message') return queueItem.contact_message || '';
+        if (map.type === 'field') return queueItem.contact_custom_fields?.[map.field] || '';
         if (map.type === 'custom') return map.value || '';
         return '';
       };
