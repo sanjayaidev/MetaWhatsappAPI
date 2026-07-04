@@ -248,6 +248,18 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div id="receivedMessagesList"><div class="empty-state"><div class="empty-icon">📥</div><p>No messages received yet</p></div></div>
 </div>
 </div>
+
+<!-- Reply modal: only usable within WhatsApp's ~24h service window -->
+<div class="modal" id="replyModal">
+<div class="modal-header"><div class="modal-title">💬 Reply</div><button class="btn btn-ghost btn-xs" onclick="closeModal('replyModal')">✕</button></div>
+<div style="margin-bottom:12px;"><label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Their message</label>
+<div id="replyOriginalMessage" style="background:var(--bg2);border-radius:8px;padding:12px;font-size:13px;color:var(--text2);max-height:120px;overflow-y:auto;overflow-wrap:anywhere;"></div>
+</div>
+<div style="margin-bottom:4px;"><label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Your reply</label>
+<textarea id="replyMessageInput" rows="4" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text1);font-family:inherit;font-size:13px;" placeholder="Type your message…"></textarea>
+</div>
+<div class="btn-row" style="margin-top:10px;"><button class="btn btn-primary" onclick="sendReply()" id="replySendBtn">Send</button><button class="btn btn-ghost" onclick="closeModal('replyModal')">Cancel</button></div>
+</div>
 <!-- ══ SETTINGS ══ -->
 <div class="tab-panel" id="tab-settings">
 <div class="page-header"><div class="page-title">Settings</div><div class="page-sub">Configure sending limits and auto-reply</div></div>
@@ -1031,6 +1043,14 @@ function timeAgo(iso) {
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return new Date(iso).toLocaleString();
 }
+// Reply is only allowed within WhatsApp's ~24h customer service window,
+// measured from this contact's most recent inbound message. Kept a hair
+// under Meta's real 24h limit as a safety margin; the server enforces the
+// real cutoff independently, this is just so the button reflects reality
+// instead of only failing after the user already typed a reply.
+const REPLY_WINDOW_HOURS = 22;
+let replyTargetPhone = null;
+
 async function loadReceivedMessages() {
   const res = await apiCall('/api/messages/received');
   const container = document.getElementById('receivedMessagesList');
@@ -1043,8 +1063,41 @@ async function loadReceivedMessages() {
   const messages = res.messages || [];
   if (!container) return;
   if (!messages.length) { container.innerHTML = '<div class="empty-state"><div class="empty-icon">📥</div><p>No messages received yet</p></div>'; return; }
-  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>From</th><th>Type</th><th>Message</th><th>Received</th></tr></thead><tbody>${messages.map(m => `<tr style="${m.is_read ? '' : 'font-weight:700;'}"><td style="font-family:'DM Mono',monospace;font-size:12px;">${escapeHtml(m.contact_name ? `${m.contact_name} (${m.phone})` : m.phone)}</td><td>${MSG_TYPE_ICON[m.message_type] || '💬'} ${escapeHtml(m.message_type || 'text')}</td><td style="max-width:340px;overflow-wrap:anywhere;">${escapeHtml(m.message_body || '')}</td><td style="font-size:11px;color:var(--text2);white-space:nowrap;">${timeAgo(m.created_at)}</td></tr>`).join('')}</tbody></table></div>`;
+  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>From</th><th>Type</th><th>Message</th><th>Received</th><th></th></tr></thead><tbody>${messages.map(m => {
+    const hoursSince = (Date.now() - new Date(m.created_at).getTime()) / 3600000;
+    const withinWindow = hoursSince <= REPLY_WINDOW_HOURS;
+    const replyBtn = withinWindow
+      ? `<button class="btn btn-primary btn-xs" onclick='openReplyModal(${JSON.stringify(m.phone)}, ${JSON.stringify(m.message_body || '')})'>↩ Reply</button>`
+      : `<button class="btn btn-ghost btn-xs" disabled title="Reply window closed (over ${REPLY_WINDOW_HOURS}h since their last message)">↩ Expired</button>`;
+    return `<tr style="${m.is_read ? '' : 'font-weight:700;'}"><td style="font-family:'DM Mono',monospace;font-size:12px;">${escapeHtml(m.contact_name ? `${m.contact_name} (${m.phone})` : m.phone)}</td><td>${MSG_TYPE_ICON[m.message_type] || '💬'} ${escapeHtml(m.message_type || 'text')}</td><td style="max-width:340px;overflow-wrap:anywhere;">${escapeHtml(m.message_body || '')}</td><td style="font-size:11px;color:var(--text2);white-space:nowrap;">${timeAgo(m.created_at)}</td><td>${replyBtn}</td></tr>`;
+  }).join('')}</tbody></table></div>`;
 }
+
+function openReplyModal(phone, originalMessage) {
+  replyTargetPhone = phone;
+  document.getElementById('replyOriginalMessage').textContent = originalMessage || '(no text content)';
+  document.getElementById('replyMessageInput').value = '';
+  document.getElementById('replyModal').classList.add('open');
+}
+
+async function sendReply() {
+  const message = document.getElementById('replyMessageInput').value.trim();
+  if (!replyTargetPhone) return;
+  if (!message) { showToast('Type a message first', true); return; }
+
+  const btn = document.getElementById('replySendBtn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const res = await apiCall('/api/messages/reply', 'POST', { phone: replyTargetPhone, message });
+  btn.disabled = false; btn.textContent = 'Send';
+
+  if (res.success) {
+    showToast('✓ Reply sent');
+    closeModal('replyModal');
+  } else {
+    showToast(res.error || 'Failed to send reply', true);
+  }
+}
+
 async function markReceivedRead() { const res = await apiCall('/api/messages/received/mark-read', 'POST'); if (res.success) { showToast('✓ Marked all read'); loadReceivedMessages(); } }
 function startReceivedPolling() { stopReceivedPolling(); receivedPollInterval = setInterval(loadReceivedMessages, 8000); }
 function stopReceivedPolling() { if (receivedPollInterval) { clearInterval(receivedPollInterval); receivedPollInterval = null; } }
@@ -1084,7 +1137,7 @@ if (window.location.hash && window.location.hash.includes('access_token')) {
 const savedToken = localStorage.getItem('supabase_token');
 if (savedToken) { authToken = savedToken; loadDashboard(); } else { window.location.href = '/login.html'; }
 
-window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.toggleCampaignScheduleInput = toggleCampaignScheduleInput; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates; window.updateCampaignContactCount = updateCampaignContactCount; window.renderCampaignGroups = renderCampaignGroups;
+window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.toggleCampaignScheduleInput = toggleCampaignScheduleInput; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates; window.updateCampaignContactCount = updateCampaignContactCount; window.renderCampaignGroups = renderCampaignGroups; window.openReplyModal = openReplyModal; window.sendReply = sendReply;
 </script>
 </body>
 </html>
