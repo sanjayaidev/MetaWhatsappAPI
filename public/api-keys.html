@@ -210,22 +210,29 @@
   <script>
     let authToken = null;
     
-    // Get auth token on load
+    // Get auth token on load. Uses a token stored under a different key
+    // than the dashboard (api_supabase_token vs supabase_token) so the two
+    // login flows never share a session, and hits /api/auth/api-verify
+    // which checks both a valid token AND wb_profiles.api_access — a
+    // dashboard session alone will not pass this check.
     async function getAuthToken() {
+      authToken = localStorage.getItem('api_supabase_token');
+      if (!authToken) {
+        window.location.href = '/api-login.html';
+        return;
+      }
       try {
-        const response = await fetch('/api/auth/verify');
+        const response = await fetch('/api/auth/api-verify', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
         if (response.ok) {
-          const data = await response.json();
-          authToken = localStorage.getItem('supabase_token') || sessionStorage.getItem('supabase_token');
-          if (!authToken) {
-            window.location.href = '/login.html';
-          }
           loadKeys();
         } else {
-          window.location.href = '/login.html';
+          localStorage.removeItem('api_supabase_token');
+          window.location.href = '/api-login.html';
         }
       } catch (err) {
-        window.location.href = '/login.html';
+        window.location.href = '/api-login.html';
       }
     }
     
