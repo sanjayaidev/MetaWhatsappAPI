@@ -51,6 +51,19 @@ app.use(express.json({
 }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Public, safe-to-expose config for browser pages that need to talk to
+// Supabase Auth directly (e.g. login.html). Only the URL and the anon
+// key are ever exposed here — never the service role key. This replaces
+// hardcoding SUPABASE_URL/SUPABASE_ANON_KEY inside login.html, which made
+// it easy for the frontend and backend to silently point at two different
+// Supabase projects.
+app.get('/api/public-config', (req, res) => {
+  res.json({
+    supabaseUrl: process.env.SUPABASE_URL,
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY
+  });
+});
+
 // Runs on every request: if an `sk_live_...` API key is present (Authorization
 // header or x-api-key), validate it, apply its rate limits, and populate
 // req.user/req.apiKey. Otherwise it's a no-op and falls through to verifyUser's
@@ -728,7 +741,7 @@ app.post('/api/campaigns', verifyUser, requirePermission('canManageCampaigns'), 
     phone: c.phone,
     contact_name: c.name || '',
     contact_message: c.message || null,
-    contact_custom_fields: c.custom_fields || null,
+    custom_fields_data: c.custom_fields || null,
     template_name: tpl.name,
     template_language: tpl.language || 'en_US',
     status: 'pending',
@@ -738,8 +751,24 @@ app.post('/api/campaigns', verifyUser, requirePermission('canManageCampaigns'), 
 
   const { error: queueErr } = await supabase.from('wb_send_queue').insert(queueItems);
   if (queueErr) {
+    // PostgREST errors carry more than .message — code/details/hint pinpoint
+    // exactly what's wrong (e.g. PGRST204 = column not found in schema cache,
+    // 23502 = not-null violation, 42501 = RLS policy block). Logging + returning
+    // all of it turns "Failed to create queue: <vague message>" into an
+    // actionable error instead of requiring a debugging session to find the cause.
+    console.error('wb_send_queue insert failed:', {
+      code: queueErr.code,
+      message: queueErr.message,
+      details: queueErr.details,
+      hint: queueErr.hint
+    });
     await supabase.from('wb_campaigns').delete().eq('id', campaign.id);
-    return res.status(500).json({ error: 'Failed to create queue: ' + queueErr.message });
+    return res.status(500).json({
+      error: 'Failed to create queue: ' + queueErr.message,
+      code: queueErr.code,
+      details: queueErr.details,
+      hint: queueErr.hint
+    });
   }
 
   res.json({ success: true, campaign, total_contacts: contacts.length, message: `Campaign created with ${contacts.length} contacts queued.` });
@@ -1441,7 +1470,7 @@ async function processQueue() {
         if (map.type === 'phone') return queueItem.phone || '';
         if (map.type === 'name') return queueItem.contact_name || '';
         if (map.type === 'message') return queueItem.contact_message || '';
-        if (map.type === 'field') return queueItem.contact_custom_fields?.[map.field] || '';
+        if (map.type === 'field') return queueItem.custom_fields_data?.[map.field] || '';
         if (map.type === 'custom') return map.value || '';
         return '';
       };
