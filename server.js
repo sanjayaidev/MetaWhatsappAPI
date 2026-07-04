@@ -1673,8 +1673,11 @@ async function processQueue() {
       errorMsg = err.message;
     }
 
-    // Update queue item
-    await supabase
+    // Update queue item. If this fails silently, the item would stay
+    // 'pending' forever and processQueue would pick the SAME contact again
+    // next cycle — sending them a duplicate message every 3 seconds,
+    // indefinitely, with the delivery already having actually succeeded.
+    const { error: queueUpdateErr } = await supabase
       .from('wb_send_queue')
       .update({
         status: sendSuccess ? 'sent' : 'failed',
@@ -1684,10 +1687,13 @@ async function processQueue() {
         attempt_count: (queueItem.attempt_count || 0) + 1
       })
       .eq('id', queueItem.id);
+    if (queueUpdateErr) {
+      console.error('[queue] failed to update queue item after send', queueItem.id, queueUpdateErr);
+    }
 
     // Insert log entry if sent
     if (sendSuccess && waMessageId) {
-      await supabase
+      const { error: logErr } = await supabase
         .from('wb_campaign_logs')
         .upsert({
           campaign_id: queueItem.campaign_id,
@@ -1696,6 +1702,9 @@ async function processQueue() {
           delivery_status: 'sent',
           created_at: new Date().toISOString()
         }, { onConflict: 'wa_message_id' });
+      if (logErr) {
+        console.error('[queue] failed to write campaign log', queueItem.id, logErr);
+      }
     }
 
     await updateCampaignProgress(queueItem.campaign_id, sendSuccess);
