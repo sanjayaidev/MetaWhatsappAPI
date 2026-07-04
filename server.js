@@ -15,11 +15,14 @@ const FormData = require('form-data');
 const multer = require('multer');
 const aiChatRouter = require('./src/routes/ai-chat');
 const { generateReply, DEFAULT_MODEL: DEFAULT_AI_MODEL } = aiChatRouter;
+const { encryptToken, decryptToken } = require('./src/crypto');
+const apiKeys = require('./src/api-keys');
+const { verifyApiKey, requirePermission, requireScopedAccount } = require('./src/middleware/api-auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-const META_API_VERSION = 'v20.0';
+const META_API_VERSION = 'v23.0';
 
 // ================================================================
 // 1. SUPABASE CLIENT (REST API — bypasses pg/IPv6 entirely)
@@ -35,40 +38,8 @@ const supabase = createClient(
 
 // ================================================================
 // 2. CRYPTO — AES-256-GCM for WA token encryption
+// (moved to ./src/crypto.js — single source of truth, imported above)
 // ================================================================
-function getKey() {
-  const keyBase64 = process.env.TOKEN_ENCRYPTION_KEY;
-  if (!keyBase64) throw new Error('TOKEN_ENCRYPTION_KEY env var is not set');
-  const key = Buffer.from(keyBase64, 'base64');
-  if (key.length !== 32) throw new Error('TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes');
-  return key;
-}
-
-function encryptToken(plaintext) {
-  const key = getKey();
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  let encrypted = cipher.update(plaintext, 'utf8');
-  encrypted = Buffer.concat([encrypted, cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  const combined = Buffer.concat([encrypted, authTag]);
-  return `${iv.toString('base64')}:${combined.toString('base64')}`;
-}
-
-function decryptToken(stored) {
-  const [ivB64, combinedB64] = stored.split(':');
-  if (!ivB64 || !combinedB64) throw new Error('Malformed encrypted token');
-  const key = getKey();
-  const iv = Buffer.from(ivB64, 'base64');
-  const combined = Buffer.from(combinedB64, 'base64');
-  const authTag = combined.slice(-16);
-  const encrypted = combined.slice(0, -16);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag);
-  let decrypted = decipher.update(encrypted);
-  decrypted = Buffer.concat([decrypted, decipher.final()]);
-  return decrypted.toString('utf8');
-}
 
 // ================================================================
 // 3. MIDDLEWARE
@@ -80,8 +51,17 @@ app.use(express.json({
 }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Auth middleware — verifies Supabase JWT (works for email + Google + FB)
+// Runs on every request: if an `sk_live_...` API key is present (Authorization
+// header or x-api-key), validate it, apply its rate limits, and populate
+// req.user/req.apiKey. Otherwise it's a no-op and falls through to verifyUser's
+// Supabase JWT check below. Previously this middleware existed but was never
+// mounted, so generated API keys couldn't actually authenticate anywhere.
+app.use(verifyApiKey);
+
+// Auth middleware — verifies Supabase JWT (works for email + Google + FB).
+// Skips straight through if verifyApiKey already authenticated this request.
 const verifyUser = async (req, res, next) => {
+  if (req.user) return next();
   const authHeader = req.headers['authorization'] || '';
   let token = authHeader.replace(/^Bearer\s+/i, '').trim();
   if (!token) token = String(req.headers['x-api-key'] || '').trim();
@@ -393,8 +373,8 @@ app.post('/api/templates/meta/sync', verifyUser, async (req, res) => {
 
   try {
     const response = await fetch(
-      `https://graph.facebook.com/${META_API_VERSION}/${account.waba_id}/message_templates?fields=id,name,status,language,category,components&access_token=${plainToken}`,
-      { method: 'GET' }
+      `https://graph.facebook.com/${META_API_VERSION}/${account.waba_id}/message_templates?fields=id,name,status,language,category,components`,
+      { method: 'GET', headers: { 'Authorization': `Bearer ${plainToken}` } }
     );
     if (!response.ok) {
       const errorData = await response.json();
@@ -402,7 +382,8 @@ app.post('/api/templates/meta/sync', verifyUser, async (req, res) => {
     }
 
     const data = await response.json();
-    const approvedTemplates = (data.data || []).filter(t => t.status === 'APPROVED');
+    const allMetaTemplates = data.data || [];
+    const approvedTemplates = allMetaTemplates.filter(t => t.status === 'APPROVED');
 
     const { data: localTemplates, error: localError } = await supabase
       .from('wb_templates')
@@ -451,8 +432,29 @@ app.post('/api/templates/meta/sync', verifyUser, async (req, res) => {
       }
     }
 
+    // Remove local templates that Meta no longer reports as APPROVED for this account
+    // (rejected, paused, deleted directly in Meta, or otherwise no longer valid to send).
+    const metaApprovedIds = new Set(approvedTemplates.map(t => t.id));
+    const metaApprovedNames = new Set(approvedTemplates.map(t => t.name));
+    const staleLocal = (localTemplates || []).filter(l => {
+      const stillOnMeta = l.meta_template_id
+        ? metaApprovedIds.has(l.meta_template_id)
+        : metaApprovedNames.has(l.name);
+      return l.status === 'APPROVED' && !stillOnMeta;
+    });
+    if (staleLocal.length) {
+      syncPromises.push(
+        supabase.from('wb_templates').delete().in('id', staleLocal.map(l => l.id))
+      );
+    }
+
     await Promise.all(syncPromises);
-    res.json({ success: true, templates: approvedTemplates, synced: true });
+    res.json({
+      success: true,
+      templates: approvedTemplates,
+      synced: true,
+      removed: staleLocal.map(l => l.name)
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed to sync approved templates: ' + err.message });
   }
@@ -478,8 +480,8 @@ app.get('/api/templates/meta/approved', verifyUser, async (req, res) => {
   try {
     // Fetch approved templates from Meta
     const response = await fetch(
-      `https://graph.facebook.com/${META_API_VERSION}/${account.waba_id}/message_templates?fields=name,status,language,category,components&access_token=${plainToken}`,
-      { method: 'GET' }
+      `https://graph.facebook.com/${META_API_VERSION}/${account.waba_id}/message_templates?fields=name,status,language,category,components`,
+      { method: 'GET', headers: { 'Authorization': `Bearer ${plainToken}` } }
     );
     
     if (!response.ok) {
@@ -490,6 +492,24 @@ app.get('/api/templates/meta/approved', verifyUser, async (req, res) => {
     const data = await response.json();
     const approvedTemplates = (data.data || []).filter(t => t.status === 'APPROVED');
 
+    // Same cleanup as /meta/sync: drop local templates no longer approved on Meta.
+    const { data: localTemplates } = await supabase
+      .from('wb_templates')
+      .select('id,name,meta_template_id,status')
+      .eq('user_id', req.user.id)
+      .eq('status', 'APPROVED');
+    const metaApprovedIds = new Set(approvedTemplates.map(t => t.id));
+    const metaApprovedNames = new Set(approvedTemplates.map(t => t.name));
+    const staleLocal = (localTemplates || []).filter(l => {
+      const stillOnMeta = l.meta_template_id
+        ? metaApprovedIds.has(l.meta_template_id)
+        : metaApprovedNames.has(l.name);
+      return !stillOnMeta;
+    });
+    if (staleLocal.length) {
+      await supabase.from('wb_templates').delete().in('id', staleLocal.map(l => l.id));
+    }
+
     res.json({
       success: true,
       templates: approvedTemplates.map(t => ({
@@ -498,7 +518,8 @@ app.get('/api/templates/meta/approved', verifyUser, async (req, res) => {
         language: t.language || 'en_US',
         category: t.category || 'MARKETING',
         components: t.components || []
-      }))
+      })),
+      removed: staleLocal.map(l => l.name)
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch approved templates: ' + err.message });
@@ -592,7 +613,7 @@ app.get('/api/campaigns', verifyUser, async (req, res) => {
   res.json({ success: true, campaigns: data || [] });
 });
 
-app.post('/api/campaigns', verifyUser, async (req, res) => {
+app.post('/api/campaigns', verifyUser, requirePermission('canManageCampaigns'), async (req, res) => {
   const { name, template_id, group_name, schedule_at, start_now, placeholder_mapping } = req.body;
   if (!name) return res.status(400).json({ error: 'Campaign name required' });
   if (!template_id) return res.status(400).json({ error: 'template_id required' });
@@ -639,7 +660,33 @@ app.post('/api/campaigns', verifyUser, async (req, res) => {
   const { data: contacts } = await contactsQuery;
   if (!contacts?.length) return res.status(400).json({ error: 'No contacts found' });
 
-  // Parse and store placeholder mapping if present
+  // Parse and store placeholder mapping if present.
+  // Supports any number of placeholders: numeric keys ("1","2",...) for
+  // positional {{1}} {{2}} templates, or string keys ("a","b",...) for named
+  // {{a}} {{b}} templates. Validated here so bad input fails fast with a clear
+  // message instead of surfacing later as a cryptic Meta API error mid-send.
+  if (placeholder_mapping !== undefined) {
+    if (typeof placeholder_mapping !== 'object' || placeholder_mapping === null || Array.isArray(placeholder_mapping)) {
+      return res.status(400).json({ error: 'placeholder_mapping must be a JSON object' });
+    }
+    const entries = Object.entries(placeholder_mapping);
+    if (entries.length) {
+      const keyStyles = new Set(entries.map(([key]) => (/^\d+$/.test(key) ? 'positional' : 'named')));
+      if (keyStyles.size > 1) {
+        return res.status(400).json({ error: 'placeholder_mapping keys must be all numeric ("1","2",...) or all named ("a","b",...), not mixed' });
+      }
+      const validTypes = new Set(['phone', 'name', 'custom']);
+      for (const [key, map] of entries) {
+        if (typeof map !== 'object' || map === null || !validTypes.has(map.type)) {
+          return res.status(400).json({ error: `placeholder_mapping["${key}"] must have a type of "phone", "name", or "custom"` });
+        }
+        if (map.type === 'custom' && typeof map.value !== 'string') {
+          return res.status(400).json({ error: `placeholder_mapping["${key}"] with type "custom" requires a string "value"` });
+        }
+      }
+    }
+  }
+
   const insertPayload = {
     user_id: req.user.id,
     name,
@@ -690,7 +737,7 @@ app.post('/api/campaigns', verifyUser, async (req, res) => {
   res.json({ success: true, campaign, total_contacts: contacts.length, message: `Campaign created with ${contacts.length} contacts queued.` });
 });
 
-app.post('/api/campaigns/:id/start', verifyUser, async (req, res) => {
+app.post('/api/campaigns/:id/start', verifyUser, requirePermission('canManageCampaigns'), async (req, res) => {
   const { error } = await supabase
     .from('wb_campaigns')
     .update({ status: 'running', started_at: new Date().toISOString(), updated_at: new Date().toISOString() })
@@ -700,7 +747,7 @@ app.post('/api/campaigns/:id/start', verifyUser, async (req, res) => {
   res.json({ success: true, message: 'Campaign started' });
 });
 
-app.post('/api/campaigns/:id/pause', verifyUser, async (req, res) => {
+app.post('/api/campaigns/:id/pause', verifyUser, requirePermission('canManageCampaigns'), async (req, res) => {
   const { error } = await supabase
     .from('wb_campaigns')
     .update({ status: 'paused', updated_at: new Date().toISOString() })
@@ -710,7 +757,7 @@ app.post('/api/campaigns/:id/pause', verifyUser, async (req, res) => {
   res.json({ success: true, message: 'Campaign paused' });
 });
 
-app.post('/api/campaigns/:id/stop', verifyUser, async (req, res) => {
+app.post('/api/campaigns/:id/stop', verifyUser, requirePermission('canManageCampaigns'), async (req, res) => {
   // Count pending items for refund
   const { count: pendingCount } = await supabase
     .from('wb_send_queue')
@@ -731,7 +778,7 @@ app.post('/api/campaigns/:id/stop', verifyUser, async (req, res) => {
   res.json({ success: true, message: 'Campaign stopped and reset to draft', refunded: pendingCount || 0 });
 });
 
-app.delete('/api/campaigns/:id', verifyUser, async (req, res) => {
+app.delete('/api/campaigns/:id', verifyUser, requirePermission('canManageCampaigns'), async (req, res) => {
   await supabase.from('wb_send_queue').delete().eq('campaign_id', req.params.id);
   await supabase.from('wb_campaign_logs').delete().eq('campaign_id', req.params.id);
   const { error } = await supabase
@@ -985,10 +1032,16 @@ app.post('/api/wa/manual/save', verifyUser, async (req, res) => {
 // ================================================================
 // 12. EXTERNAL API (n8n / Zapier)
 // ================================================================
-app.post('/api/external/send', verifyUser, async (req, res) => {
-  const { phone_number_id, to, template_name, language_code } = req.body;
+app.post('/api/external/send', verifyUser, requirePermission('canSendMessages'), requireScopedAccount(), async (req, res) => {
+  const { phone_number_id, to, template_name, language_code, components } = req.body;
   if (!phone_number_id || !to || !template_name) {
     return res.status(400).json({ error: 'phone_number_id, to, and template_name required' });
+  }
+  // `components` lets callers pass template variables, e.g.:
+  // "components": [{ "type": "body", "parameters": [{ "type": "text", "text": "Sanjay" }] }]
+  // or, for named variables: [{ "type": "text", "parameter_name": "a", "text": "Sanjay" }]
+  if (components !== undefined && !Array.isArray(components)) {
+    return res.status(400).json({ error: 'components must be an array when provided' });
   }
   try {
     const { data: acc } = await supabase
@@ -1001,6 +1054,9 @@ app.post('/api/external/send', verifyUser, async (req, res) => {
     if (!acc) return res.status(404).json({ error: 'Phone number not found or inactive' });
 
     const plainToken = decryptToken(acc.access_token);
+    const templatePayload = { name: template_name, language: { code: language_code || 'en_US' } };
+    if (components?.length) templatePayload.components = components;
+
     const metaRes = await fetch(
       `https://graph.facebook.com/${META_API_VERSION}/${phone_number_id}/messages`,
       {
@@ -1009,7 +1065,7 @@ app.post('/api/external/send', verifyUser, async (req, res) => {
         body: JSON.stringify({
           messaging_product: 'whatsapp', to,
           type: 'template',
-          template: { name: template_name, language: { code: language_code || 'en_US' } }
+          template: templatePayload
         })
       }
     );
@@ -1037,16 +1093,26 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', async (req, res) => {
   res.sendStatus(200); // Must respond immediately
 
-  // Verify signature
-  const sigHeader = req.headers['x-hub-signature-256'] || '';
-  if (sigHeader && process.env.META_APP_SECRET) {
+  // Verify signature — if META_APP_SECRET is configured, a valid signature is mandatory.
+  // (Previously this only checked when a signature header happened to be present,
+  // so a request with the header stripped would sail through unverified.)
+  if (process.env.META_APP_SECRET) {
+    const sigHeader = req.headers['x-hub-signature-256'] || '';
+    if (!sigHeader) {
+      console.warn('[webhook] rejected: missing x-hub-signature-256 header');
+      return;
+    }
     const expected = 'sha256=' + crypto.createHmac('sha256', process.env.META_APP_SECRET).update(req.rawBody).digest('hex');
     try {
-      if (!crypto.timingSafeEqual(Buffer.from(sigHeader), Buffer.from(expected))) {
+      const sigBuf = Buffer.from(sigHeader);
+      const expBuf = Buffer.from(expected);
+      if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
         console.warn('[webhook] signature verification FAILED');
         return;
       }
     } catch (_) { return; }
+  } else {
+    console.warn('[webhook] META_APP_SECRET not set — skipping signature verification (INSECURE, set it in production)');
   }
 
   const body = req.body;
@@ -1349,7 +1415,11 @@ async function processQueue() {
       .update({ status: 'processing', processed_at: new Date().toISOString() })
       .eq('id', queueItem.id);
 
-    // Fetch campaign placeholder mapping for this queue item
+    // Fetch campaign placeholder mapping for this queue item.
+    // placeholder_mapping is free-form JSON: { "<key>": { type, value? } }
+    // <key> can be a number ("1","2",...) for positional {{1}} {{2}} templates,
+    // or a string ("a","b",...) for named {{a}} {{b}} templates — any number of
+    // keys is supported, they're just iterated below.
     const { data: campaignData } = await supabase
       .from('wb_campaigns')
       .select('placeholder_mapping')
@@ -1358,18 +1428,32 @@ async function processQueue() {
 
     let templatePayload = { name: queueItem.template_name, language: { code: queueItem.template_language || 'en_US' } };
     if (campaignData?.placeholder_mapping && typeof campaignData.placeholder_mapping === 'object') {
-      const params = Object.keys(campaignData.placeholder_mapping)
-        .map(key => ({ position: parseInt(key, 10), mapping: campaignData.placeholder_mapping[key] }))
-        .filter(item => item.position > 0)
-        .sort((a, b) => a.position - b.position)
-        .map(item => {
-          const map = item.mapping;
-          let value = '';
-          if (map.type === 'phone') value = queueItem.phone || '';
-          else if (map.type === 'name') value = queueItem.contact_name || '';
-          else if (map.type === 'custom') value = map.value || '';
-          return { type: 'text', text: value };
-        });
+      const resolveValue = (map) => {
+        if (map.type === 'phone') return queueItem.phone || '';
+        if (map.type === 'name') return queueItem.contact_name || '';
+        if (map.type === 'custom') return map.value || '';
+        return '';
+      };
+
+      const entries = Object.entries(campaignData.placeholder_mapping);
+      const isPositional = entries.every(([key]) => /^\d+$/.test(key));
+
+      let params;
+      if (isPositional) {
+        // {{1}}, {{2}}, ... — order matters, no parameter_name needed
+        params = entries
+          .map(([key, map]) => ({ position: parseInt(key, 10), text: resolveValue(map) }))
+          .sort((a, b) => a.position - b.position)
+          .map(({ text }) => ({ type: 'text', text }));
+      } else {
+        // {{a}}, {{b}}, ... — each parameter must carry its name
+        params = entries.map(([key, map]) => ({
+          type: 'text',
+          parameter_name: key,
+          text: resolveValue(map)
+        }));
+      }
+
       if (params.length) {
         templatePayload.components = [ { type: 'BODY', parameters: params } ];
       }
@@ -1473,8 +1557,8 @@ app.use('/api/ai', aiChatRouter);
 
 // ================================================================
 // 16. API KEY MANAGEMENT ROUTES
+// (apiKeys module imported at top of file)
 // ================================================================
-const apiKeys = require('./src/api-keys');
 
 // Get all API keys for current user
 app.get('/api/api-keys', verifyUser, async (req, res) => {
