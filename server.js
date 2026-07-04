@@ -876,7 +876,7 @@ app.get('/api/campaigns/:id/status', verifyUser, async (req, res) => {
 app.get('/api/campaigns/:id/logs', verifyUser, async (req, res) => {
   const { data, error } = await supabase
     .from('wb_send_queue')
-    .select('phone, contact_name, status, wa_message_id, error_reason, created_at, delivery_status')
+    .select('phone, contact_name, status, wa_message_id, error_reason, created_at')
     .eq('campaign_id', req.params.id)
     .eq('user_id', req.user.id)
     .order('created_at', { ascending: true });
@@ -885,6 +885,7 @@ app.get('/api/campaigns/:id/logs', verifyUser, async (req, res) => {
   // Enrich with delivery status from logs table
   const logs = data || [];
   for (const log of logs) {
+    log.delivery_status = log.status; // default/fallback until enriched below
     if (log.wa_message_id) {
       const { data: deliveryLog } = await supabase
         .from('wb_campaign_logs')
@@ -892,11 +893,11 @@ app.get('/api/campaigns/:id/logs', verifyUser, async (req, res) => {
         .eq('wa_message_id', log.wa_message_id)
         .single();
       if (deliveryLog) {
-        log.delivery_status = deliveryLog.delivery_status || log.delivery_status || log.status;
+        log.delivery_status = deliveryLog.delivery_status || log.delivery_status;
         if (deliveryLog.error_reason) log.error_reason = deliveryLog.error_reason;
+        log.delivered_at = deliveryLog.delivered_at || null;
+        log.read_at = deliveryLog.read_at || null;
       }
-    } else if (!log.delivery_status) {
-      log.delivery_status = log.status;
     }
   }
   res.json({ success: true, logs });
