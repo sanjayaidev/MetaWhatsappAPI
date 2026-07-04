@@ -52,8 +52,19 @@ body { font-family: 'DM Sans', sans-serif; background: #080b10; color: #e8f0fb; 
 </div>
 
 <script>
-const SUPABASE_URL = 'https://vnytcmoyvfyrvcmshwsz.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZueXRjbW95dmZ5cnZjbXNod3N6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5OTI3OTYsImV4cCI6MjA5ODU2ODc5Nn0.xG4BgzVqklaLKMv1Y9k4id8XSvXUgdarnJhGMebNO7s';
+let SUPABASE_URL = null;
+let SUPABASE_ANON_KEY = null;
+
+async function loadConfig() {
+  if (SUPABASE_URL && SUPABASE_ANON_KEY) return;
+  const res = await fetch('/api/public-config');
+  const cfg = await res.json();
+  SUPABASE_URL = cfg.supabaseUrl;
+  SUPABASE_ANON_KEY = cfg.supabaseAnonKey;
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    throw new Error('Server is missing SUPABASE_URL / SUPABASE_ANON_KEY env vars');
+  }
+}
 
 function showAuthError(msg) {
   const el = document.getElementById('authError');
@@ -69,6 +80,7 @@ async function handleEmailAuth() {
   btn.textContent = 'Please wait…'; btn.disabled = true;
   
   try {
+    await loadConfig();
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const { data, error } = await sb.auth.signInWithPassword({ email, password });
@@ -83,12 +95,14 @@ async function handleEmailAuth() {
 }
 
 async function handleGoogleLogin() {
+  await loadConfig();
   const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
   const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin + '/dashboard.html' } });
 }
 
 async function handleFacebookLogin() {
+  await loadConfig();
   const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
   const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   await sb.auth.signInWithOAuth({ provider: 'facebook', options: { redirectTo: window.location.origin + '/dashboard.html' } });
