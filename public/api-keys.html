@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Keys - WaBlast</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px 20px; text-align: center; }
+    header h1 { font-size: 2.5rem; margin-bottom: 10px; }
+    header p { opacity: 0.9; }
+    
+    .card { background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); padding: 24px; margin-bottom: 24px; }
+    .card h2 { color: #667eea; margin-bottom: 20px; font-size: 1.5rem; }
+    
+    .btn { display: inline-block; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; }
+    .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-secondary { background: #e5e7eb; color: #374151; }
+    .btn-secondary:hover { background: #d1d5db; }
+    
+    .form-group { margin-bottom: 20px; }
+    .form-group label { display: block; margin-bottom: 8px; font-weight: 600; color: #374151; }
+    .form-group input[type="text"], .form-group input[type="number"], .form-group textarea, .form-group select { width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px; transition: border-color 0.2s; }
+    .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #667eea; }
+    
+    .permissions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-top: 10px; }
+    .permission-item { display: flex; align-items: center; padding: 12px; background: #f9fafb; border-radius: 8px; border: 2px solid #e5e7eb; cursor: pointer; transition: all 0.2s; }
+    .permission-item:hover { border-color: #667eea; background: #f0f4ff; }
+    .permission-item input[type="checkbox"] { width: 18px; height: 18px; margin-right: 12px; accent-color: #667eea; }
+    .permission-item label { cursor: pointer; font-weight: 500; }
+    
+    .key-list { list-style: none; }
+    .key-item { display: flex; justify-content: space-between; align-items: center; padding: 16px; border: 2px solid #e5e7eb; border-radius: 8px; margin-bottom: 12px; transition: all 0.2s; }
+    .key-item:hover { border-color: #667eea; box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15); }
+    .key-info { flex: 1; }
+    .key-name { font-weight: 600; color: #111827; font-size: 16px; }
+    .key-prefix { color: #6b7280; font-size: 13px; margin-top: 4px; }
+    .key-meta { display: flex; gap: 16px; margin-top: 8px; font-size: 12px; color: #6b7280; }
+    .key-actions { display: flex; gap: 8px; }
+    
+    .alert { padding: 16px; border-radius: 8px; margin-bottom: 20px; }
+    .alert-warning { background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; }
+    .alert-success { background: #d1fae5; border: 1px solid #10b981; color: #065f46; }
+    .alert-error { background: #fee2e2; border: 1px solid #ef4444; color: #991b1b; }
+    
+    .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .modal { background: white; border-radius: 12px; padding: 32px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; }
+    .modal h3 { color: #111827; margin-bottom: 20px; font-size: 1.5rem; }
+    .modal-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; }
+    
+    .api-key-display { background: #1f2937; color: #10b981; padding: 16px; border-radius: 8px; font-family: 'Courier New', monospace; font-size: 16px; word-break: break-all; margin: 16px 0; position: relative; }
+    .copy-btn { position: absolute; top: 8px; right: 8px; background: #374151; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+    .copy-btn:hover { background: #4b5563; }
+    
+    .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .badge-active { background: #d1fae5; color: #065f46; }
+    .badge-inactive { background: #fee2e2; color: #991b1b; }
+    
+    .hidden { display: none; }
+    
+    a.nav-link { color: white; text-decoration: underline; opacity: 0.9; }
+    a.nav-link:hover { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🔑 API Keys Management</h1>
+    <p>Generate and manage API keys for external integrations (n8n, Zapier, etc.)</p>
+    <p style="margin-top: 10px;"><a href="/dashboard.html" class="nav-link">← Back to Dashboard</a></p>
+  </header>
+  
+  <div class="container">
+    <!-- Alert Messages -->
+    <div id="alertContainer"></div>
+    
+    <!-- Create Key Button -->
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>Your API Keys</h2>
+        <button class="btn btn-primary" onclick="showCreateModal()">+ Create New API Key</button>
+      </div>
+      <p style="color: #6b7280; margin-top: 8px;">Use these keys to authenticate API requests from external applications.</p>
+    </div>
+    
+    <!-- Keys List -->
+    <div class="card">
+      <h2>Active Keys</h2>
+      <ul class="key-list" id="keysList">
+        <li style="text-align: center; color: #6b7280; padding: 40px;">Loading...</li>
+      </ul>
+    </div>
+  </div>
+  
+  <!-- Create Key Modal -->
+  <div id="createModal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Create New API Key</h3>
+      
+      <div class="form-group">
+        <label for="keyName">Key Name *</label>
+        <input type="text" id="keyName" placeholder="e.g., n8n Integration, Production App">
+      </div>
+      
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="keyDescription" rows="2" placeholder="Optional description for this key"></textarea>
+      </div>
+      
+      <div class="form-group">
+        <label>Permissions</label>
+        <div class="permissions-grid">
+          <div class="permission-item">
+            <input type="checkbox" id="perm_send_messages">
+            <label for="perm_send_messages">Send Messages</label>
+          </div>
+          <div class="permission-item">
+            <input type="checkbox" id="perm_read_messages">
+            <label for="perm_read_messages">Read Messages</label>
+          </div>
+          <div class="permission-item">
+            <input type="checkbox" id="perm_manage_templates">
+            <label for="perm_manage_templates">Manage Templates</label>
+          </div>
+          <div class="permission-item">
+            <input type="checkbox" id="perm_manage_contacts">
+            <label for="perm_manage_contacts">Manage Contacts</label>
+          </div>
+          <div class="permission-item">
+            <input type="checkbox" id="perm_manage_campaigns">
+            <label for="perm_manage_campaigns">Manage Campaigns</label>
+          </div>
+          <div class="permission-item">
+            <input type="checkbox" id="perm_manage_accounts">
+            <label for="perm_manage_accounts">Manage Accounts</label>
+          </div>
+          <div class="permission-item">
+            <input type="checkbox" id="perm_access_analytics">
+            <label for="perm_access_analytics">Access Analytics</label>
+          </div>
+        </div>
+      </div>
+      
+      <div class="form-group">
+        <label>Rate Limits</label>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+          <div>
+            <label style="font-size: 12px; color: #6b7280;">Per Minute</label>
+            <input type="number" id="rate_minute" value="60" min="1">
+          </div>
+          <div>
+            <label style="font-size: 12px; color: #6b7280;">Per Hour</label>
+            <input type="number" id="rate_hour" value="1000" min="1">
+          </div>
+          <div>
+            <label style="font-size: 12px; color: #6b7280;">Per Day</label>
+            <input type="number" id="rate_day" value="10000" min="1">
+          </div>
+        </div>
+      </div>
+      
+      <div class="form-group">
+        <label>Scope to Phone Number (Optional)</label>
+        <input type="text" id="scopedPhone" placeholder="Leave empty for all accounts">
+        <small style="color: #6b7280;">If set, this key can only access the specified phone number ID</small>
+      </div>
+      
+      <div class="form-group">
+        <label>Expiration Date (Optional)</label>
+        <input type="date" id="expiresAt">
+      </div>
+      
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="hideCreateModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="createApiKey()">Create Key</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Show Key Modal -->
+  <div id="showKeyModal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>✅ API Key Created Successfully</h3>
+      
+      <div class="alert alert-warning">
+        <strong>⚠️ Important:</strong> Copy this API key now. It will not be shown again!
+      </div>
+      
+      <div class="api-key-display">
+        <span id="newApiKey"></span>
+        <button class="copy-btn" onclick="copyApiKey()">Copy</button>
+      </div>
+      
+      <div class="form-group">
+        <label>Key Details</label>
+        <p><strong>Name:</strong> <span id="newKeyName"></span></p>
+        <p><strong>Created:</strong> <span id="newKeyCreated"></span></p>
+      </div>
+      
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="hideShowKeyModal()">Done</button>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    let authToken = null;
+    
+    // Get auth token on load
+    async function getAuthToken() {
+      try {
+        const response = await fetch('/api/auth/verify');
+        if (response.ok) {
+          const data = await response.json();
+          authToken = localStorage.getItem('supabase_token') || sessionStorage.getItem('supabase_token');
+          if (!authToken) {
+            window.location.href = '/login.html';
+          }
+          loadKeys();
+        } else {
+          window.location.href = '/login.html';
+        }
+      } catch (err) {
+        window.location.href = '/login.html';
+      }
+    }
+    
+    // Load all API keys
+    async function loadKeys() {
+      try {
+        const response = await fetch('/api/api-keys', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        
+        if (!response.ok) throw new Error('Failed to load keys');
+        
+        const data = await response.json();
+        const keysList = document.getElementById('keysList');
+        
+        if (data.keys.length === 0) {
+          keysList.innerHTML = '<li style="text-align: center; color: #6b7280; padding: 40px;">No API keys yet. Create your first key above.</li>';
+          return;
+        }
+        
+        keysList.innerHTML = data.keys.map(key => `
+          <li class="key-item">
+            <div class="key-info">
+              <div class="key-name">${escapeHtml(key.name)}</div>
+              <div class="key-prefix">sk_live_${key.keyPrefix}••••••••••••••••</div>
+              <div class="key-meta">
+                <span>${key.isActive ? '<span class="badge badge-active">Active</span>' : '<span class="badge badge-inactive">Revoked</span>'}</span>
+                <span>Created: ${new Date(key.createdAt).toLocaleDateString()}</span>
+                ${key.lastUsedAt ? `<span>Last used: ${new Date(key.lastUsedAt).toLocaleDateString()}</span>` : ''}
+                ${key.expiresAt ? `<span>Expires: ${new Date(key.expiresAt).toLocaleDateString()}</span>` : ''}
+              </div>
+              <div class="key-meta" style="margin-top: 8px;">
+                <span>Rate: ${key.rateLimits.perMinute}/min</span>
+                ${key.scopedPhoneNumberId ? `<span>Scoped: ${key.scopedPhoneNumberId}</span>` : '<span>All accounts</span>'}
+              </div>
+            </div>
+            <div class="key-actions">
+              ${key.isActive ? `<button class="btn btn-danger" onclick="revokeKey('${key.id}')">Revoke</button>` : ''}
+            </div>
+          </li>
+        `).join('');
+      } catch (err) {
+        showAlert('Failed to load API keys: ' + err.message, 'error');
+      }
+    }
+    
+    // Create new API key
+    async function createApiKey() {
+      const name = document.getElementById('keyName').value.trim();
+      if (!name) {
+        showAlert('Please enter a key name', 'error');
+        return;
+      }
+      
+      const permissions = {
+        canSendMessages: document.getElementById('perm_send_messages').checked,
+        canReadMessages: document.getElementById('perm_read_messages').checked,
+        canManageTemplates: document.getElementById('perm_manage_templates').checked,
+        canManageContacts: document.getElementById('perm_manage_contacts').checked,
+        canManageCampaigns: document.getElementById('perm_manage_campaigns').checked,
+        canManageAccounts: document.getElementById('perm_manage_accounts').checked,
+        canAccessAnalytics: document.getElementById('perm_access_analytics').checked
+      };
+      
+      const rateLimits = {
+        perMinute: parseInt(document.getElementById('rate_minute').value) || 60,
+        perHour: parseInt(document.getElementById('rate_hour').value) || 1000,
+        perDay: parseInt(document.getElementById('rate_day').value) || 10000
+      };
+      
+      const scopedPhoneNumberId = document.getElementById('scopedPhone').value.trim() || null;
+      const description = document.getElementById('keyDescription').value.trim() || null;
+      const expiresAt = document.getElementById('expiresAt').value || null;
+      
+      try {
+        const response = await fetch('/api/api-keys', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({
+            name,
+            permissions,
+            rateLimits,
+            scopedPhoneNumberId,
+            description,
+            expiresAt
+          })
+        });
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to create key');
+        }
+        
+        const data = await response.json();
+        
+        // Show the new key
+        document.getElementById('newApiKey').textContent = data.key.apiKey;
+        document.getElementById('newKeyName').textContent = data.key.name;
+        document.getElementById('newKeyCreated').textContent = new Date(data.key.createdAt).toLocaleString();
+        
+        hideCreateModal();
+        showShowKeyModal();
+        loadKeys();
+        
+        showAlert('API key created successfully!', 'success');
+      } catch (err) {
+        showAlert(err.message, 'error');
+      }
+    }
+    
+    // Revoke API key
+    async function revokeKey(keyId) {
+      if (!confirm('Are you sure you want to revoke this API key? This action cannot be undone.')) {
+        return;
+      }
+      
+      try {
+        const response = await fetch(`/api/api-keys/${keyId}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to revoke key');
+        }
+        
+        showAlert('API key revoked successfully', 'success');
+        loadKeys();
+      } catch (err) {
+        showAlert(err.message, 'error');
+      }
+    }
+    
+    // Copy API key to clipboard
+    function copyApiKey() {
+      const apiKey = document.getElementById('newApiKey').textContent;
+      navigator.clipboard.writeText(apiKey).then(() => {
+        const btn = document.querySelector('.copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 2000);
+      });
+    }
+    
+    // Modal functions
+    function showCreateModal() {
+      document.getElementById('createModal').classList.remove('hidden');
+    }
+    
+    function hideCreateModal() {
+      document.getElementById('createModal').classList.add('hidden');
+      // Reset form
+      document.getElementById('keyName').value = '';
+      document.getElementById('keyDescription').value = '';
+      document.querySelectorAll('.permission-item input').forEach(cb => cb.checked = false);
+      document.getElementById('rate_minute').value = '60';
+      document.getElementById('rate_hour').value = '1000';
+      document.getElementById('rate_day').value = '10000';
+      document.getElementById('scopedPhone').value = '';
+      document.getElementById('expiresAt').value = '';
+    }
+    
+    function showShowKeyModal() {
+      document.getElementById('showKeyModal').classList.remove('hidden');
+    }
+    
+    function hideShowKeyModal() {
+      document.getElementById('showKeyModal').classList.add('hidden');
+    }
+    
+    // Alert helper
+    function showAlert(message, type) {
+      const container = document.getElementById('alertContainer');
+      const alert = document.createElement('div');
+      alert.className = `alert alert-${type}`;
+      alert.textContent = message;
+      container.appendChild(alert);
+      setTimeout(() => alert.remove(), 5000);
+    }
+    
+    // Escape HTML
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+    
+    // Initialize
+    getAuthToken();
+  </script>
+</body>
+</html>
