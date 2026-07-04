@@ -1042,6 +1042,78 @@ app.post('/api/messages/received/mark-read', verifyUser, async (req, res) => {
   res.json({ success: true });
 });
 
+// Manual free-form reply, only valid within WhatsApp's 24-hour customer
+// service window (https://developers.facebook.com/docs/whatsapp/...).
+// We use a 22-hour cutoff here — a safety margin under Meta's real 24h
+// limit to absorb clock drift/latency between Meta's timestamp and this
+// check. The window is measured from the CONTACT'S most recent inbound
+// message (each new inbound message resets it), not from first contact.
+// Enforced server-side too, not just via a disabled button in the UI —
+// a stale button state or a direct API call shouldn't be able to bypass it.
+const REPLY_WINDOW_HOURS = 22;
+
+app.post('/api/messages/reply', verifyUser, async (req, res) => {
+  const { phone, message } = req.body || {};
+  if (!phone || !message?.trim()) {
+    return res.status(400).json({ error: 'phone and message are required' });
+  }
+
+  const { data: lastInbound, error: lastErr } = await supabase
+    .from('wb_inbound_messages')
+    .select('created_at')
+    .eq('user_id', req.user.id)
+    .eq('phone', phone)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+  if (lastErr || !lastInbound) {
+    return res.status(400).json({ error: 'No inbound message found for this contact' });
+  }
+
+  const hoursSince = (Date.now() - new Date(lastInbound.created_at).getTime()) / 3600000;
+  if (hoursSince > REPLY_WINDOW_HOURS) {
+    return res.status(403).json({
+      error: `Reply window has closed (${hoursSince.toFixed(1)}h since their last message, limit is ${REPLY_WINDOW_HOURS}h). Use an approved template instead.`
+    });
+  }
+
+  const { data: waAccounts } = await supabase
+    .from('wa_accounts')
+    .select('*')
+    .eq('user_id', req.user.id)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (!waAccounts?.length) {
+    return res.status(400).json({ error: 'No active WhatsApp account connected' });
+  }
+  const waAccount = waAccounts[0];
+
+  try {
+    const plainToken = decryptToken(waAccount.access_token);
+    const result = await fetch(
+      `https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${plainToken}` },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: phone,
+          type: 'text',
+          text: { body: message.trim() }
+        })
+      }
+    );
+    const responseData = await result.json();
+    if (!result.ok || !responseData.messages?.[0]?.id) {
+      return res.status(502).json({ error: responseData.error?.message || `Meta API ${result.status}` });
+    }
+    res.json({ success: true, wa_message_id: responseData.messages[0].id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ================================================================
 // 11. WA ACCOUNTS ROUTES
 // ================================================================
