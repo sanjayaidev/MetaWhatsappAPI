@@ -163,7 +163,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="page-header"><div class="page-title">Contacts</div><div class="page-sub">Import and manage your recipient list</div></div>
 <div class="card">
 <div class="card-header"><div class="card-title">📥 Import Contacts</div></div>
-<span class="form-label">Paste CSV (Name, Phone, Message — one per line)</span>
+<span class="form-label">Paste CSV (Name, Phone, Message — one per line, or add a header row like "name,phone,message,city" for extra fields)</span>
 <div style="display:flex;gap:10px;margin-bottom:8px;align-items:center;"><div style="flex:1;"><span class="form-label" style="margin-top:0;">Group Name</span><input type="text" id="pasteGroup" placeholder="e.g. Customers, VIP, Leads" style="margin-bottom:0;"></div></div>
 <textarea id="pasteInput" rows="4" placeholder="John Doe, 919876543210, Hi John!&#10;Jane Smith, 919876543211, Hello Jane!"></textarea>
 <div class="btn-row">
@@ -326,7 +326,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div>
 <div class="card-title" style="margin-bottom:10px;">03 Managing Contacts</div>
 <p>Import your recipient list before creating campaigns.</p>
-<p><strong>📋 Paste CSV</strong><br>Go to <strong>Contacts</strong> and paste contacts directly in the text area in this format: <code>Name, Phone, Message</code> — one per line.</p>
+<p><strong>📋 Paste CSV</strong><br>Go to <strong>Contacts</strong> and paste contacts directly in the text area: <code>Name, Phone, Message</code> — one per line. Or add a header row first (e.g. <code>name,phone,message,city</code>) to include extra columns as custom fields, same as file import.</p>
 <p><strong>📁 Import from CSV or Excel</strong><br>Upload a <code>.csv</code> or <code>.xlsx</code> file with columns: <code>name</code>, <code>phone</code>, <code>message</code>. Any other column (e.g. <code>email</code>, <code>order_id</code>, <code>city</code>) is kept as a custom field you can map to a template placeholder when creating a campaign.</p>
 <p><strong>💾 Save to Database</strong><br>After importing, click <strong>Save to DB</strong> to permanently store contacts. Unsaved contacts are lost on refresh.</p>
 <p><strong>🚫 Important:</strong> Only message contacts who have explicitly opted in. Sending unsolicited messages violates WhatsApp policy and can get your number banned.</p>
@@ -763,11 +763,52 @@ function updateCampaignContactCount() {
   document.getElementById('campaignGroupCountNum').textContent = count;
 }
 function removeContact(i) { contacts.splice(i, 1); renderContacts(); renderCampaignGroups(); updateCampaignContactCount(); }
+function looksLikeHeaderRow(parts) {
+  // A real data row's 2nd column is a phone number (mostly digits, 6+ digits
+  // after stripping non-digits). A header row's 2nd column won't be.
+  const digits = (parts[1] || '').replace(/\D/g, '');
+  return digits.length < 6;
+}
 function parsePaste() {
   const raw = document.getElementById('pasteInput').value; const group = document.getElementById('pasteGroup').value.trim() || 'Default';
-  const lines = raw.split(/\r?\n/); let added = 0;
-  for (const line of lines) { const parts = line.split(/[\t,]/); if (parts.length < 2) continue; let phone = parts[1].replace(/\D/g,''); if (phone.length === 10) phone = '91' + phone; if (phone.length >= 10 && !contacts.some(c => c.phone === phone)) { contacts.push({ name: parts[0].trim(), phone, message: parts[2]?.trim() || '', group_name: group }); added++; } }
-  renderContacts(); showToast(`Added ${added} contacts`); document.getElementById('pasteInput').value = '';
+  const lines = raw.split(/\r?\n/).filter(l => l.trim() !== '');
+  if (!lines.length) { showToast('Paste some contacts first', true); return; }
+  let added = 0, extraCols = new Set();
+
+  const firstParts = lines[0].split(/[\t,]/);
+  if (looksLikeHeaderRow(firstParts)) {
+    // Header row present: columns can be in any order, and any column beyond
+    // name/phone/message/group becomes a mappable custom field — same as CSV import.
+    const headers = firstParts.map(h => h.toLowerCase().trim());
+    for (let i = 1; i < lines.length; i++) {
+      const vals = lines[i].split(/[\t,]/);
+      const row = {}; headers.forEach((h, idx) => row[h] = vals[idx]?.trim() || '');
+      let phone = String(row.phone || row.mobile || '').replace(/\D/g, '');
+      if (phone.length === 10) phone = '91' + phone;
+      if (phone.length >= 10 && !contacts.some(c => c.phone === phone)) {
+        const custom_fields = extractCustomFields(row);
+        if (custom_fields) Object.keys(custom_fields).forEach(k => extraCols.add(k));
+        contacts.push({ name: row.name || phone, phone, message: row.message || '', group_name: row.group || group, custom_fields });
+        added++;
+      }
+    }
+  } else {
+    // Legacy fixed format: Name, Phone, Message — one per line, no header.
+    for (const line of lines) {
+      const parts = line.split(/[\t,]/); if (parts.length < 2) continue;
+      let phone = parts[1].replace(/\D/g, ''); if (phone.length === 10) phone = '91' + phone;
+      if (phone.length >= 10 && !contacts.some(c => c.phone === phone)) {
+        contacts.push({ name: parts[0].trim(), phone, message: parts[2]?.trim() || '', group_name: group, custom_fields: null });
+        added++;
+      }
+    }
+  }
+
+  renderContacts();
+  showToast(extraCols.size
+    ? `Added ${added} contacts (extra columns detected: ${[...extraCols].join(', ')})`
+    : `Added ${added} contacts`);
+  document.getElementById('pasteInput').value = '';
 }
 async function saveContactsToDb() { const res = await apiCall('/api/contacts', 'POST', { contacts }); if (res.success) { showToast('Contacts saved'); loadContacts(); } else showToast(res.error || 'Save failed', true); }
 function clearContacts() { if (!confirm('Clear all contacts?')) return; contacts = []; renderContacts(); }
