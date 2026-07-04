@@ -1472,7 +1472,71 @@ async function updateCampaignProgress(campaignId, sendSuccess) {
 app.use('/api/ai', aiChatRouter);
 
 // ================================================================
-// 16. START SERVER
+// 16. API KEY MANAGEMENT ROUTES
+// ================================================================
+const apiKeys = require('./src/api-keys');
+
+// Get all API keys for current user
+app.get('/api/api-keys', verifyUser, async (req, res) => {
+  try {
+    const keys = await apiKeys.listApiKeys(req.user.id);
+    res.json({ success: true, keys });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create a new API key
+app.post('/api/api-keys', verifyUser, async (req, res) => {
+  const { name, permissions, rateLimits, scopedPhoneNumberId, description, expiresAt } = req.body;
+  
+  if (!name) {
+    return res.status(400).json({ error: 'Key name is required' });
+  }
+  
+  try {
+    const result = await apiKeys.createApiKey({
+      userId: req.user.id,
+      name,
+      permissions: permissions || {},
+      rateLimits: rateLimits || { perMinute: 60, perHour: 1000, perDay: 10000 },
+      scopedPhoneNumberId: scopedPhoneNumberId || null,
+      description: description || null,
+      expiresAt: expiresAt || null
+    });
+    
+    res.json({ 
+      success: true, 
+      key: {
+        id: result.id,
+        name: result.name,
+        keyPrefix: result.keyPrefix,
+        apiKey: result.apiKey, // Only returned once!
+        createdAt: result.createdAt
+      },
+      warning: 'Store this API key securely. It will not be shown again.'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Revoke an API key
+app.delete('/api/api-keys/:id', verifyUser, async (req, res) => {
+  try {
+    const success = await apiKeys.revokeApiKey(req.params.id, req.user.id);
+    if (success) {
+      res.json({ success: true, message: 'API key revoked' });
+    } else {
+      res.status(404).json({ error: 'API key not found or already revoked' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================================
+// 17. START SERVER
 // ================================================================
 app.listen(PORT, () => {
   console.log(`✅ WaBlast server running on ${SELF_URL}`);
