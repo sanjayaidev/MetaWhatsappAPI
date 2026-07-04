@@ -1565,18 +1565,23 @@ async function processQueue() {
 }
 
 async function updateCampaignProgress(campaignId, sendSuccess) {
-  const { data: campaign } = await supabase
+  const { data: campaign, error: fetchErr } = await supabase
     .from('wb_campaigns')
     .select('queue_processed, queue_failed, queue_total, status')
     .eq('id', campaignId)
     .single();
+
+  if (fetchErr) {
+    console.error('[updateCampaignProgress] failed to fetch campaign', campaignId, fetchErr);
+    return;
+  }
   if (!campaign || campaign.status === 'paused') return;
 
   const newProcessed = (campaign.queue_processed || 0) + (sendSuccess ? 1 : 0);
   const newFailed = (campaign.queue_failed || 0) + (sendSuccess ? 0 : 1);
   const newStatus = (newProcessed + newFailed) >= campaign.queue_total ? 'completed' : campaign.status;
 
-  await supabase
+  const { error: updateErr } = await supabase
     .from('wb_campaigns')
     .update({
       queue_processed: newProcessed,
@@ -1588,6 +1593,15 @@ async function updateCampaignProgress(campaignId, sendSuccess) {
       updated_at: new Date().toISOString()
     })
     .eq('id', campaignId);
+
+  // This update was previously fire-and-forget with no error check, so a
+  // schema mismatch or RLS block here would silently no-op: WhatsApp sends
+  // would succeed (visible in the [queue] processed console logs) while
+  // queue_processed/sent_count on wb_campaigns never actually incremented —
+  // exactly the "dashboard stuck at 0/0 with no errors anywhere" symptom.
+  if (updateErr) {
+    console.error('[updateCampaignProgress] failed to update campaign', campaignId, updateErr);
+  }
 }
 
 // ================================================================
