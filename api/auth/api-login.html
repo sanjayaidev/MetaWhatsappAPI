@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WaBlast Pro | API Access</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=Syne:wght@800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'DM Sans', sans-serif; background: #080b10; color: #e8f0fb; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.auth-card { max-width: 420px; width: 100%; background: #0f1520; border: 1px solid #263550; border-radius: 24px; padding: 40px 36px; }
+.auth-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
+.auth-brand-icon { width: 42px; height: 42px; background: #7c5cff; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+.auth-brand-name { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; }
+.auth-brand-name span { color: #7c5cff; }
+.auth-card h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+.auth-card > p { font-size: 13px; color: #7a90b0; margin-bottom: 28px; }
+.auth-error { background: rgba(240,79,110,0.12); color: #f04f6e; border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 14px; display: none; }
+.fg { margin-bottom: 14px; }
+.fg label { display: block; font-size: 11px; font-weight: 600; color: #7a90b0; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 7px; }
+.fg input { width: 100%; background: #0c1018; border: 1px solid #263550; border-radius: 12px; padding: 12px 14px; color: #e8f0fb; font-family: 'DM Sans', sans-serif; font-size: 14px; }
+.fg input:focus { outline: none; border-color: #7c5cff; }
+.auth-btn { width: 100%; padding: 13px; background: #7c5cff; color: #fff; font-weight: 700; border: none; border-radius: 12px; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 14px; }
+.auth-btn:hover { background: #6a4ae8; }
+.auth-btn:disabled { background: #263550; color: #445570; cursor: not-allowed; }
+.footer-text { text-align: center; font-size: 12px; color: #445570; margin-top: 24px; }
+.footer-text a { color: #7c5cff; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="auth-card">
+  <div class="auth-brand">
+    <div class="auth-brand-icon">🔑</div>
+    <div class="auth-brand-name">Wa<span>Blast</span> <span style="font-size:13px;font-weight:400;color:#445570">API</span></div>
+  </div>
+  <h1>API Access</h1>
+  <p>Sign in with an account that has API access enabled</p>
+  <div class="auth-error" id="authError"></div>
+  <div class="fg"><label>Email</label><input type="email" id="authEmail" placeholder="you@example.com"></div>
+  <div class="fg"><label>Password</label><input type="password" id="authPass" placeholder="••••••••"></div>
+  <button class="auth-btn" id="authSubmitBtn">Sign In →</button>
+  <div class="footer-text">
+    Looking for the dashboard? <a href="/login.html">Regular sign in</a>
+  </div>
+</div>
+
+<script>
+function showAuthError(msg) {
+  const el = document.getElementById('authError');
+  el.textContent = msg; el.style.display = 'block';
+}
+
+async function handleApiAuth() {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPass').value;
+  if (!email || !password) { showAuthError('Please enter email and password'); return; }
+
+  const btn = document.getElementById('authSubmitBtn');
+  btn.textContent = 'Please wait…'; btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/auth/api-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.success) {
+      showAuthError(data.error || 'Sign in failed');
+    } else {
+      // Stored under a separate key from the dashboard's supabase_token,
+      // deliberately, so the two login flows never share a session.
+      localStorage.setItem('api_supabase_token', data.token);
+      window.location.href = '/api-keys.html';
+    }
+  } catch (err) {
+    showAuthError(err.message);
+  }
+  btn.textContent = 'Sign In →'; btn.disabled = false;
+}
+
+document.getElementById('authSubmitBtn').onclick = handleApiAuth;
+document.addEventListener('keydown', e => { if (e.key === 'Enter') handleApiAuth(); });
+</script>
+</body>
+</html>
