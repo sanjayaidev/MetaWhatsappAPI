@@ -194,9 +194,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
   <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="radio" name="campaignTiming" value="schedule" onchange="toggleCampaignScheduleInput()"> Schedule</label>
 </div>
 <input type="datetime-local" id="campaignScheduleAt" style="margin-top:10px;display:none;width:100%;" />
-<span class="form-label">Contact Group</span><select id="campaignGroupSelect" onchange="updateCampaignContactCount()"><option value="">All Contacts</option></select>
+<span class="form-label">Contact Group</span><select id="campaignGroupSelect" onchange="updateCampaignContactCount(); loadTemplatePlaceholders();"><option value="">All Contacts</option></select>
 <div id="campaignGroupCount" style="font-size:13px;font-weight:600;margin-top:8px;padding:8px;background:var(--surface2);border-radius:10px;"><span id="campaignGroupCountNum">0</span> contacts will receive this message</div>
-<div id="campaignPlaceholderNote" style="font-size:12px;color:var(--text2);margin-top:8px;">Use up to 4 placeholders per template. Map each placeholder below.</div>
+<div id="campaignPlaceholderNote" style="font-size:12px;color:var(--text2);margin-top:8px;">Map each placeholder in your template to a value below. Each row previews the actual value that will be sent, using a sample contact from the selected group.</div>
 <div id="campaignPlaceholderMapping" style="margin-top:12px;"></div>
 <div class="btn-row"><button class="btn btn-primary" onclick="createCampaign()">Create Campaign</button></div>
 </div>
@@ -327,7 +327,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="card-title" style="margin-bottom:10px;">03 Managing Contacts</div>
 <p>Import your recipient list before creating campaigns.</p>
 <p><strong>📋 Paste CSV</strong><br>Go to <strong>Contacts</strong> and paste contacts directly in the text area in this format: <code>Name, Phone, Message</code> — one per line.</p>
-<p><strong>📁 Import from CSV or Excel</strong><br>Upload a <code>.csv</code> or <code>.xlsx</code> file with columns: <code>name</code>, <code>phone</code>, <code>message</code>.</p>
+<p><strong>📁 Import from CSV or Excel</strong><br>Upload a <code>.csv</code> or <code>.xlsx</code> file with columns: <code>name</code>, <code>phone</code>, <code>message</code>. Any other column (e.g. <code>email</code>, <code>order_id</code>, <code>city</code>) is kept as a custom field you can map to a template placeholder when creating a campaign.</p>
 <p><strong>💾 Save to Database</strong><br>After importing, click <strong>Save to DB</strong> to permanently store contacts. Unsaved contacts are lost on refresh.</p>
 <p><strong>🚫 Important:</strong> Only message contacts who have explicitly opted in. Sending unsolicited messages violates WhatsApp policy and can get your number banned.</p>
 </div>
@@ -771,15 +771,40 @@ function parsePaste() {
 }
 async function saveContactsToDb() { const res = await apiCall('/api/contacts', 'POST', { contacts }); if (res.success) { showToast('Contacts saved'); loadContacts(); } else showToast(res.error || 'Save failed', true); }
 function clearContacts() { if (!confirm('Clear all contacts?')) return; contacts = []; renderContacts(); }
+const RESERVED_CONTACT_COLUMNS = new Set(['name', 'phone', 'mobile', 'message', 'group']);
+function extractCustomFields(row) {
+  const fields = {};
+  for (const key of Object.keys(row)) {
+    const k = key.toLowerCase().trim();
+    if (RESERVED_CONTACT_COLUMNS.has(k)) continue;
+    const val = row[key];
+    if (val !== undefined && val !== null && String(val).trim() !== '') {
+      fields[k] = String(val).trim();
+    }
+  }
+  return Object.keys(fields).length ? fields : null;
+}
 async function importFile() {
   const file = document.getElementById('importFile').files[0]; const group = document.getElementById('pasteGroup').value.trim() || 'Default';
   if (!file) { showToast('Select a file first', true); return; }
   const ext = file.name.split('.').pop().toLowerCase(); let data = [];
   if (ext === 'csv') { const text = await file.text(); const lines = text.split(/\r?\n/); const headers = lines[0].split(',').map(h => h.toLowerCase().trim()); for (let i = 1; i < lines.length; i++) { const vals = lines[i].split(','); if (!vals.join('').trim()) continue; const row = {}; headers.forEach((h, idx) => row[h] = vals[idx]?.trim() || ''); data.push(row); } }
   else { const buf = await file.arrayBuffer(); const wb = XLSX.read(buf); const ws = wb.Sheets[wb.SheetNames[0]]; data = XLSX.utils.sheet_to_json(ws); }
-  let added = 0;
-  for (const row of data) { let phone = String(row.phone || row.mobile || '').replace(/\D/g,''); if (phone.length === 10) phone = '91' + phone; if (phone.length >= 10 && !contacts.some(c => c.phone === phone)) { contacts.push({ name: row.name || phone, phone, message: row.message || '', group_name: row.group || group }); added++; } }
-  renderContacts(); showToast(`Imported ${added} contacts`);
+  let added = 0, extraCols = new Set();
+  for (const row of data) {
+    let phone = String(row.phone || row.mobile || '').replace(/\D/g,'');
+    if (phone.length === 10) phone = '91' + phone;
+    if (phone.length >= 10 && !contacts.some(c => c.phone === phone)) {
+      const custom_fields = extractCustomFields(row);
+      if (custom_fields) Object.keys(custom_fields).forEach(k => extraCols.add(k));
+      contacts.push({ name: row.name || phone, phone, message: row.message || '', group_name: row.group || group, custom_fields });
+      added++;
+    }
+  }
+  renderContacts();
+  showToast(extraCols.size
+    ? `Imported ${added} contacts (extra columns detected: ${[...extraCols].join(', ')} — save contacts, then map them as placeholders when creating a campaign)`
+    : `Imported ${added} contacts`);
 }
 
 async function loadCampaigns() {
@@ -793,32 +818,99 @@ async function loadCampaigns() {
   }
 }
 function getTemplatePlaceholders(tpl) {
-  if (!tpl) return [];
-  const defined = Array.isArray(tpl.placeholders) && tpl.placeholders.length
-    ? tpl.placeholders.map(p => parseInt(p.position, 10)).filter(Boolean)
-    : [];
+  if (!tpl) return { keys: [], isPositional: true };
   const body = tpl.body || '';
-  const found = [...new Set((body.match(/\{\{(\d+)\}\}/g) || []).map(m => parseInt(m.match(/\d+/)[0], 10)))].filter(Boolean);
-  const positions = defined.length ? defined : found;
-  return positions.sort((a, b) => a - b).slice(0, 4);
+  const rawKeys = [...new Set((body.match(/\{\{([^}]+)\}\}/g) || []).map(m => m.slice(2, -2).trim()))];
+  const isPositional = rawKeys.length > 0 && rawKeys.every(k => /^\d+$/.test(k));
+  const keys = isPositional ? rawKeys.map(k => parseInt(k, 10)).sort((a, b) => a - b) : rawKeys;
+  return { keys, isPositional };
 }
 
-function handleCampaignPlaceholderTypeChange(position, type) {
-  const custom = document.getElementById(`campCustom_${position}`);
-  if (!custom) return;
+function getAvailableCustomFields(groupName) {
+  const pool = groupName ? contacts.filter(c => (c.group_name?.trim() || 'Default') === groupName) : contacts;
+  const keys = new Set();
+  for (const c of pool) {
+    if (c.custom_fields && typeof c.custom_fields === 'object') {
+      Object.keys(c.custom_fields).forEach(k => keys.add(k));
+    }
+  }
+  return [...keys].sort();
+}
+
+function sampleContactFor(groupName) {
+  const pool = groupName ? contacts.filter(c => (c.group_name?.trim() || 'Default') === groupName) : contacts;
+  return pool[0] || contacts[0] || null;
+}
+
+function previewValueFor(type, field, customValue, sample) {
+  if (!sample && type !== 'custom') return '(no contacts yet)';
+  if (type === 'name') return sample?.name || '(empty)';
+  if (type === 'phone') return sample?.phone || '(empty)';
+  if (type === 'message') return sample?.message || '(empty — no Message value for this contact)';
+  if (type === 'field') return (field && sample?.custom_fields?.[field]) || `(empty — no "${field}" column for this contact)`;
+  if (type === 'custom') return customValue || '(enter a value)';
+  return '';
+}
+
+function updateCampaignPlaceholderPreview(key) {
+  const groupName = document.getElementById('campaignGroupSelect').value || null;
+  const sample = sampleContactFor(groupName);
+  const select = document.getElementById(`campMap_${key}`);
+  const custom = document.getElementById(`campCustom_${key}`);
+  const preview = document.getElementById(`campPreview_${key}`);
+  if (!select || !preview) return;
+  const type = select.value;
   custom.style.display = type === 'custom' ? 'block' : 'none';
+  const field = type === 'field' ? select.dataset.fieldChoice || '' : '';
+  preview.textContent = `Preview: "${previewValueFor(type, field, custom.value.trim(), sample)}"`;
+}
+
+function handleCampaignPlaceholderTypeChange(key, value) {
+  // value is either a plain type ("name","phone","message","custom") or "field:<fieldname>"
+  const select = document.getElementById(`campMap_${key}`);
+  if (value.startsWith('field:')) {
+    select.dataset.type = 'field';
+    select.dataset.fieldChoice = value.slice(6);
+  } else {
+    select.dataset.type = value;
+    select.dataset.fieldChoice = '';
+  }
+  updateCampaignPlaceholderPreview(key);
 }
 
 function loadTemplatePlaceholders() {
   const id = document.getElementById('campaignTemplateSelect').value;
   const tpl = templates.find(t => t.id === id);
-  const positions = getTemplatePlaceholders(tpl);
+  const { keys, isPositional } = getTemplatePlaceholders(tpl);
   const container = document.getElementById('campaignPlaceholderMapping');
-  if (!positions.length) {
-    container.innerHTML = '';
-    return;
+  if (!keys.length) { container.innerHTML = ''; return; }
+
+  const groupName = document.getElementById('campaignGroupSelect')?.value || null;
+  const customFields = getAvailableCustomFields(groupName);
+  const fieldOptions = customFields.map(f => `<option value="field:${escapeHtml(f)}">Custom Field: ${escapeHtml(f)}</option>`).join('');
+
+  container.innerHTML = keys.map(key => {
+    const label = isPositional ? `{{${key}}}` : `{{${key}}} (named)`;
+    return `
+      <div class="ph-row" style="flex-direction:column;align-items:stretch;gap:4px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span class="ph-tag">${label}</span>
+          <select id="campMap_${key}" data-type="name" data-field-choice="" style="flex:1;" onchange="handleCampaignPlaceholderTypeChange('${key}', this.value)">
+            <option value="name">Contact Name (from Name column)</option>
+            <option value="phone">Contact Phone (E.164 digits, e.g. 919876543210)</option>
+            <option value="message">Per-Contact Message (from CSV "message" column)</option>
+            ${fieldOptions}
+            <option value="custom">Fixed Custom Value (same text for every contact)</option>
+          </select>
+          <input type="text" id="campCustom_${key}" placeholder="Custom value" style="flex:1;display:none;" oninput="updateCampaignPlaceholderPreview('${key}')">
+        </div>
+        <div id="campPreview_${key}" style="font-size:11px;color:var(--text3);padding-left:2px;">Preview: "${escapeHtml(sampleContactFor(groupName)?.name || '(no contacts yet)')}"</div>
+      </div>`;
+  }).join('');
+
+  if (!customFields.length) {
+    container.insertAdjacentHTML('beforeend', `<div style="font-size:11px;color:var(--text3);margin-top:4px;">No custom columns detected in this group's contacts yet. Import a CSV with extra columns (e.g. "email", "order_id") to map them here.</div>`);
   }
-  container.innerHTML = positions.map(pos => `<div class="ph-row"><span class="ph-tag">{{${pos}}}</span><select id="campMap_${pos}" style="flex:1;" onchange="handleCampaignPlaceholderTypeChange(${pos}, this.value)"><option value="name">Contact Name</option><option value="phone">Contact Phone</option><option value="custom">Custom Value</option></select><input type="text" id="campCustom_${pos}" placeholder="Custom value" style="flex:1;display:none;"></div>`).join('');
 }
 
 function toggleCampaignScheduleInput() {
@@ -843,15 +935,23 @@ async function createCampaign() {
   if (!name || !templateId) { showToast('Name and template required', true); return; }
 
   const tpl = templates.find(t => t.id === templateId);
-  const positions = getTemplatePlaceholders(tpl);
+  const { keys } = getTemplatePlaceholders(tpl);
   const placeholder_mapping = {};
-  for (const pos of positions) {
-    const select = document.getElementById(`campMap_${pos}`);
+  for (const key of keys) {
+    const select = document.getElementById(`campMap_${key}`);
     if (!select) continue;
-    const type = select.value;
-    const custom = document.getElementById(`campCustom_${pos}`)?.value.trim() || '';
-    if (type === 'custom' && !custom) { showToast(`Custom value required for {{${pos}}}`, true); return; }
-    placeholder_mapping[pos] = { type, value: custom };
+    const type = select.dataset.type || select.value;
+    if (type === 'field') {
+      const field = select.dataset.fieldChoice || '';
+      if (!field) { showToast(`Choose a custom field for {{${key}}}`, true); return; }
+      placeholder_mapping[key] = { type: 'field', field };
+    } else if (type === 'custom') {
+      const custom = document.getElementById(`campCustom_${key}`)?.value.trim() || '';
+      if (!custom) { showToast(`Custom value required for {{${key}}}`, true); return; }
+      placeholder_mapping[key] = { type: 'custom', value: custom };
+    } else {
+      placeholder_mapping[key] = { type }; // 'name' | 'phone' | 'message'
+    }
   }
 
   if (timing === 'schedule' && !scheduleAt) { showToast('Schedule date/time is required for scheduled campaigns', true); return; }
