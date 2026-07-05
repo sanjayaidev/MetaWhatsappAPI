@@ -1351,9 +1351,12 @@ app.get('/api/billing/analytics', verifyUser, async (req, res) => {
   await Promise.all(Object.entries(byWaba).map(async ([wabaId, info]) => {
     try {
       const plainToken = decryptToken(info.access_token);
+      // NOTE: do NOT add a .phone_numbers(...) filter here — verified live
+      // against Meta's API that including it causes pricing_analytics to
+      // come back empty/zeroed for this WABA. The confirmed-working query
+      // omits phone number scoping entirely and relies on WABA-level totals.
       const fieldsExpr =
         `pricing_analytics.start(${startTs}).end(${endTs}).granularity(DAILY)` +
-        `.phone_numbers(${JSON.stringify(info.phoneNumberIds)})` +
         `.metric_types(["COST","VOLUME"])` +
         `.dimensions(["PRICING_CATEGORY","PRICING_TYPE"])`;
       const url = `https://graph.facebook.com/${META_API_VERSION}/${wabaId}?fields=${encodeURIComponent(fieldsExpr)}`;
