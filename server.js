@@ -92,21 +92,21 @@ const verifyUser = async (req, res, next) => {
 // Gate for anything under the "API" surface (key management routes, the
 // api-keys.html page). This is separate from and on top of per-key
 // permissions (can_send_messages, etc.) on wb_api_keys — it's an
-// account-level master switch stored on wb_profiles. A user can have a
-// perfectly valid dashboard login (or even a valid sk_live_ key) and still
-// be blocked here if api_access is false on their profile.
+// account-level master switch stored on wb_profiles.account_type. A user can
+// have a perfectly valid dashboard login (or even a valid sk_live_ key) and
+// still be blocked here if their account_type is 'regular' (dashboard-only).
 const requireApiAccess = async (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   const { data: profile, error } = await supabase
     .from('wb_profiles')
-    .select('api_access')
+    .select('account_type')
     .eq('id', req.user.id)
     .single();
   if (error) {
     console.error('[requireApiAccess] profile lookup failed', req.user.id, error);
     return res.status(500).json({ error: 'Could not verify API access' });
   }
-  if (!profile?.api_access) {
+  if (!['api', 'full'].includes(profile?.account_type)) {
     return res.status(403).json({ error: 'API access is not enabled for this account' });
   }
   next();
@@ -164,8 +164,9 @@ app.post('/api/admin/create-user', verifyAdmin, async (req, res) => {
 // Dedicated login for the API surface — deliberately separate from the
 // dashboard's session flow (public/login.html -> /dashboard.html). Same
 // underlying Supabase credentials, but this endpoint additionally requires
-// wb_profiles.api_access = true before it will hand back a usable token.
-// Valid dashboard credentials alone are NOT enough to pass this endpoint.
+// wb_profiles.account_type to be 'api' or 'full' before it will hand back a
+// usable token. Valid dashboard credentials alone are NOT enough to pass
+// this endpoint if the account is 'regular'.
 app.post('/api/auth/api-login', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
@@ -191,7 +192,7 @@ app.post('/api/auth/api-login', async (req, res) => {
     // Untouched service-role `supabase` client — guaranteed to bypass RLS.
     const { data: profile, error: profileErr } = await supabase
       .from('wb_profiles')
-      .select('api_access')
+      .select('account_type')
       .eq('id', data.user.id)
       .single();
 
@@ -199,7 +200,7 @@ app.post('/api/auth/api-login', async (req, res) => {
       console.error('[api-login] profile lookup failed', data.user.id, profileErr);
       return res.status(500).json({ error: 'Could not verify API access' });
     }
-    if (!profile?.api_access) {
+    if (!['api', 'full'].includes(profile?.account_type)) {
       // Valid credentials, but this account isn't allowed onto the API surface.
       return res.status(403).json({ error: 'API access is not enabled for this account' });
     }
@@ -240,7 +241,7 @@ app.get('/api/profile', verifyUser, async (req, res) => {
   // Try to get existing profile
   let { data, error } = await supabase
     .from('wb_profiles')
-    .select('id, email, full_name')
+    .select('id, email, full_name, account_type')
     .eq('id', req.user.id)
     .single();
   
@@ -252,6 +253,7 @@ app.get('/api/profile', verifyUser, async (req, res) => {
       full_name: req.user.user_metadata?.full_name || req.user.email?.split('@')[0] || 'User',
       credits: 50,
       free_credits_granted: true,
+      account_type: 'regular',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
