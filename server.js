@@ -1307,12 +1307,11 @@ app.post('/api/wa/manual/save', verifyUser, async (req, res) => {
 //   REGULAR               -> billable, business-initiated
 //   FREE_CUSTOMER_SERVICE  -> free, sent inside the 24h reply window
 //   FREE_ENTRY_POINT       -> free, sent inside a 72h ad/CTA click-in window
-// NOTE: field/parameter names here are taken directly from Meta's current
-// developer docs, but this endpoint has not been exercised against a live
-// WABA in this environment — verify the shape of one real response (e.g.
-// via the Graph API Explorer) before trusting these numbers for financial
-// decisions. If Meta changes the response shape, the parsing below may
-// need small adjustments.
+// NOTE: verified against a live WABA response on 2026-07-05. Meta's
+// pricing_analytics.data is an array of groups, each containing a nested
+// data_points[] array with the actual {start, end, cost, volume,
+// pricing_category, pricing_type} rows — this nesting isn't obvious from
+// Meta's docs prose, so don't "simplify" this back to a flat array later.
 app.get('/api/billing/analytics', verifyUser, async (req, res) => {
   const period = ['day', 'week', 'month'].includes(req.query.period) ? req.query.period : 'month';
   const now = new Date();
@@ -1364,16 +1363,21 @@ app.get('/api/billing/analytics', verifyUser, async (req, res) => {
         errors.push({ waba_id: wabaId, error: metaData.error?.message || `Meta API ${metaRes.status}` });
         return;
       }
-      const dataPoints = metaData.pricing_analytics?.data || [];
-      for (const dp of dataPoints) {
-        rows.push({
-          waba_id: wabaId,
-          start: dp.start, end: dp.end,
-          cost: Number(dp.cost) || 0,
-          volume: Number(dp.volume) || 0,
-          pricing_category: dp.pricing_category || 'UNKNOWN',
-          pricing_type: dp.pricing_type || 'UNKNOWN'
-        });
+      // pricing_analytics.data is an array of groups, each wrapping the
+      // actual rows in a nested data_points[] array — confirmed against a
+      // live response; this is NOT documented explicitly by Meta's docs text.
+      const groups = metaData.pricing_analytics?.data || [];
+      for (const group of groups) {
+        for (const dp of (group.data_points || [])) {
+          rows.push({
+            waba_id: wabaId,
+            start: dp.start, end: dp.end,
+            cost: Number(dp.cost) || 0,
+            volume: Number(dp.volume) || 0,
+            pricing_category: dp.pricing_category || 'UNKNOWN',
+            pricing_type: dp.pricing_type || 'UNKNOWN'
+          });
+        }
       }
     } catch (err) {
       errors.push({ waba_id: wabaId, error: err.message });
