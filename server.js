@@ -171,11 +171,24 @@ app.post('/api/auth/api-login', async (req, res) => {
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    // IMPORTANT: sign in on a throwaway client, never on the shared `supabase`
+    // (service-role) instance. Even with persistSession/autoRefreshToken off,
+    // a successful signInWithPassword on the shared client updates its
+    // in-memory session, which then gets used as the Authorization header for
+    // ALL subsequent .from() calls on that same instance — silently turning
+    // the "service role" client into a request scoped to whichever user just
+    // logged in. That made the profile lookup below run under the user's own
+    // (RLS-restricted) session instead of service_role, returning 0 rows
+    // (PGRST116) even though the row plainly existed.
+    const authClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false }
+    });
+    const { data, error } = await authClient.auth.signInWithPassword({ email, password });
     if (error || !data?.session) {
       return res.status(401).json({ error: error?.message || 'Invalid credentials' });
     }
 
+    // Untouched service-role `supabase` client — guaranteed to bypass RLS.
     const { data: profile, error: profileErr } = await supabase
       .from('wb_profiles')
       .select('api_access')
