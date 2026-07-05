@@ -112,12 +112,24 @@ async function verifyApiKey(apiKey) {
 
 /**
  * Check rate limit for an API key.
- * NOTE: this does a read-then-write increment per bucket instead of an atomic
- * SQL `ON CONFLICT ... SET count = count + 1`, since that's not expressible
- * through the Supabase REST client. Under very high concurrent request bursts
- * from the *same* key this can under-count slightly — acceptable for
- * per-customer API rate limiting, but worth knowing if you ever need
- * hard, exact limits.
+ *
+ * IMPORTANT: only ever writes ONE row per (api_key_id, minute_bucket). Hour
+ * and day counts are computed by summing minute-level rows that fall in that
+ * hour/day, rather than maintaining separate hour/day rows — the table has
+ * independent unique constraints per bucket type, and since many minutes
+ * share the same hour_bucket/day_bucket value, writing a distinct row per
+ * granularity is guaranteed to collide (this was the cause of the
+ * "duplicate key value violates ... hour_bucket_key" error). Run this once
+ * in Supabase SQL editor before using this version:
+ *   ALTER TABLE wb_api_key_usage DROP CONSTRAINT IF EXISTS wb_api_key_usage_api_key_id_hour_bucket_key;
+ *   ALTER TABLE wb_api_key_usage DROP CONSTRAINT IF EXISTS wb_api_key_usage_api_key_id_day_bucket_key;
+ *
+ * Also note: this does a read-then-write increment instead of an atomic SQL
+ * `ON CONFLICT ... SET count = count + 1`, since that's not directly
+ * expressible through the Supabase REST client. Under a burst of many
+ * simultaneous requests from the *same* key this can under-count slightly —
+ * acceptable for per-customer API rate limiting, not for hard exact limits.
+ *
  * @param {string} apiKeyId - The API key ID
  * @param {number} perMinute - Max requests per minute
  * @param {number} perHour - Max requests per hour
@@ -130,24 +142,38 @@ async function checkRateLimit(apiKeyId, perMinute, perHour, perDay) {
   const hourBucket = new Date(now.setMinutes(0, 0, 0));
   const dayBucket = new Date(now.setHours(0, 0, 0, 0));
   const minuteIso = minuteBucket.toISOString();
-  const hourIso = hourBucket.toISOString();
-  const dayIso = dayBucket.toISOString();
+  const hourStartIso = hourBucket.toISOString();
+  const hourEndIso = new Date(hourBucket.getTime() + 3600000).toISOString();
+  const dayStartIso = dayBucket.toISOString();
+  const dayEndIso = new Date(dayBucket.getTime() + 86400000).toISOString();
 
   try {
-    const sumFor = async (column, value) => {
+    const sumInRange = async (gteVal, ltVal) => {
       const { data, error } = await supabase
         .from('wb_api_key_usage')
         .select('request_count')
         .eq('api_key_id', apiKeyId)
-        .eq(column, value);
+        .gte('minute_bucket', gteVal)
+        .lt('minute_bucket', ltVal);
       if (error) throw error;
       return (data || []).reduce((sum, row) => sum + (row.request_count || 0), 0);
     };
 
+    const getMinuteCount = async () => {
+      const { data, error } = await supabase
+        .from('wb_api_key_usage')
+        .select('request_count')
+        .eq('api_key_id', apiKeyId)
+        .eq('minute_bucket', minuteIso)
+        .maybeSingle();
+      if (error) throw error;
+      return data?.request_count || 0;
+    };
+
     const [minuteCount, hourCount, dayCount] = await Promise.all([
-      sumFor('minute_bucket', minuteIso),
-      sumFor('hour_bucket', hourIso),
-      sumFor('day_bucket', dayIso)
+      getMinuteCount(),
+      sumInRange(hourStartIso, hourEndIso),
+      sumInRange(dayStartIso, dayEndIso)
     ]);
 
     if (minuteCount >= perMinute) {
@@ -160,31 +186,21 @@ async function checkRateLimit(apiKeyId, perMinute, perHour, perDay) {
       return { allowed: false, remaining: 0, resetAt: new Date(dayBucket.getTime() + 86400000), reason: 'day' };
     }
 
-    // Increment usage counters (upsert per bucket type, matching the three
-    // original unique constraints: (api_key_id, minute_bucket),
-    // (api_key_id, hour_bucket), (api_key_id, day_bucket))
-    const upsertBucket = async (conflictCols, currentCount) => {
-      const { error } = await supabase
-        .from('wb_api_key_usage')
-        .upsert(
-          {
-            api_key_id: apiKeyId,
-            minute_bucket: minuteIso,
-            hour_bucket: hourIso,
-            day_bucket: dayIso,
-            request_count: currentCount + 1,
-            updated_at: new Date().toISOString()
-          },
-          { onConflict: conflictCols }
-        );
-      if (error) throw error;
-    };
-
-    await Promise.all([
-      upsertBucket('api_key_id,minute_bucket', minuteCount),
-      upsertBucket('api_key_id,hour_bucket', hourCount),
-      upsertBucket('api_key_id,day_bucket', dayCount)
-    ]);
+    // Increment the single minute-level row (this is the only row we ever write)
+    const { error: upsertErr } = await supabase
+      .from('wb_api_key_usage')
+      .upsert(
+        {
+          api_key_id: apiKeyId,
+          minute_bucket: minuteIso,
+          hour_bucket: hourStartIso,
+          day_bucket: dayStartIso,
+          request_count: minuteCount + 1,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: 'api_key_id,minute_bucket' }
+      );
+    if (upsertErr) throw upsertErr;
 
     const remaining = Math.min(
       perMinute - minuteCount - 1,
