@@ -564,6 +564,14 @@ async function loadDashboard() {
   document.getElementById('app').style.display = 'block';
   const profileRes = await apiCall('/api/profile');
   if (profileRes.success) {
+    // Gate: 'api' accounts (API-only tier) don't get the full dashboard —
+    // send them to the trimmed-down view instead. Checked here (rather than
+    // before the fetch) so we reuse the profile call loadDashboard already
+    // makes instead of firing a second one.
+    if (profileRes.user.account_type === 'api') {
+      window.location.href = '/api-dashboard.html';
+      return;
+    }
     currentUser = profileRes.user;
     const name = profileRes.user.full_name || profileRes.user.email?.split('@')[0] || 'User';
     const email = profileRes.user.email || '';
