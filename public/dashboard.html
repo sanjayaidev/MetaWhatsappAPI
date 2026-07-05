@@ -112,6 +112,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="nav-section-label">Account</div>
 <div class="nav-item" data-tab="settings"><span class="nav-icon">⚙️</span> Settings</div>
 <div class="nav-item" data-tab="account"><span class="nav-icon">👤</span> Account</div>
+<div class="nav-item" data-tab="billing"><span class="nav-icon">💳</span> Billing</div>
 <div class="nav-item" data-tab="about"><span class="nav-icon">ℹ️</span> About</div>
 </div>
 <div class="sidebar-bottom">
@@ -303,9 +304,62 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 </div>
 </div>
 <div class="card">
-<div class="card-header"><div class="card-title">📞 Connected Numbers</div><button class="btn btn-primary btn-sm" onclick="openWaConnectModal()">➕ Connect Number</button></div>
+<div class="card-header"><div class="card-title">📞 Connected Numbers</div><div style="display:flex;gap:8px;"><button id="refreshWaQualityBtn" class="btn btn-secondary btn-sm" onclick="refreshWaQuality()" title="Get latest quality rating from Meta">🔄 Refresh</button><button class="btn btn-primary btn-sm" onclick="openWaConnectModal()">➕ Connect Number</button></div></div>
 <div id="waAccountsList" style="margin-top:8px;"><div class="empty-state"><div class="empty-icon">📱</div><p>No numbers connected</p></div></div>
 </div>
+</div>
+</div>
+<!-- ══ BILLING ══ -->
+<div class="tab-panel" id="tab-billing">
+<div class="page-header"><div class="page-title">Billing</div><div class="page-sub">Real per-message charges from Meta, not an estimate</div></div>
+<div class="card">
+<div class="card-header">
+<div class="card-title">💳 Meta Charges</div>
+<button class="btn btn-secondary btn-sm" onclick="loadBillingAnalytics()">↻ Refresh</button>
+</div>
+<div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px;">
+<div>
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Period</label>
+<div style="display:flex;gap:6px;">
+<button class="btn btn-sm billing-period-btn" data-period="day" onclick="setBillingPeriod('day')">Day</button>
+<button class="btn btn-sm billing-period-btn" data-period="week" onclick="setBillingPeriod('week')">Week</button>
+<button class="btn btn-sm billing-period-btn" data-period="month" onclick="setBillingPeriod('month')">Month</button>
+</div>
+</div>
+<div>
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Message Type</label>
+<select id="billingCategoryFilter" onchange="renderBillingAnalytics()" style="min-width:160px;">
+<option value="all">All types</option>
+<option value="MARKETING">Marketing</option>
+<option value="UTILITY">Utility</option>
+<option value="AUTHENTICATION">Authentication</option>
+<option value="AUTHENTICATION_INTERNATIONAL">Authentication (Intl)</option>
+<option value="SERVICE">Service</option>
+<option value="REFERRAL_CONVERSION">Referral Conversion</option>
+</select>
+</div>
+<div>
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Free / Paid</label>
+<select id="billingFreePaidFilter" onchange="renderBillingAnalytics()" style="min-width:130px;">
+<option value="all">All</option>
+<option value="free">Free only</option>
+<option value="paid">Paid only</option>
+</select>
+</div>
+<div>
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Window</label>
+<select id="billingWindowFilter" onchange="renderBillingAnalytics()" style="min-width:220px;">
+<option value="all">All windows</option>
+<option value="REGULAR">Business-initiated (billed)</option>
+<option value="FREE_CUSTOMER_SERVICE">Free — 24h reply window</option>
+<option value="FREE_ENTRY_POINT">Free — 72h entry-point window</option>
+</select>
+</div>
+</div>
+<div id="billingSummaryCards" class="limit-grid" style="margin-bottom:16px;"></div>
+<div id="billingErrorBox" style="display:none;background:rgba(240,79,110,0.12);color:var(--red);border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:14px;"></div>
+<div id="billingBreakdown"><div class="empty-state"><div class="empty-icon">💳</div><p>Loading…</p></div></div>
+<div style="margin-top:12px;font-size:11px;color:var(--text2);">Amounts are in your WhatsApp Business Account's billing currency, straight from Meta's pricing_analytics API. Not affiliated with or verified against your actual invoice — cross-check with Meta Business Suite for billing decisions.</div>
 </div>
 </div>
 <div class="tab-panel" id="tab-about">
@@ -523,6 +577,7 @@ async function loadDashboard() {
   await loadTemplates();
   await fetchApprovedTemplates();
   await Promise.all([ loadDashboardStats(), loadContacts(), loadCampaigns(), loadSettings(), loadWaAccounts() ]);
+  refreshWaQuality();
   refreshUnreadBadge();
   setInterval(refreshUnreadBadge, 30000);
 }
@@ -1110,6 +1165,128 @@ async function saveAutoReplySettings() { const res = await apiCall('/api/setting
 
 async function updateProfile() { const res = await apiCall('/api/profile', 'PUT', { full_name: document.getElementById('profileName').value, email: document.getElementById('profileEmail').value }); if (res.success) { showToast('Profile updated'); document.getElementById('userName').textContent = document.getElementById('profileName').value; } else showToast(res.error || 'Update failed', true); }
 async function loadWaAccounts() { const res = await apiCall('/api/wa/accounts'); renderWaAccounts(res.accounts || []); }
+
+// ── Billing tab ──────────────────────────────────────────────────────
+let billingPeriod = 'month';
+let billingRows = []; // raw rows from /api/billing/analytics
+
+function setBillingPeriod(period) {
+  billingPeriod = period;
+  document.querySelectorAll('.billing-period-btn').forEach(b => {
+    b.classList.toggle('btn-primary', b.dataset.period === period);
+    b.classList.toggle('btn-secondary', b.dataset.period !== period);
+  });
+  loadBillingAnalytics();
+}
+
+async function loadBillingAnalytics() {
+  const box = document.getElementById('billingBreakdown');
+  const errBox = document.getElementById('billingErrorBox');
+  box.innerHTML = '<div class="empty-state"><div class="empty-icon">💳</div><p>Loading…</p></div>';
+  errBox.style.display = 'none';
+
+  const res = await apiCall(`/api/billing/analytics?period=${billingPeriod}`);
+  if (!res.success) {
+    errBox.textContent = res.error || 'Failed to load billing data';
+    errBox.style.display = 'block';
+    box.innerHTML = '';
+    return;
+  }
+  billingRows = res.rows || [];
+  if (res.errors?.length) {
+    errBox.textContent = res.errors.map(e => e.error).join(' · ');
+    errBox.style.display = 'block';
+  }
+  renderBillingAnalytics();
+}
+
+// pricing_type -> human label + whether it's free, per Meta's pricing_analytics
+// docs: REGULAR is billable/business-initiated; FREE_CUSTOMER_SERVICE is a
+// free reply inside the 24h service window; FREE_ENTRY_POINT is free inside
+// the 72h ad/CTA click-in window.
+const PRICING_TYPE_LABELS = {
+  REGULAR: 'Business-initiated (billed)',
+  FREE_CUSTOMER_SERVICE: 'Free — 24h reply window',
+  FREE_ENTRY_POINT: 'Free — 72h entry-point window',
+  UNKNOWN: 'Unknown'
+};
+
+function renderBillingAnalytics() {
+  const categoryFilter = document.getElementById('billingCategoryFilter').value;
+  const freePaidFilter = document.getElementById('billingFreePaidFilter').value;
+  const windowFilter = document.getElementById('billingWindowFilter').value;
+
+  const filtered = billingRows.filter(r => {
+    if (categoryFilter !== 'all' && r.pricing_category !== categoryFilter) return false;
+    if (windowFilter !== 'all' && r.pricing_type !== windowFilter) return false;
+    const isFree = r.pricing_type !== 'REGULAR';
+    if (freePaidFilter === 'free' && !isFree) return false;
+    if (freePaidFilter === 'paid' && isFree) return false;
+    return true;
+  });
+
+  const totalCost = filtered.reduce((s, r) => s + r.cost, 0);
+  const totalVolume = filtered.reduce((s, r) => s + r.volume, 0);
+  const freeVolume = filtered.filter(r => r.pricing_type !== 'REGULAR').reduce((s, r) => s + r.volume, 0);
+  const paidVolume = filtered.filter(r => r.pricing_type === 'REGULAR').reduce((s, r) => s + r.volume, 0);
+
+  document.getElementById('billingSummaryCards').innerHTML = `
+    <div class="limit-card"><label>Total Cost</label><div style="font-size:20px;font-weight:700;">${totalCost.toFixed(4)}</div></div>
+    <div class="limit-card"><label>Total Messages</label><div style="font-size:20px;font-weight:700;">${totalVolume}</div></div>
+    <div class="limit-card"><label>Free Messages</label><div style="font-size:20px;font-weight:700;color:var(--green);">${freeVolume}</div></div>
+    <div class="limit-card"><label>Paid Messages</label><div style="font-size:20px;font-weight:700;color:var(--red);">${paidVolume}</div></div>
+  `;
+
+  // Group by category + pricing_type for the breakdown table
+  const groups = {};
+  for (const r of filtered) {
+    const key = `${r.pricing_category}::${r.pricing_type}`;
+    if (!groups[key]) groups[key] = { category: r.pricing_category, pricing_type: r.pricing_type, cost: 0, volume: 0 };
+    groups[key].cost += r.cost;
+    groups[key].volume += r.volume;
+  }
+  const groupList = Object.values(groups).sort((a, b) => b.cost - a.cost);
+
+  const box = document.getElementById('billingBreakdown');
+  if (!groupList.length) {
+    box.innerHTML = '<div class="empty-state"><div class="empty-icon">💳</div><p>No messages match these filters for this period</p></div>';
+    return;
+  }
+  const maxCost = Math.max(...groupList.map(g => g.cost), 0.0001);
+  box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Type</th><th>Window</th><th>Messages</th><th>Cost</th><th></th></tr></thead><tbody>${groupList.map(g => `
+    <tr>
+      <td>${escapeHtml(g.category)}</td>
+      <td>${escapeHtml(PRICING_TYPE_LABELS[g.pricing_type] || g.pricing_type)}</td>
+      <td>${g.volume}</td>
+      <td>${g.cost.toFixed(4)}</td>
+      <td style="min-width:120px;"><div style="background:var(--bg2);border-radius:4px;height:8px;overflow:hidden;"><div style="background:${g.pricing_type === 'REGULAR' ? 'var(--red)' : 'var(--green)'};height:100%;width:${(g.cost / maxCost) * 100}%;"></div></div></td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+
+// Mirrors the templates tab's "Refresh Meta" pattern: pulls current
+// quality_rating for every connected number straight from Meta (quality
+// drifts over time based on recent sending behavior — the last-saved
+// value can go stale), rather than only showing whatever was cached
+// locally when the number was first connected.
+async function refreshWaQuality() {
+  const btn = document.getElementById('refreshWaQualityBtn');
+  const originalText = btn?.textContent || '🔄 Refresh';
+  if (btn) { btn.textContent = '⏳ Refreshing...'; btn.disabled = true; }
+
+  const res = await apiCall('/api/wa/accounts/refresh-quality', 'POST');
+  if (res.success) {
+    renderWaAccounts(res.accounts || []);
+    if (res.failed?.length) {
+      showToast(`Updated ${res.updated}, ${res.failed.length} failed`, true);
+    } else if (res.updated > 0) {
+      showToast(`✓ Quality ratings refreshed`);
+    }
+  } else {
+    showToast(res.error || 'Failed to refresh quality ratings', true);
+  }
+
+  if (btn) { btn.textContent = originalText; btn.disabled = false; }
+}
 function renderWaAccounts(accounts) { const div = document.getElementById('waAccountsList'); if (!accounts.length) { div.innerHTML = '<div class="empty-state"><div class="empty-icon"></div><p>No numbers connected</p></div>'; return; } div.innerHTML = accounts.map(a => `<div class="data-row"><div><div class="data-row-title">${escapeHtml(a.display_name || a.phone_number)}</div><div class="data-row-sub" style="font-family:'DM Mono',monospace;">${a.phone_number}</div><div style="margin-top:4px;display:flex;gap:6px;"><span class="badge badge-green">Quality: ${a.quality_rating||'N/A'}</span>${a.is_active ? '<span class="badge badge-green">● Active</span>' : ''}</div></div><button class="btn btn-danger btn-xs" onclick="disconnectNumber('${a.id}')">Disconnect</button></div>`).join(''); if (accounts.length > 0) { const acc = accounts[0]; document.getElementById('waNumberDisplay').textContent = acc.phone_number || '—'; document.getElementById('waStatus').className = 'badge badge-green'; document.getElementById('waStatus').textContent = '● Connected'; document.getElementById('waQuality').innerHTML = `<span class="badge badge-green">Quality: ${acc.quality_rating || 'N/A'}</span>`; } }
 async function disconnectNumber(id) { if (!confirm('Disconnect this number?')) return; const res = await apiCall(`/api/wa/accounts/${id}`, 'DELETE'); if (res.success) { showToast('Disconnected'); loadWaAccounts(); } else showToast(res.error || 'Failed', true); }
 
@@ -1121,7 +1298,7 @@ function waSelectConnNumber(i) { document.querySelectorAll('#waConnNumberList .d
 async function waSaveNumber() { const errEl = document.getElementById('waConnError2'); const btn = document.getElementById('waConnSaveBtn'); errEl.textContent = ''; if (!waConnSelectedNumber) { errEl.textContent = 'Select a number first.'; return; } btn.disabled = true; btn.textContent = 'Connecting…'; try { const res = await fetch(`${API_BASE_URL}/api/wa/manual/save`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` }, body: JSON.stringify({ waba_id: document.getElementById('waConnWabaId').value.trim(), phone_number_id: waConnSelectedNumber.phone_number_id, access_token: document.getElementById('waConnToken').value.trim() }) }); const data = await res.json(); if (!data.success) { errEl.textContent = data.error || 'Failed to save.'; btn.disabled = false; btn.textContent = 'Connect This Number'; return; } showToast(`✅ ${data.phone_number} connected!`); closeWaConnectModal(); await loadWaAccounts(); } catch (err) { errEl.textContent = 'Network error: ' + err.message; } finally { btn.disabled = false; btn.textContent = 'Connect This Number'; } }
 function waResetConnectModal() { document.getElementById('waConnectStep2').style.display = 'none'; document.getElementById('waConnectStep1').style.display = 'block'; document.getElementById('waConnVerifyBtn').disabled = false; document.getElementById('waConnVerifyBtn').textContent = 'Find My Numbers →'; waConnSelectedNumber = null; waConnNumbersCache = []; }
 
-async function switchTab(tabName) { document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); const panel = document.getElementById(`tab-${tabName}`); const nav = document.querySelector(`[data-tab="${tabName}"]`); if (panel) panel.classList.add('active'); if (nav) nav.classList.add('active'); if (window.innerWidth <= 860) document.getElementById('sidebar').classList.remove('open'); if (tabName === 'send') loadActiveCampaign(); if (tabName === 'templates') renderTemplates(); if (tabName === 'contacts') renderContacts(); if (tabName === 'campaigns') { loadCampaigns(); loadTemplatesForCampaignSelect(); } if (tabName === 'logs') loadCampaigns(); if (tabName === 'received') { loadReceivedMessages(); startReceivedPolling(); } else stopReceivedPolling(); if (tabName === 'settings') loadSettings(); if (tabName === 'account') loadWaAccounts(); }
+async function switchTab(tabName) { document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); const panel = document.getElementById(`tab-${tabName}`); const nav = document.querySelector(`[data-tab="${tabName}"]`); if (panel) panel.classList.add('active'); if (nav) nav.classList.add('active'); if (window.innerWidth <= 860) document.getElementById('sidebar').classList.remove('open'); if (tabName === 'send') loadActiveCampaign(); if (tabName === 'templates') renderTemplates(); if (tabName === 'contacts') renderContacts(); if (tabName === 'campaigns') { loadCampaigns(); loadTemplatesForCampaignSelect(); } if (tabName === 'logs') loadCampaigns(); if (tabName === 'received') { loadReceivedMessages(); startReceivedPolling(); } else stopReceivedPolling(); if (tabName === 'settings') loadSettings(); if (tabName === 'account') loadWaAccounts(); if (tabName === 'billing') setBillingPeriod(billingPeriod); }
 
 document.querySelectorAll('.nav-item').forEach(n => n.addEventListener('click', () => switchTab(n.dataset.tab)));
 // Catch OAuth hash if redirected from Google/FB (e.g. #access_token=...)
@@ -1137,7 +1314,7 @@ if (window.location.hash && window.location.hash.includes('access_token')) {
 const savedToken = localStorage.getItem('supabase_token');
 if (savedToken) { authToken = savedToken; loadDashboard(); } else { window.location.href = '/login.html'; }
 
-window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.toggleCampaignScheduleInput = toggleCampaignScheduleInput; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates; window.updateCampaignContactCount = updateCampaignContactCount; window.renderCampaignGroups = renderCampaignGroups; window.openReplyModal = openReplyModal; window.sendReply = sendReply;
+window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.toggleCampaignScheduleInput = toggleCampaignScheduleInput; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates; window.updateCampaignContactCount = updateCampaignContactCount; window.renderCampaignGroups = renderCampaignGroups; window.openReplyModal = openReplyModal; window.sendReply = sendReply; window.refreshWaQuality = refreshWaQuality; window.setBillingPeriod = setBillingPeriod; window.loadBillingAnalytics = loadBillingAnalytics; window.renderBillingAnalytics = renderBillingAnalytics;
 </script>
 </body>
 </html>
