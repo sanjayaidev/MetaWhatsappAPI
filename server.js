@@ -531,11 +531,20 @@ app.post('/api/templates/meta/sync', verifyUser, async (req, res) => {
       );
     }
 
-    await Promise.all(syncPromises);
+    const syncResults = await Promise.all(syncPromises);
+    const syncErrors = syncResults.filter(r => r?.error).map(r => r.error);
+    if (syncErrors.length) {
+      // Supabase query builder promises RESOLVE (not reject) even on failure,
+      // so Promise.all alone would never surface these — every failed
+      // upsert/delete here would silently report "synced: true" while some
+      // templates quietly kept a stale local status.
+      console.error('[templates/sync] some sync operations failed:', syncErrors);
+    }
     res.json({
       success: true,
       templates: approvedTemplates,
       synced: true,
+      sync_errors: syncErrors.length || undefined,
       removed: staleLocal.map(l => l.name)
     });
   } catch (err) {
@@ -865,6 +874,20 @@ app.post('/api/campaigns/:id/pause', verifyUser, requirePermission('canManageCam
 });
 
 app.post('/api/campaigns/:id/stop', verifyUser, requirePermission('canManageCampaigns'), async (req, res) => {
+  // Ownership check FIRST. Without this, any authenticated user who knows
+  // (or guesses/enumerates) another user's campaign UUID could delete that
+  // other user's pending queue rows below, since wb_send_queue.delete()
+  // was previously filtered only by campaign_id — not by user_id — because
+  // the service-role Supabase client bypasses RLS entirely and relies on
+  // the app code to enforce ownership itself.
+  const { data: owned, error: ownErr } = await supabase
+    .from('wb_campaigns')
+    .select('id')
+    .eq('id', req.params.id)
+    .eq('user_id', req.user.id)
+    .single();
+  if (ownErr || !owned) return res.status(404).json({ error: 'Campaign not found' });
+
   // Count pending items for refund
   const { count: pendingCount } = await supabase
     .from('wb_send_queue')
@@ -886,6 +909,16 @@ app.post('/api/campaigns/:id/stop', verifyUser, requirePermission('canManageCamp
 });
 
 app.delete('/api/campaigns/:id', verifyUser, requirePermission('canManageCampaigns'), async (req, res) => {
+  // Same ownership-first fix as /stop above — wb_send_queue and
+  // wb_campaign_logs deletes were previously scoped by campaign_id alone.
+  const { data: owned, error: ownErr } = await supabase
+    .from('wb_campaigns')
+    .select('id')
+    .eq('id', req.params.id)
+    .eq('user_id', req.user.id)
+    .single();
+  if (ownErr || !owned) return res.status(404).json({ error: 'Campaign not found' });
+
   await supabase.from('wb_send_queue').delete().eq('campaign_id', req.params.id);
   await supabase.from('wb_campaign_logs').delete().eq('campaign_id', req.params.id);
   const { error } = await supabase
@@ -1331,14 +1364,30 @@ app.post('/webhook', async (req, res) => {
         const newStatus = value.event === 'APPROVED' ? 'APPROVED' 
                         : value.event === 'REJECTED' ? 'REJECTED' 
                         : 'PENDING';
-        await supabase
-          .from('wb_templates')
-          .update({ 
-            status: newStatus, 
-            meta_error: value.reason || null,
-            updated_at: new Date().toISOString() 
-          })
-          .or(`meta_template_id.eq.${value.message_template_id || 'null'},name.eq.${value.message_template_name || 'null'}`);
+        // entry.id is the WABA this event belongs to. Without resolving it
+        // to the owning user_id, matching by meta_template_id/name alone
+        // could update a DIFFERENT user's template if they happened to pick
+        // the same template name (names aren't globally unique, only unique
+        // per-WABA) — a cross-tenant data-integrity bug, since the service
+        // role client bypasses RLS and nothing else scoped this query.
+        const { data: owningAccount } = await supabase
+          .from('wa_accounts')
+          .select('user_id')
+          .eq('waba_id', entry.id)
+          .single();
+        if (owningAccount?.user_id) {
+          await supabase
+            .from('wb_templates')
+            .update({ 
+              status: newStatus, 
+              meta_error: value.reason || null,
+              updated_at: new Date().toISOString() 
+            })
+            .eq('user_id', owningAccount.user_id)
+            .or(`meta_template_id.eq.${value.message_template_id || 'null'},name.eq.${value.message_template_name || 'null'}`);
+        } else {
+          console.warn('[webhook] template_status_update: no wa_account found for WABA', entry.id);
+        }
       }
     }
   }
