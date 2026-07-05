@@ -1,0 +1,1111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>WaBlast Pro | Dashboard</title>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&family=Syne:wght@700;800;900&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+--bg: #080b10; --bg2: #0c1018; --surface: #0f1520; --surface2: #141c2a; --surface3: #1a2335;
+--border: #1e2d42; --border2: #263550; --text: #e8f0fb; --text2: #7a90b0; --text3: #445570;
+--green: #22d172; --green-dim: rgba(34,209,114,0.10); --amber: #f5a623; --amber-dim: rgba(245,166,35,0.12);
+--red: #f04f6e; --red-dim: rgba(240,79,110,0.12); --blue: #3d8ef5; --blue-dim: rgba(61,142,245,0.12);
+--purple: #9d78fa; --purple-dim: rgba(157,120,250,0.12); --sidebar-w: 256px; --radius: 16px; --radius-sm: 10px;
+}
+body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.55; }
+::-webkit-scrollbar { width: 4px; height: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+.app { display: none; min-height: 100vh; }
+.mobile-topbar { display: none; position: sticky; top: 0; background: var(--surface); border-bottom: 1px solid var(--border); padding: 13px 18px; align-items: center; justify-content: space-between; z-index: 200; }
+.menu-btn { background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; }
+.sidebar { width: var(--sidebar-w); background: var(--surface); border-right: 1px solid var(--border); position: fixed; top: 0; left: 0; bottom: 0; z-index: 150; display: flex; flex-direction: column; overflow-y: auto; transition: transform .25s ease; }
+.sidebar-logo { padding: 22px 18px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+.logo-icon { width: 34px; height: 34px; background: var(--green); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.logo-name { font-family: 'Syne', sans-serif; font-size: 17px; font-weight: 800; } .logo-name span { color: var(--green); }
+.nav-section { padding: 8px 10px 4px; }
+.nav-section-label { font-size: 10px; font-weight: 600; color: var(--text3); letter-spacing: .08em; text-transform: uppercase; padding: 0 8px; margin-bottom: 4px; }
+.nav-item { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 10px; font-size: 13.5px; font-weight: 500; cursor: pointer; color: var(--text2); transition: background .12s, color .12s; }
+.nav-item:hover { background: var(--surface2); color: var(--text); } .nav-item.active { background: var(--green-dim); color: var(--green); font-weight: 600; }
+.nav-icon { font-size: 15px; width: 18px; text-align: center; }
+.sidebar-bottom { margin-top: auto; border-top: 1px solid var(--border); padding: 14px; }
+.user-row { display: flex; align-items: center; gap: 10px; background: var(--surface2); border-radius: 12px; padding: 10px; margin-bottom: 10px; }
+.user-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, var(--purple), var(--blue)); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: #fff; flex-shrink: 0; }
+.user-info { overflow: hidden; } .user-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .user-email { font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.logout-btn { width: 100%; padding: 9px; background: transparent; border: 1px solid var(--border2); border-radius: 10px; color: var(--text2); cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 13px; }
+.logout-btn:hover { border-color: var(--red); color: var(--red); }
+.main { margin-left: var(--sidebar-w); padding: 28px 32px; min-height: 100vh; }
+@media (max-width: 860px) { .mobile-topbar { display: flex; } .sidebar { transform: translateX(-100%); top: 57px; } .sidebar.open { transform: translateX(0); } .main { margin-left: 0; padding: 18px 16px; } }
+.tab-panel { display: none; } .tab-panel.active { display: block; }
+.page-header { margin-bottom: 24px; } .page-title { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; } .page-sub { font-size: 13px; color: var(--text2); margin-top: 3px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 22px; margin-bottom: 20px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+.card-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+.stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; position: relative; overflow: hidden; }
+.stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
+.stat-card.green::before { background: var(--green); } .stat-card.amber::before { background: var(--amber); } .stat-card.blue::before { background: var(--blue); } .stat-card.purple::before { background: var(--purple); }
+.stat-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); margin-bottom: 6px; }
+.stat-value { font-family: 'DM Mono', monospace; font-size: 28px; font-weight: 500; line-height: 1; }
+.stat-card.green .stat-value { color: var(--green); } .stat-card.amber .stat-value { color: var(--amber); } .stat-card.blue .stat-value { color: var(--blue); } .stat-card.purple .stat-value { color: var(--purple); }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; border: none; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all .15s; white-space: nowrap; }
+.btn-primary { background: var(--green); color: #000; } .btn-primary:hover { background: #1bbf64; } .btn-primary:disabled { background: var(--border2); color: var(--text3); cursor: not-allowed; }
+.btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border2); } .btn-secondary:hover { border-color: var(--green); color: var(--green); }
+.btn-danger { background: var(--red); color: #fff; } .btn-danger:hover { background: #d93f5c; }
+.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border2); } .btn-ghost:hover { color: var(--text); border-color: var(--border2); }
+.btn-sm { padding: 5px 12px; font-size: 12px; border-radius: 8px; } .btn-xs { padding: 3px 9px; font-size: 11px; border-radius: 7px; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+.badge-green { background: var(--green-dim); color: var(--green); } .badge-amber { background: var(--amber-dim); color: var(--amber); } .badge-red { background: var(--red-dim); color: var(--red); } .badge-blue { background: var(--blue-dim); color: var(--blue); }
+.badge-APPROVED { background: var(--green-dim); color: var(--green); } .badge-PENDING { background: var(--amber-dim); color: var(--amber); } .badge-REJECTED { background: var(--red-dim); color: var(--red); }
+.badge-scheduled { background: var(--amber-dim); color: var(--amber); }
+.badge-pending { background: var(--amber-dim); color: var(--amber); } .badge-sent { background: var(--green-dim); color: var(--green); } .badge-failed { background: var(--red-dim); color: var(--red); }
+.badge-running { background: var(--blue-dim); color: var(--blue); } .badge-draft { background: var(--surface3); color: var(--text2); } .badge-completed { background: var(--green-dim); color: var(--green); } .badge-paused { background: var(--amber-dim); color: var(--amber); }
+.badge-scheduled { background: var(--amber-dim); color: var(--amber); }
+.data-row { display: flex; align-items: center; justify-content: space-between; background: var(--surface2); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
+.data-row:last-child { margin-bottom: 0; } .data-row-title { font-weight: 600; font-size: 13px; margin-bottom: 2px; } .data-row-sub { font-size: 11px; color: var(--text3); } .data-row-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.form-label { display: block; font-size: 11px; font-weight: 600; color: var(--text2); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 7px; margin-top: 14px; } .form-label:first-child { margin-top: 0; }
+input[type="text"], input[type="email"], input[type="password"], input[type="url"], input[type="tel"], input[type="number"], select, textarea { width: 100%; background: var(--bg2); border: 1px solid var(--border2); border-radius: 12px; padding: 11px 13px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 13px; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--green); } input[type="file"] { padding: 8px 12px; cursor: pointer; } input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--green); } select option { background: var(--surface2); } textarea { resize: vertical; min-height: 80px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; } @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+.table-wrap { overflow-x: auto; } table { width: 100%; border-collapse: collapse; } th { text-align: left; padding: 8px 10px; font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--border); } td { padding: 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; vertical-align: middle; } tr:last-child td { border-bottom: none; } tr:hover td { background: var(--surface2); } hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+.modal { display: none; position: fixed; inset: 0; align-items: center; justify-content: center; z-index: 1000; background: rgba(0,0,0,.75); backdrop-filter: blur(6px); padding: 20px; } .modal.open { display: flex; }
+.modal-box { background: var(--surface); border: 1px solid var(--border2); border-radius: 24px; padding: 28px; width: 100%; max-width: 580px; max-height: 88vh; overflow-y: auto; } .modal-box.wide { max-width: 780px; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; } .modal-title { font-family: 'Syne', sans-serif; font-size: 17px; font-weight: 800; }
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface2); border: 1px solid var(--border2); padding: 10px 22px; border-radius: 40px; font-size: 13px; z-index: 9999; display: none; white-space: nowrap; box-shadow: 0 8px 32px rgba(0,0,0,.4); }
+.spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--border2); border-top-color: var(--green); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; } @keyframes spin { to { transform: rotate(360deg); } }
+.wa-number-display { font-family: 'DM Mono', monospace; font-size: 20px; font-weight: 500; color: var(--green); }
+.campaign-mini { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--surface2); border-radius: 10px; margin-bottom: 8px; } .campaign-mini-name { font-weight: 600; font-size: 13px; flex: 1; } .mini-bar { background: var(--bg2); border-radius: 20px; height: 4px; overflow: hidden; margin-top: 5px; } .mini-bar-fill { height: 100%; background: var(--green); border-radius: 20px; transition: width .4s; }
+.template-section { background: var(--surface2); border-radius: 12px; padding: 14px; margin-bottom: 14px; } .template-section-title { font-size: 11px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+.header-type-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; } .header-type-btn { padding: 8px 4px; border: 1px solid var(--border2); border-radius: 10px; background: var(--bg2); color: var(--text2); cursor: pointer; text-align: center; font-size: 11px; font-family: 'DM Sans', sans-serif; font-weight: 600; transition: all .15s; } .header-type-btn .hti { font-size: 18px; display: block; margin-bottom: 3px; } .header-type-btn:hover, .header-type-btn.active { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+.ph-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; } .ph-tag { font-family: 'DM Mono', monospace; font-size: 12px; background: var(--surface3); color: var(--purple); padding: 4px 8px; border-radius: 6px; white-space: nowrap; }
+.btn-row-builder { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; } .btn-item { background: var(--bg2); border: 1px solid var(--border2); border-radius: 10px; padding: 12px; } .btn-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; } .remove-btn-item { background: none; border: none; color: var(--red); cursor: pointer; font-size: 16px; line-height: 1; }
+.wa-preview-wrap { background: #0b1f17; border: 1px solid #1a3a28; border-radius: 20px; padding: 20px; min-height: 160px; } .wa-bubble { background: #1a3a28; border-radius: 12px 12px 12px 0; padding: 12px 14px; max-width: 280px; font-size: 13px; line-height: 1.5; } .wa-bubble-header { font-weight: 700; margin-bottom: 6px; font-size: 13px; } .wa-bubble-body { color: #e0f2eb; } .wa-bubble-footer { color: #7aaa90; font-size: 11px; margin-top: 6px; } .wa-bubble-btn { background: #0d3325; border: 1px solid #1a5c3a; border-radius: 8px; padding: 8px 12px; margin-top: 4px; font-size: 12px; font-weight: 600; color: #22d172; text-align: center; cursor: default; } .wa-media-placeholder { background: #0d3325; border-radius: 8px; padding: 24px; text-align: center; color: #7aaa90; font-size: 12px; margin-bottom: 8px; } .wa-meta { font-size: 10px; color: #4a7a5a; text-align: right; margin-top: 6px; }
+.limit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } .limit-card { background: var(--bg2); border: 1px solid var(--border2); border-radius: 12px; padding: 14px; } .limit-card label { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 7px; } .limit-card input { background: var(--surface2); }
+.empty-state { text-align: center; padding: 40px 20px; color: var(--text3); } .empty-state .empty-icon { font-size: 36px; margin-bottom: 12px; } .empty-state p { font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+<div class="mobile-topbar">
+<button class="menu-btn" onclick="toggleSidebar()"></button>
+<div style="font-family:'Syne';font-weight:800;">Wa<span style="color:var(--green)">Blast</span></div>
+<div style="width:24px"></div>
+</div>
+<div class="sidebar" id="sidebar">
+<div class="sidebar-logo">
+<div class="logo-icon">💬</div>
+<div class="logo-name">Wa<span>Blast</span></div>
+</div>
+<div class="nav-section">
+<div class="nav-section-label">Main</div>
+<div class="nav-item active" data-tab="dashboard"><span class="nav-icon">📊</span> Dashboard</div>
+</div>
+<div class="nav-section">
+<div class="nav-section-label">Account</div>
+<div class="nav-item" data-tab="account"><span class="nav-icon">👤</span> Account</div>
+<div class="nav-item" data-tab="billing"><span class="nav-icon">💳</span> Billing</div>
+</div>
+<div class="sidebar-bottom">
+<div class="user-row">
+<div class="user-avatar" id="avatarLetter">U</div>
+<div class="user-info">
+<div class="user-name" id="userName">User</div>
+<div class="user-email" id="userEmailDisplay">user@wablast.com</div>
+</div>
+</div>
+<button class="logout-btn" onclick="doLogout()">Sign out</button>
+</div>
+</div>
+<div class="main" id="mainContent">
+<!-- ══ DASHBOARD ══ -->
+<div class="tab-panel active" id="tab-dashboard">
+<div class="page-header"><div class="page-title">Dashboard</div><div class="page-sub">Overview of your WhatsApp Business activity</div></div>
+<div class="stats-row">
+<div class="stat-card blue"><div class="stat-label">Templates</div><div class="stat-value" id="dashTemplates">0</div></div>
+<div class="stat-card amber"><div class="stat-label">Contacts</div><div class="stat-value" id="dashContacts">0</div></div>
+<div class="stat-card purple"><div class="stat-label">Campaigns</div><div class="stat-value" id="dashCampaigns">0</div></div>
+</div>
+<div class="grid-2">
+<div class="card">
+<div class="card-header"><div class="card-title">📱 Connected Number</div><span class="badge badge-amber" id="waStatus">● Loading…</span></div>
+<div id="waNumberDisplay" class="wa-number-display" style="margin-bottom:6px;">—</div>
+<div id="waQuality"></div>
+</div>
+<div class="card">
+<div class="card-header"><div class="card-title">🔔 Recent Campaigns</div><button class="btn btn-ghost btn-sm" onclick="loadDashboardStats()">↻</button></div>
+<div id="recentCampaigns"><div class="empty-state"><div class="empty-icon">🚀</div><p>No campaigns yet</p></div></div>
+</div>
+</div>
+</div>
+<!-- ══ ACCOUNT ══ -->
+<div class="tab-panel" id="tab-account">
+<div class="page-header"><div class="page-title">Account</div><div class="page-sub">Profile and connected WhatsApp numbers</div></div>
+<div class="grid-2">
+<div>
+<div class="card">
+<div class="card-title" style="margin-bottom:16px;">👤 Profile</div>
+<span class="form-label">Full Name</span><input type="text" id="profileName">
+<span class="form-label">Email</span><input type="email" id="profileEmail">
+<div class="btn-row"><button class="btn btn-primary" onclick="updateProfile()">Update Profile</button></div>
+</div>
+</div>
+<div class="card">
+<div class="card-header"><div class="card-title">📞 Connected Numbers</div><div style="display:flex;gap:8px;"><button id="refreshWaQualityBtn" class="btn btn-secondary btn-sm" onclick="refreshWaQuality()" title="Get latest quality rating from Meta">🔄 Refresh</button><button class="btn btn-primary btn-sm" onclick="openWaConnectModal()">➕ Connect Number</button></div></div>
+<div id="waAccountsList" style="margin-top:8px;"><div class="empty-state"><div class="empty-icon">📱</div><p>No numbers connected</p></div></div>
+</div>
+</div>
+</div>
+<!-- ══ BILLING ══ -->
+<div class="tab-panel" id="tab-billing">
+<div class="page-header"><div class="page-title">Billing</div><div class="page-sub">Real per-message charges from Meta, not an estimate</div></div>
+<div class="card">
+<div class="card-header">
+<div class="card-title">💳 Meta Charges</div>
+<button class="btn btn-secondary btn-sm" onclick="loadBillingAnalytics()">↻ Refresh</button>
+</div>
+<div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px;">
+<div>
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Period</label>
+<div style="display:flex;gap:6px;">
+<button class="btn btn-sm billing-period-btn" data-period="day" onclick="setBillingPeriod('day')">Day</button>
+<button class="btn btn-sm billing-period-btn" data-period="week" onclick="setBillingPeriod('week')">Week</button>
+<button class="btn btn-sm billing-period-btn" data-period="month" onclick="setBillingPeriod('month')">Month</button>
+</div>
+</div>
+<div>
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Message Type</label>
+<select id="billingCategoryFilter" onchange="renderBillingAnalytics()" style="min-width:160px;">
+<option value="all">All types</option>
+<option value="MARKETING">Marketing</option>
+<option value="UTILITY">Utility</option>
+<option value="AUTHENTICATION">Authentication</option>
+<option value="AUTHENTICATION_INTERNATIONAL">Authentication (Intl)</option>
+<option value="SERVICE">Service</option>
+<option value="REFERRAL_CONVERSION">Referral Conversion</option>
+</select>
+</div>
+<div>
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Free / Paid</label>
+<select id="billingFreePaidFilter" onchange="renderBillingAnalytics()" style="min-width:130px;">
+<option value="all">All</option>
+<option value="free">Free only</option>
+<option value="paid">Paid only</option>
+</select>
+</div>
+<div>
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Window</label>
+<select id="billingWindowFilter" onchange="renderBillingAnalytics()" style="min-width:220px;">
+<option value="all">All windows</option>
+<option value="REGULAR">Business-initiated (billed)</option>
+<option value="FREE_CUSTOMER_SERVICE">Free — 24h reply window</option>
+<option value="FREE_ENTRY_POINT">Free — 72h entry-point window</option>
+</select>
+</div>
+</div>
+<div id="billingSummaryCards" class="limit-grid" style="margin-bottom:16px;"></div>
+<div id="billingErrorBox" style="display:none;background:rgba(240,79,110,0.12);color:var(--red);border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:14px;"></div>
+<div id="billingBreakdown"><div class="empty-state"><div class="empty-icon">💳</div><p>Loading…</p></div></div>
+<div style="margin-top:12px;font-size:11px;color:var(--text2);">Amounts are in your WhatsApp Business Account's billing currency, pulled live from Meta's pricing_analytics API.</div>
+</div>
+</div>
+</div>
+</div>
+<!-- ══ WA CONNECT MODAL ══ -->
+<div class="modal" id="waConnectModal">
+<div class="modal-box">
+<div class="modal-header"><div class="modal-title">📱 Connect WhatsApp Number</div><button class="btn btn-ghost btn-xs" onclick="closeWaConnectModal()">✕</button></div>
+<div id="waConnectStep1">
+<span class="form-label" style="margin-top:0;">WhatsApp Business Account ID</span><input type="text" id="waConnWabaId" placeholder="e.g. 1491368952771238">
+<span class="form-label">System User Access Token</span><input type="password" id="waConnToken" placeholder="Paste your never-expiring token">
+<div id="waConnError1" style="color:var(--red);font-size:12px;margin-top:8px;min-height:16px;"></div>
+<div class="btn-row"><button class="btn btn-primary" id="waConnVerifyBtn" onclick="waVerifyNumbers()">Find My Numbers →</button></div>
+<div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:14px;">In Meta Business Manager → Business Settings → System Users, create a system user, assign it to this app and your WhatsApp Business Account, then generate a token with <code style="background:var(--surface3);padding:1px 5px;border-radius:4px;">whatsapp_business_messaging</code> and <code style="background:var(--surface3);padding:1px 5px;border-radius:4px;">whatsapp_business_management</code> permissions, expiration set to Never.</div>
+</div>
+<div id="waConnectStep2" style="display:none;">
+<span class="form-label" style="margin-top:0;">Select Number to Connect</span>
+<div id="waConnNumberList" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;"></div>
+<div id="waConnError2" style="color:var(--red);font-size:12px;margin-top:8px;min-height:16px;"></div>
+<div class="btn-row"><button class="btn btn-primary" id="waConnSaveBtn" onclick="waSaveNumber()">Connect This Number</button><button class="btn btn-ghost" onclick="waResetConnectModal()">← Back</button></div>
+</div>
+</div>
+</div>
+<!-- ═ TEMPLATE BUILDER MODAL ══ -->
+<div class="modal" id="templateModal">
+<div class="modal-box wide">
+<div class="modal-header"><div class="modal-title">📝 Create Template</div><button class="btn btn-ghost btn-xs" onclick="closeModal('templateModal')">✕</button></div>
+<div class="grid-2" style="gap:16px;">
+<div>
+<div class="template-section">
+<div class="template-section-title">📌 Basic Info</div>
+<span class="form-label" style="margin-top:0;">Template Name</span><input type="text" id="tplName" placeholder="welcome_message" oninput="sanitizeTemplateName(this)">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;">
+<div><span class="form-label" style="margin-top:0;">Category</span><select id="tplCategory"><option value="MARKETING">MARKETING</option><option value="UTILITY">UTILITY</option><option value="AUTHENTICATION">AUTHENTICATION</option></select></div>
+<div><span class="form-label" style="margin-top:0;">Language</span><select id="tplLanguage"><option value="en_US">English (US)</option><option value="hi">Hindi</option></select></div>
+</div>
+</div>
+<div class="template-section">
+<div class="template-section-title">🖼️ Header</div>
+<div class="header-type-grid" id="headerTypeGrid">
+<button class="header-type-btn active" onclick="setHeaderType('NONE')" data-type="NONE"><span class="hti">🚫</span>None</button>
+<button class="header-type-btn" onclick="setHeaderType('TEXT')" data-type="TEXT"><span class="hti">📝</span>Text</button>
+<button class="header-type-btn" onclick="setHeaderType('IMAGE')" data-type="IMAGE"><span class="hti">🖼️</span>Image</button>
+<button class="header-type-btn" onclick="setHeaderType('VIDEO')" data-type="VIDEO"><span class="hti">🎬</span>Video</button>
+<button class="header-type-btn" onclick="setHeaderType('DOCUMENT')" data-type="DOCUMENT"><span class="hti">📄</span>Document</button>
+</div>
+<div id="headerInputArea" style="margin-top:12px;"></div>
+</div>
+<div class="template-section">
+<div class="template-section-title">💬 Body</div>
+<textarea id="tplBody" rows="4" placeholder="Hi {{1}}, your order is ready!" oninput="onBodyInput()"></textarea>
+<div class="template-section-title" style="margin-top:14px;font-size:12px;color:var(--text2);font-weight:600;">Placeholder values</div>
+<div style="font-size:12px;color:var(--text3);margin-bottom:8px;">Enter sample values for each {{placeholder}} to preview personalized text while building the template.</div>
+<div id="placeholderFields" style="margin-top:10px;"></div>
+</div>
+<div class="template-section">
+<div class="template-section-title">📎 Footer</div>
+<input type="text" id="tplFooter" placeholder="Reply STOP to opt out" maxlength="60" oninput="updatePreview()">
+</div>
+<div class="template-section">
+<div class="template-section-title">Buttons</div>
+<div id="buttonsList" class="btn-row-builder"></div>
+<div class="btn-row" style="margin-top:8px;">
+<button class="btn btn-ghost btn-sm" onclick="addButton('QUICK_REPLY')">+ Quick Reply</button>
+<button class="btn btn-ghost btn-sm" onclick="addButton('URL')">+ URL</button>
+</div>
+</div>
+<div class="btn-row" style="margin-top:4px;"><button class="btn btn-primary" onclick="submitTemplate()" id="tplSubmitBtn">Submit for Review</button><button class="btn btn-ghost" onclick="closeModal('templateModal')">Cancel</button></div>
+<div id="tplSubmitStatus" style="margin-top:10px;font-size:12px;color:var(--text3);"></div>
+</div>
+<div><div class="template-section" style="position:sticky;top:0;"><div class="template-section-title">WhatsApp Preview</div><div id="tplPreview" class="wa-preview-wrap"><div class="wa-bubble"><div class="wa-bubble-body" id="prvBody">Your message will appear here…</div><div class="wa-meta">12:00 ✓✓</div></div></div></div></div>
+</div>
+</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API_BASE_URL = window.location.origin;
+let authToken = null, currentUser = null, contacts = [], templates = [], campaigns = [];
+let buttonCount = 0, currentHeaderType = 'NONE', sendPollInterval = null, activeSendCampaignId = null, receivedPollInterval = null;
+let headerMediaId = null, headerMediaName = '', headerMediaMime = '';
+let waConnSelectedNumber = null, waConnNumbersCache = [];
+
+async function apiCall(endpoint, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  const options = { method, headers };
+  if (body) options.body = JSON.stringify(body);
+  try {
+    const res = await fetch(`${API_BASE_URL}${endpoint}`, options);
+    const data = await res.json();
+    if (res.status === 401) { doLogout(); throw new Error('Session expired'); }
+    return data;
+  } catch (err) { console.error(`API Error [${endpoint}]:`, err); return { error: err.message }; }
+}
+function showToast(msg, isError = false) {
+  const t = document.getElementById('toast'); t.textContent = msg;
+  t.style.background = isError ? 'var(--red-dim)' : 'var(--green-dim)';
+  t.style.color = isError ? 'var(--red)' : 'var(--green)';
+  t.style.display = 'block'; clearTimeout(t._to);
+  t._to = setTimeout(() => t.style.display = 'none', 3500);
+}
+function escapeHtml(str) { if (!str) return ''; return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;'); }
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); }
+
+function doLogout() {
+  authToken = null; currentUser = null; contacts = []; templates = []; campaigns = [];
+  localStorage.removeItem('supabase_token');
+  window.location.href = '/login.html';
+}
+
+async function apiUploadFile(endpoint, file) {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  try {
+    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Authorization': authToken ? `Bearer ${authToken}` : undefined },
+      body: form
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('File upload error:', err);
+    return { error: err.message };
+  }
+}
+
+function resetHeaderMediaState() {
+  headerMediaId = null; headerMediaName = ''; headerMediaMime = '';
+}
+
+async function loadDashboard() {
+  document.getElementById('app').style.display = 'block';
+  const profileRes = await apiCall('/api/profile');
+  if (profileRes.success) {
+    currentUser = profileRes.user;
+    const name = profileRes.user.full_name || profileRes.user.email?.split('@')[0] || 'User';
+    const email = profileRes.user.email || '';
+    document.getElementById('userName').textContent = name;
+    document.getElementById('userEmailDisplay').textContent = email;
+    document.getElementById('avatarLetter').textContent = name[0].toUpperCase();
+    document.getElementById('profileName').value = name;
+    document.getElementById('profileEmail').value = email;
+  } else { doLogout(); return; }
+
+  // This trimmed dashboard has no Templates/Contacts/Campaigns/Settings tabs,
+  // so we fetch just enough data for the stat counts (below) without calling
+  // loadTemplates()/loadContacts()/loadCampaigns()/loadSettings() — those
+  // also render into tab DOM that doesn't exist on this page and would throw.
+  const [tRes, cRes] = await Promise.all([apiCall('/api/templates'), apiCall('/api/contacts')]);
+  if (tRes.success) templates = tRes.templates || [];
+  if (cRes.success) contacts = cRes.contacts || [];
+  await Promise.all([ loadDashboardStats(), loadWaAccounts() ]);
+  refreshWaQuality();
+  refreshUnreadBadge();
+  setInterval(refreshUnreadBadge, 30000);
+}
+
+// Lightweight badge-only refresh so the unread count on the sidebar stays
+// current even when the user isn't on the Received tab.
+async function refreshUnreadBadge() {
+  const res = await apiCall('/api/messages/received?limit=1');
+  const badge = document.getElementById('receivedUnreadBadge');
+  if (!res.success || !badge) return;
+  if (res.unread > 0) { badge.style.display = ''; badge.textContent = res.unread > 99 ? '99+' : res.unread; }
+  else badge.style.display = 'none';
+}
+
+async function loadDashboardStats() {
+  document.getElementById('dashTemplates').textContent = templates.length;
+  document.getElementById('dashContacts').textContent = contacts.length;
+  const campRes = await apiCall('/api/campaigns');
+  if (campRes.success) {
+    campaigns = campRes.campaigns || [];
+    document.getElementById('dashCampaigns').textContent = campaigns.length;
+    const recentHtml = campaigns.slice(0, 5).map(c => {
+      const pct = c.total_contacts > 0 ? Math.round((c.sent_count / c.total_contacts) * 100) : 0;
+      return `<div class="campaign-mini"><div style="flex:1;"><div class="campaign-mini-name">${escapeHtml(c.name)}</div><div style="font-size:11px;color:var(--text3);">${c.sent_count||0}/${c.total_contacts||0} sent</div><div class="mini-bar"><div class="mini-bar-fill" style="width:${pct}%"></div></div></div><span class="badge badge-${c.status}">${c.status}</span></div>`;
+    }).join('') || '<div class="empty-state"><div class="empty-icon"></div><p>No campaigns yet</p></div>';
+    document.getElementById('recentCampaigns').innerHTML = recentHtml;
+  }
+}
+
+async function loadTemplates() {
+  const res = await apiCall('/api/templates');
+  if (res.success) { templates = res.templates || []; renderTemplates(); }
+}
+
+async function fetchApprovedTemplates() {
+  const btn = document.getElementById('refreshApprovedTemplatesBtn');
+  const originalText = btn?.textContent || 'Refresh Meta';
+  if (btn) {
+    btn.textContent = '⏳ Syncing...';
+    btn.disabled = true;
+  }
+  
+  const res = await apiCall('/api/templates/meta/sync', 'POST');
+  
+  if (res.success) {
+    await loadTemplates();
+    renderMetaApprovedTemplates(res.templates || []);
+    loadTemplatesForCampaignSelect();
+    showToast(`Found ${res.templates?.length || 0} approved templates on Meta`);
+  } else {
+    showToast(res.error || 'Failed to sync approved templates', true);
+    renderMetaApprovedTemplates([]);
+  }
+  
+  if (btn) {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+
+function syncLocalTemplateApprovalStatus(approvedTemplates) {
+  if (!Array.isArray(approvedTemplates) || !approvedTemplates.length) return;
+  let updated = false;
+  approvedTemplates.forEach(metaTpl => {
+    const local = templates.find(t => t.name === metaTpl.name);
+    if (local && local.status !== 'APPROVED') {
+      local.status = 'APPROVED';
+      local.language = metaTpl.language || local.language;
+      local.category = metaTpl.category || local.category;
+      updated = true;
+    }
+  });
+  if (updated) renderTemplates();
+}
+
+function renderMetaApprovedTemplates(templates) {
+  const container = document.getElementById('metaApprovedList');
+  if (!templates?.length) {
+    container.innerHTML = '<div class="empty-state" style="padding:12px 0;"><p style="font-size:12px;">No approved templates</p></div>';
+    return;
+  }
+  
+  container.innerHTML = templates.map(t => `
+    <div class="data-row" style="margin-bottom:8px;">
+      <div style="flex:1;">
+        <div class="data-row-title">${escapeHtml(t.name)}</div>
+        <div class="data-row-sub">${t.category} · ${t.language || 'en_US'}</div>
+      </div>
+      <span class="badge badge-green">✓ Approved</span>
+    </div>
+  `).join('');
+}
+
+function renderTemplates() {
+  const container = document.getElementById('templateList');
+  document.getElementById('dashTemplates').textContent = templates.length;
+  if (!templates.length) { container.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>No templates yet</p></div>'; return; }
+  container.innerHTML = templates.map(t => `<div class="data-row"><div><div class="data-row-title">${escapeHtml(t.name)}</div><div class="data-row-sub">${t.category} · ${t.language || 'en_US'}</div></div><div class="data-row-actions"><span class="badge badge-${t.status}">${t.status}</span><button class="btn btn-ghost btn-xs" onclick="previewTemplate('${t.id}')">Preview</button><button class="btn btn-danger btn-xs" onclick="deleteTemplate('${t.id}')">Delete</button></div></div>`).join('');
+  loadTemplatesForCampaignSelect();
+}
+function loadTemplatesForCampaignSelect() {
+  const select = document.getElementById('campaignTemplateSelect');
+  if (!select) return;
+  const approved = templates.filter(t => t.status === 'APPROVED');
+  select.innerHTML = approved.length ? approved.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('') : '<option value="">— No approved templates —</option>';
+  if (select.value) loadTemplatePlaceholders();
+}
+function previewTemplate(id) { const tpl = templates.find(t => t.id === id); if (!tpl) return; renderWaPreview(tpl.header_type, null, tpl.body, tpl.footer, tpl.buttons || [], 'templatePreviewArea'); }
+function openTemplateBuilder() {
+  document.getElementById('tplName').value = ''; document.getElementById('tplBody').value = ''; document.getElementById('tplFooter').value = '';
+  document.getElementById('placeholderFields').innerHTML = ''; document.getElementById('buttonsList').innerHTML = '';
+  document.getElementById('tplSubmitStatus').textContent = ''; buttonCount = 0; setHeaderType('NONE'); updatePreview(); openModal('templateModal');
+}
+function sanitizeTemplateName(input) { input.value = input.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'); }
+function setHeaderType(type) {
+  currentHeaderType = type;
+  resetHeaderMediaState();
+  document.querySelectorAll('.header-type-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.type === type));
+  const area = document.getElementById('headerInputArea');
+  if (type === 'TEXT') {
+    area.innerHTML = `<input type="text" id="headerText" placeholder="Header text" oninput="updatePreview()">`;
+  } else if (type === 'IMAGE' || type === 'VIDEO' || type === 'DOCUMENT') {
+    const acceptTypes = type === 'IMAGE'
+      ? 'image/*'
+      : type === 'VIDEO'
+      ? 'video/*'
+      : 'application/pdf,image/*,video/*,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    area.innerHTML = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button class="btn btn-secondary btn-sm" type="button" onclick="document.getElementById('tplMediaFile').click()">Choose ${type.toLowerCase()} file</button>
+        <span id="tplMediaStatus" style="font-size:12px;color:var(--text3);">No file selected</span>
+      </div>
+      <input type="file" id="tplMediaFile" accept="${acceptTypes}" style="display:none;" onchange="handleTemplateMediaFile(event)">
+      <div style="margin-top:10px;font-size:12px;color:var(--text2);">Supported file types: ${type === 'IMAGE' ? 'JPEG, PNG, WEBP' : type === 'VIDEO' ? 'MP4, AVI, MOV' : 'PDF, DOC, DOCX, PPTX, XLSX, images, video'}</div>
+    `;
+  } else {
+    area.innerHTML = '';
+  }
+  updatePreview();
+}
+
+async function handleTemplateMediaFile(event) {
+  const file = event.target.files?.[0];
+  const statusEl = document.getElementById('tplMediaStatus');
+  if (!file) return;
+  if (statusEl) statusEl.textContent = 'Uploading file...';
+  const res = await apiUploadFile('/api/templates/media/upload', file);
+  if (res.success && res.media_id) {
+    headerMediaId = res.media_id;
+    headerMediaName = file.name;
+    headerMediaMime = file.type;
+    if (statusEl) statusEl.textContent = `${file.name} uploaded`;
+    showToast('Media uploaded successfully');
+  } else {
+    if (statusEl) statusEl.textContent = 'Upload failed';
+    showToast(res.error || 'Media upload failed', true);
+  }
+  updatePreview();
+}
+function onBodyInput() { buildPlaceholderFields(); updatePreview(); }
+function buildPlaceholderFields() {
+  const body = document.getElementById('tplBody').value;
+  const matches = body.match(/\{\{(\d+)\}\}/g) || [];
+  const positions = [...new Set(matches.map(m => parseInt(m.match(/\d+/)[0])))].sort((a,b)=>a-b);
+  const container = document.getElementById('placeholderFields');
+  if (!positions.length) { container.innerHTML = ''; return; }
+  container.innerHTML = positions.map(pos => `<div class="ph-row"><span class="ph-tag">{{${pos}}}</span><input type="text" id="phSample_${pos}" placeholder="Sample value" style="flex:1;" oninput="updatePreview()"></div>`).join('');
+}
+function addButton(type) {
+  const list = document.getElementById('buttonsList'); const id = ++buttonCount;
+  const item = document.createElement('div'); item.className = 'btn-item'; item.id = `btnItem_${id}`; item.dataset.type = type;
+  item.innerHTML = `<div class="btn-item-header"><span class="badge badge-blue">${type}</span><button class="remove-btn-item" onclick="removeButton(${id})">×</button></div><input type="text" placeholder="Button text" id="btnText_${id}" oninput="updatePreview()">`;
+  list.appendChild(item); updatePreview();
+}
+function removeButton(id) { const el = document.getElementById(`btnItem_${id}`); if (el) { el.remove(); updatePreview(); } }
+function collectButtons() { return Array.from(document.querySelectorAll('.btn-item')).map(item => { const id = item.id.replace('btnItem_',''); return { type: item.dataset.type, text: document.getElementById(`btnText_${id}`)?.value || '' }; }); }
+function updatePreview() {
+  const body = document.getElementById('tplBody')?.value || ''; const footer = document.getElementById('tplFooter')?.value || ''; const buttons = collectButtons();
+  const positions = [...new Set((body.match(/\{\{(\d+)\}\}/g)||[]).map(m=>parseInt(m.match(/\d+/)[0])))];
+  let previewBody = body;
+  for (const pos of positions) { const sample = document.getElementById(`phSample_${pos}`)?.value || `[field_${pos}]`; previewBody = previewBody.replaceAll(`{{${pos}}}`, `<strong>${escapeHtml(sample)}</strong>`); }
+  previewBody = previewBody.replace(/\*(.*?)\*/g, '<strong>$1</strong>').replace(/_(.*?)_/g, '<em>$1</em>').replace(/\n/g, '<br>');
+  renderWaPreview(currentHeaderType, { text: document.getElementById('headerText')?.value }, previewBody, footer, buttons, 'tplPreview', true);
+}
+function renderWaPreview(headerType, headerData, body, footer, buttons, containerId, bodyIsHtml=false) {
+  let headerHtml = '';
+  if (headerType === 'TEXT') {
+    headerHtml = `<div class="wa-bubble-header">${escapeHtml(headerData?.text || '')}</div>`;
+  } else if (headerType === 'IMAGE') {
+    headerHtml = `<div class="wa-media-placeholder">🖼️ Image header selected</div>`;
+  } else if (headerType === 'VIDEO') {
+    headerHtml = `<div class="wa-media-placeholder">🎬 Video header selected</div>`;
+  } else if (headerType === 'DOCUMENT') {
+    headerHtml = `<div class="wa-media-placeholder">📄 Document header selected</div>`;
+  }
+  const bodyHtml = bodyIsHtml ? body : escapeHtml(body).replace(/\n/g,'<br>');
+  const footerHtml = footer ? `<div class="wa-bubble-footer">${escapeHtml(footer)}</div>` : '';
+  const btnsHtml = (buttons||[]).map(b => b.text ? `<div class="wa-bubble-btn">${escapeHtml(b.text)}</div>` : '').join('');
+  document.getElementById(containerId).innerHTML = `<div class="wa-bubble">${headerHtml}<div class="wa-bubble-body">${bodyHtml || '<span style="opacity:.5">Your message…</span>'}</div>${footerHtml}<div class="wa-meta">12:00 ✓✓</div></div>${btnsHtml}`;
+}
+async function submitTemplate() {
+  const name = document.getElementById('tplName').value.trim(); const body = document.getElementById('tplBody').value.trim();
+  const category = document.getElementById('tplCategory').value; const language = document.getElementById('tplLanguage').value;
+  const footer = document.getElementById('tplFooter').value.trim(); const buttons = collectButtons();
+  if (!name || !body) { showToast('Name and body required', true); return; }
+  if ((currentHeaderType === 'IMAGE' || currentHeaderType === 'VIDEO' || currentHeaderType === 'DOCUMENT') && !headerMediaId) {
+    showToast('Please upload a media file for the selected header type', true);
+    return;
+  }
+  const btn = document.getElementById('tplSubmitBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Submitting…';
+  const payload = {
+    name,
+    body,
+    category,
+    language,
+    footer: footer || undefined,
+    buttons: buttons.length ? buttons : undefined,
+    header_type: currentHeaderType,
+    header_text: document.getElementById('headerText')?.value || undefined,
+    header_media_id: headerMediaId || undefined
+  };
+  const res = await apiCall('/api/templates', 'POST', payload);
+  btn.disabled = false; btn.textContent = 'Submit for Review';
+  if (res.success) {
+    showToast('Template submitted!');
+    resetHeaderMediaState();
+    loadTemplates();
+    closeModal('templateModal');
+  } else showToast(res.error || 'Submission failed', true);
+}
+async function deleteTemplate(id) { if (!confirm('Delete this template?')) return; const res = await apiCall(`/api/templates/${id}`, 'DELETE'); if (res.success) { showToast('Template deleted'); loadTemplates(); } else showToast(res.error || 'Delete failed', true); }
+
+async function loadContacts() { const res = await apiCall('/api/contacts'); if (res.success) { contacts = res.contacts || []; renderContacts(); renderCampaignGroups(); updateCampaignContactCount(); } }
+function renderContacts() {
+  const tbody = document.getElementById('contactsBody'); document.getElementById('contactCount').textContent = `(${contacts.length})`; document.getElementById('dashContacts').textContent = contacts.length;
+  if (!contacts.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:24px;">No contacts</td></tr>'; return; }
+  tbody.innerHTML = contacts.map((c, i) => `<tr><td>${escapeHtml(c.name)}</td><td style="font-family:'DM Mono',monospace;font-size:12px;">${c.phone}</td><td><span class="badge badge-blue">${escapeHtml(c.group_name||'Default')}</span></td><td style="font-size:11px;color:var(--text3);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(c.message||'—')}</td><td><button onclick="removeContact(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:15px;">×</button></td></tr>`).join('');
+}
+function renderCampaignGroups() {
+  const select = document.getElementById('campaignGroupSelect');
+  if (!select) return;
+  const groups = [...new Set(contacts.map(c => c.group_name?.trim() || 'Default'))].filter(Boolean);
+  select.innerHTML = '<option value="">All Contacts</option>' + groups.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('');
+}
+function updateCampaignContactCount() {
+  const groupName = document.getElementById('campaignGroupSelect')?.value || '';
+  const count = groupName
+    ? contacts.filter(c => (c.group_name?.trim() || 'Default') === groupName).length
+    : contacts.length;
+  document.getElementById('campaignGroupCountNum').textContent = count;
+}
+function removeContact(i) { contacts.splice(i, 1); renderContacts(); renderCampaignGroups(); updateCampaignContactCount(); }
+function looksLikeHeaderRow(parts) {
+  // A real data row's 2nd column is a phone number (mostly digits, 6+ digits
+  // after stripping non-digits). A header row's 2nd column won't be.
+  const digits = (parts[1] || '').replace(/\D/g, '');
+  return digits.length < 6;
+}
+function parsePaste() {
+  const raw = document.getElementById('pasteInput').value; const group = document.getElementById('pasteGroup').value.trim() || 'Default';
+  const lines = raw.split(/\r?\n/).filter(l => l.trim() !== '');
+  if (!lines.length) { showToast('Paste some contacts first', true); return; }
+  let added = 0, extraCols = new Set();
+
+  const firstParts = lines[0].split(/[\t,]/);
+  if (looksLikeHeaderRow(firstParts)) {
+    // Header row present: columns can be in any order, and any column beyond
+    // name/phone/message/group becomes a mappable custom field — same as CSV import.
+    const headers = firstParts.map(h => h.toLowerCase().trim());
+    for (let i = 1; i < lines.length; i++) {
+      const vals = lines[i].split(/[\t,]/);
+      const row = {}; headers.forEach((h, idx) => row[h] = vals[idx]?.trim() || '');
+      let phone = String(row.phone || row.mobile || '').replace(/\D/g, '');
+      if (phone.length === 10) phone = '91' + phone;
+      if (phone.length >= 10 && !contacts.some(c => c.phone === phone)) {
+        const custom_fields = extractCustomFields(row);
+        if (custom_fields) Object.keys(custom_fields).forEach(k => extraCols.add(k));
+        contacts.push({ name: row.name || phone, phone, message: row.message || '', group_name: row.group || group, custom_fields });
+        added++;
+      }
+    }
+  } else {
+    // Legacy fixed format: Name, Phone, Message — one per line, no header.
+    for (const line of lines) {
+      const parts = line.split(/[\t,]/); if (parts.length < 2) continue;
+      let phone = parts[1].replace(/\D/g, ''); if (phone.length === 10) phone = '91' + phone;
+      if (phone.length >= 10 && !contacts.some(c => c.phone === phone)) {
+        contacts.push({ name: parts[0].trim(), phone, message: parts[2]?.trim() || '', group_name: group, custom_fields: null });
+        added++;
+      }
+    }
+  }
+
+  renderContacts();
+  showToast(extraCols.size
+    ? `Added ${added} contacts (extra columns detected: ${[...extraCols].join(', ')})`
+    : `Added ${added} contacts`);
+  document.getElementById('pasteInput').value = '';
+}
+async function saveContactsToDb() { const res = await apiCall('/api/contacts', 'POST', { contacts }); if (res.success) { showToast('Contacts saved'); loadContacts(); } else showToast(res.error || 'Save failed', true); }
+function clearContacts() { if (!confirm('Clear all contacts?')) return; contacts = []; renderContacts(); }
+const RESERVED_CONTACT_COLUMNS = new Set(['name', 'phone', 'mobile', 'message', 'group']);
+function extractCustomFields(row) {
+  const fields = {};
+  for (const key of Object.keys(row)) {
+    const k = key.toLowerCase().trim();
+    if (RESERVED_CONTACT_COLUMNS.has(k)) continue;
+    const val = row[key];
+    if (val !== undefined && val !== null && String(val).trim() !== '') {
+      fields[k] = String(val).trim();
+    }
+  }
+  return Object.keys(fields).length ? fields : null;
+}
+async function importFile() {
+  const file = document.getElementById('importFile').files[0]; const group = document.getElementById('pasteGroup').value.trim() || 'Default';
+  if (!file) { showToast('Select a file first', true); return; }
+  const ext = file.name.split('.').pop().toLowerCase(); let data = [];
+  if (ext === 'csv') { const text = await file.text(); const lines = text.split(/\r?\n/); const headers = lines[0].split(',').map(h => h.toLowerCase().trim()); for (let i = 1; i < lines.length; i++) { const vals = lines[i].split(','); if (!vals.join('').trim()) continue; const row = {}; headers.forEach((h, idx) => row[h] = vals[idx]?.trim() || ''); data.push(row); } }
+  else { const buf = await file.arrayBuffer(); const wb = XLSX.read(buf); const ws = wb.Sheets[wb.SheetNames[0]]; data = XLSX.utils.sheet_to_json(ws); }
+  let added = 0, extraCols = new Set();
+  for (const row of data) {
+    let phone = String(row.phone || row.mobile || '').replace(/\D/g,'');
+    if (phone.length === 10) phone = '91' + phone;
+    if (phone.length >= 10 && !contacts.some(c => c.phone === phone)) {
+      const custom_fields = extractCustomFields(row);
+      if (custom_fields) Object.keys(custom_fields).forEach(k => extraCols.add(k));
+      contacts.push({ name: row.name || phone, phone, message: row.message || '', group_name: row.group || group, custom_fields });
+      added++;
+    }
+  }
+  renderContacts();
+  showToast(extraCols.size
+    ? `Imported ${added} contacts (extra columns detected: ${[...extraCols].join(', ')} — save contacts, then map them as placeholders when creating a campaign)`
+    : `Imported ${added} contacts`);
+}
+
+async function loadCampaigns() {
+  const res = await apiCall('/api/campaigns');
+  if (res.success) {
+    campaigns = res.campaigns || [];
+    const logSelect = document.getElementById('logCampaignSelect'); if (logSelect) logSelect.innerHTML = '<option value="">— Select campaign —</option>' + campaigns.map(c => `<option value="${c.id}">${escapeHtml(c.name)} (${c.status})</option>`).join('');
+    const container = document.getElementById('campaignsList'); if (!container) return;
+    if (!campaigns.length) { container.innerHTML = '<div class="empty-state"><div class="empty-icon"></div><p>No campaigns yet</p></div>'; return; }
+    container.innerHTML = campaigns.map(c => { const pct = c.total_contacts > 0 ? Math.round((c.sent_count / c.total_contacts) * 100) : 0; return `<div class="data-row"><div style="flex:1;min-width:0;"><div class="data-row-title">${escapeHtml(c.name)}</div><div class="data-row-sub">${c.template_name || 'No template'} · ${c.sent_count||0}/${c.total_contacts||0} sent</div><div class="mini-bar" style="margin-top:6px;"><div class="mini-bar-fill" style="width:${pct}%"></div></div></div><div class="data-row-actions"><span class="badge badge-${c.status}">${c.status}</span>${c.status === 'draft' ? `<button class="btn btn-primary btn-xs" onclick="sendStartCampaign('${c.id}')">▶ Start</button>` : ''}${c.status === 'running' ? `<button class="btn btn-ghost btn-xs" onclick="sendPauseCampaign('${c.id}')">⏸ Pause</button>` : ''}${['draft','completed','failed'].includes(c.status) ? `<button class="btn btn-danger btn-xs" onclick="deleteCampaignFromList('${c.id}')">🗑</button>` : ''}</div></div>`; }).join('');
+  }
+}
+function getTemplatePlaceholders(tpl) {
+  if (!tpl) return { keys: [], isPositional: true };
+  const body = tpl.body || '';
+  const rawKeys = [...new Set((body.match(/\{\{([^}]+)\}\}/g) || []).map(m => m.slice(2, -2).trim()))];
+  const isPositional = rawKeys.length > 0 && rawKeys.every(k => /^\d+$/.test(k));
+  const keys = isPositional ? rawKeys.map(k => parseInt(k, 10)).sort((a, b) => a - b) : rawKeys;
+  return { keys, isPositional };
+}
+
+function getAvailableCustomFields(groupName) {
+  const pool = groupName ? contacts.filter(c => (c.group_name?.trim() || 'Default') === groupName) : contacts;
+  const keys = new Set();
+  for (const c of pool) {
+    if (c.custom_fields && typeof c.custom_fields === 'object') {
+      Object.keys(c.custom_fields).forEach(k => keys.add(k));
+    }
+  }
+  return [...keys].sort();
+}
+
+function sampleContactFor(groupName) {
+  const pool = groupName ? contacts.filter(c => (c.group_name?.trim() || 'Default') === groupName) : contacts;
+  return pool[0] || contacts[0] || null;
+}
+
+function previewValueFor(type, field, customValue, sample) {
+  if (!sample && type !== 'custom') return '(no contacts yet)';
+  if (type === 'name') return sample?.name || '(empty)';
+  if (type === 'phone') return sample?.phone || '(empty)';
+  if (type === 'message') return sample?.message || '(empty — no Message value for this contact)';
+  if (type === 'field') return (field && sample?.custom_fields?.[field]) || `(empty — no "${field}" column for this contact)`;
+  if (type === 'custom') return customValue || '(enter a value)';
+  return '';
+}
+
+function updateCampaignPlaceholderPreview(key) {
+  const groupName = document.getElementById('campaignGroupSelect').value || null;
+  const sample = sampleContactFor(groupName);
+  const select = document.getElementById(`campMap_${key}`);
+  const custom = document.getElementById(`campCustom_${key}`);
+  const preview = document.getElementById(`campPreview_${key}`);
+  if (!select || !preview) return;
+  const type = select.value;
+  custom.style.display = type === 'custom' ? 'block' : 'none';
+  const field = type === 'field' ? select.dataset.fieldChoice || '' : '';
+  preview.textContent = `Preview: "${previewValueFor(type, field, custom.value.trim(), sample)}"`;
+}
+
+function handleCampaignPlaceholderTypeChange(key, value) {
+  // value is either a plain type ("name","phone","message","custom") or "field:<fieldname>"
+  const select = document.getElementById(`campMap_${key}`);
+  if (value.startsWith('field:')) {
+    select.dataset.type = 'field';
+    select.dataset.fieldChoice = value.slice(6);
+  } else {
+    select.dataset.type = value;
+    select.dataset.fieldChoice = '';
+  }
+  updateCampaignPlaceholderPreview(key);
+}
+
+function loadTemplatePlaceholders() {
+  const id = document.getElementById('campaignTemplateSelect').value;
+  const tpl = templates.find(t => t.id === id);
+  const { keys, isPositional } = getTemplatePlaceholders(tpl);
+  const container = document.getElementById('campaignPlaceholderMapping');
+  if (!keys.length) { container.innerHTML = ''; return; }
+
+  const groupName = document.getElementById('campaignGroupSelect')?.value || null;
+  const customFields = getAvailableCustomFields(groupName);
+  const fieldOptions = customFields.map(f => `<option value="field:${escapeHtml(f)}">Custom Field: ${escapeHtml(f)}</option>`).join('');
+
+  container.innerHTML = keys.map(key => {
+    const label = isPositional ? `{{${key}}}` : `{{${key}}} (named)`;
+    return `
+      <div class="ph-row" style="flex-direction:column;align-items:stretch;gap:4px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span class="ph-tag">${label}</span>
+          <select id="campMap_${key}" data-type="name" data-field-choice="" style="flex:1;" onchange="handleCampaignPlaceholderTypeChange('${key}', this.value)">
+            <option value="name">Contact Name (from Name column)</option>
+            <option value="phone">Contact Phone (E.164 digits, e.g. 919876543210)</option>
+            <option value="message">Per-Contact Message (from CSV "message" column)</option>
+            ${fieldOptions}
+            <option value="custom">Fixed Custom Value (same text for every contact)</option>
+          </select>
+          <input type="text" id="campCustom_${key}" placeholder="Custom value" style="flex:1;display:none;" oninput="updateCampaignPlaceholderPreview('${key}')">
+        </div>
+        <div id="campPreview_${key}" style="font-size:11px;color:var(--text3);padding-left:2px;">Preview: "${escapeHtml(sampleContactFor(groupName)?.name || '(no contacts yet)')}"</div>
+      </div>`;
+  }).join('');
+
+  if (!customFields.length) {
+    container.insertAdjacentHTML('beforeend', `<div style="font-size:11px;color:var(--text3);margin-top:4px;">No custom columns detected in this group's contacts yet. Import a CSV with extra columns (e.g. "email", "order_id") to map them here.</div>`);
+  }
+}
+
+function toggleCampaignScheduleInput() {
+  const timing = document.querySelector('input[name="campaignTiming"]:checked')?.value;
+  const scheduleInput = document.getElementById('campaignScheduleAt');
+  if (!scheduleInput) return;
+  if (timing === 'schedule') {
+    scheduleInput.style.display = 'block';
+    scheduleInput.required = true;
+  } else {
+    scheduleInput.style.display = 'none';
+    scheduleInput.required = false;
+  }
+}
+
+async function createCampaign() {
+  const name = document.getElementById('campaignName').value.trim();
+  const templateId = document.getElementById('campaignTemplateSelect').value;
+  const groupName = document.getElementById('campaignGroupSelect').value || null;
+  const timing = document.querySelector('input[name="campaignTiming"]:checked')?.value || 'draft';
+  const scheduleAt = document.getElementById('campaignScheduleAt')?.value || null;
+  if (!name || !templateId) { showToast('Name and template required', true); return; }
+
+  const tpl = templates.find(t => t.id === templateId);
+  const { keys } = getTemplatePlaceholders(tpl);
+  const placeholder_mapping = {};
+  for (const key of keys) {
+    const select = document.getElementById(`campMap_${key}`);
+    if (!select) continue;
+    const type = select.dataset.type || select.value;
+    if (type === 'field') {
+      const field = select.dataset.fieldChoice || '';
+      if (!field) { showToast(`Choose a custom field for {{${key}}}`, true); return; }
+      placeholder_mapping[key] = { type: 'field', field };
+    } else if (type === 'custom') {
+      const custom = document.getElementById(`campCustom_${key}`)?.value.trim() || '';
+      if (!custom) { showToast(`Custom value required for {{${key}}}`, true); return; }
+      placeholder_mapping[key] = { type: 'custom', value: custom };
+    } else {
+      placeholder_mapping[key] = { type }; // 'name' | 'phone' | 'message'
+    }
+  }
+
+  if (timing === 'schedule' && !scheduleAt) { showToast('Schedule date/time is required for scheduled campaigns', true); return; }
+  const payload = { name, template_id: templateId, group_name: groupName };
+  if (timing === 'schedule') payload.schedule_at = scheduleAt;
+  if (timing === 'running') payload.start_now = true;
+  if (Object.keys(placeholder_mapping).length) payload.placeholder_mapping = placeholder_mapping;
+
+  const res = await apiCall('/api/campaigns', 'POST', payload);
+  if (res.success) {
+    showToast(`✅ Campaign created!`);
+    loadCampaigns();
+  } else showToast(res.error || 'Create failed', true);
+}
+async function loadCampaignLogs() { const id = document.getElementById('logCampaignSelect').value; if (!id) return; const res = await apiCall(`/api/campaigns/${id}/logs`); const container = document.getElementById('campaignLogsList'); if (!res.success) { console.error('[logs] fetch failed for campaign', id, res); container.innerHTML = `<div class="empty-state"><p>⚠ Failed to load logs: ${escapeHtml(res.error || 'unknown error')}</p></div>`; return; } if (!res.logs?.length) { container.innerHTML = '<div class="empty-state"><p>No logs yet</p></div>'; return; } container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Phone</th><th>Name</th><th>Status</th><th>Delivery</th><th>Error</th></tr></thead><tbody>${res.logs.map(l => `<tr><td style="font-family:'DM Mono',monospace;font-size:12px;">${l.phone}</td><td>${escapeHtml(l.contact_name||'')}</td><td><span class="badge badge-${l.status}">${l.status}</span></td><td><span class="badge badge-${l.delivery_status||'sent'}">${l.delivery_status||l.status}</span></td><td style="font-size:11px;color:var(--red);">${escapeHtml(l.error_reason||'—')}</td></tr>`).join('')}</tbody></table></div>`; }
+
+async function loadActiveCampaign() { const res = await apiCall('/api/campaigns/active'); if (!res.success) console.error('[send] /api/campaigns/active failed', res); if (res.success && res.campaign) { activeSendCampaignId = res.campaign.id; renderActiveCampaign(res.campaign); document.getElementById('sendStatsCard').style.display = 'block'; pollSendStatus(res.campaign.id); if (['running', 'queued', 'paused'].includes(res.campaign.status)) startSendPolling(res.campaign.id); } else { document.getElementById('sendActiveCampaignInfo').innerHTML = '<div class="empty-state"><div class="empty-icon">🚀</div><p>No active campaign</p></div>'; document.getElementById('sendStatsCard').style.display = 'none'; } }
+function renderActiveCampaign(c) { document.getElementById('sendActiveCampaignInfo').innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;"><div><div style="font-size:16px;font-weight:700;">${escapeHtml(c.name)}</div><div style="font-size:12px;color:var(--text2);">Template: <strong>${escapeHtml(c.template_name || '—')}</strong> · <span class="badge badge-${c.status}">${c.status}</span></div></div></div>`; document.getElementById('sendStartBtn').style.display = c.status === 'queued' || c.status === 'draft' || c.status === 'paused' ? '' : 'none'; document.getElementById('sendPauseBtn').style.display = c.status === 'running' ? '' : 'none'; document.getElementById('sendStopBtn').style.display = c.status === 'running' || c.status === 'queued' || c.status === 'paused' ? '' : 'none'; document.getElementById('sendDeleteBtn').style.display = ['draft','completed','failed'].includes(c.status) ? '' : 'none'; }
+async function sendStart() { if (!activeSendCampaignId) return; const res = await apiCall(`/api/campaigns/${activeSendCampaignId}/start`, 'POST'); if (res.success) { showToast('▶ Started'); loadCampaigns(); loadActiveCampaign(); startSendPolling(activeSendCampaignId); } else showToast(res.error || 'Start failed', true); }
+async function sendStartCampaign(id) { const res = await apiCall(`/api/campaigns/${id}/start`, 'POST'); if (res.success) { showToast('▶ Started'); loadCampaigns(); loadActiveCampaign(); } else showToast(res.error || 'Start failed', true); }
+async function sendPause() { if (!activeSendCampaignId) return; const res = await apiCall(`/api/campaigns/${activeSendCampaignId}/pause`, 'POST'); if (res.success) { showToast(' Paused'); stopSendPolling(); loadCampaigns(); loadActiveCampaign(); } else showToast(res.error || 'Pause failed', true); }
+async function sendPauseCampaign(id) { await sendPause(); }
+async function sendStop() { if (!activeSendCampaignId) return; if (!confirm('Stop this campaign?')) return; const res = await apiCall(`/api/campaigns/${activeSendCampaignId}/stop`, 'POST'); if (res.success) { showToast(`⏹ Stopped`); stopSendPolling(); activeSendCampaignId = null; loadCampaigns(); loadActiveCampaign(); } else showToast(res.error || 'Stop failed', true); }
+async function sendDelete() { if (!activeSendCampaignId) return; if (!confirm('Delete this campaign?')) return; const res = await apiCall(`/api/campaigns/${activeSendCampaignId}`, 'DELETE'); if (res.success) { showToast('🗑 Deleted'); stopSendPolling(); activeSendCampaignId = null; document.getElementById('sendStatsCard').style.display = 'none'; loadCampaigns(); loadActiveCampaign(); } else showToast(res.error || 'Delete failed', true); }
+async function deleteCampaignFromList(id) { if (!confirm('Delete this campaign?')) return; const res = await apiCall(`/api/campaigns/${id}`, 'DELETE'); if (res.success) { showToast('Deleted'); loadCampaigns(); loadActiveCampaign(); } else showToast(res.error || 'Delete failed', true); }
+function startSendPolling(id) { stopSendPolling(); sendPollInterval = setInterval(() => pollSendStatus(id), 2500); }
+function stopSendPolling() { if (sendPollInterval) { clearInterval(sendPollInterval); sendPollInterval = null; } }
+async function pollSendStatus(id) { const campaignId = id || activeSendCampaignId; if (!campaignId) return; const res = await apiCall(`/api/campaigns/${campaignId}/status`); if (!res.success) { console.error('[send] status fetch failed for campaign', campaignId, res); document.getElementById('sendCurrentStatus').textContent = `⚠ ${res.error || 'Could not load status'}`; return; } const sent = res.sent || 0, failed = res.failed || 0, pending = res.pending || 0, total = res.total || 0; document.getElementById('sendSentCount').textContent = sent; document.getElementById('sendPendingCount').textContent = pending; document.getElementById('sendFailedCount').textContent = failed; document.getElementById('sendTotalCount').textContent = total; const pct = total > 0 ? Math.round(((sent + failed) / total) * 100) : 0; document.getElementById('sendProgressBar').style.width = pct + '%'; if (res.status === 'running' && res.gap_seconds > 0) document.getElementById('sendCurrentStatus').textContent = `⏳ Waiting ${res.gap_seconds}s...`; else { const statusMap = { draft:'Ready', queued:'Queued…', running:'Sending…', paused:'Paused', completed:'Completed ✅', failed:'Failed ❌' }; document.getElementById('sendCurrentStatus').textContent = statusMap[res.status] || res.status; } if (res.status === 'completed' || res.status === 'failed') { stopSendPolling(); loadCampaigns(); } if (res.status === 'paused') stopSendPolling(); }
+
+const MSG_TYPE_ICON = { text: '💬', image: '📷', video: '🎥', audio: '🎵', document: '📄', sticker: '🩹', location: '📍', button: '🔘', interactive: '🔘' };
+function timeAgo(iso) {
+  if (!iso) return '';
+  const diff = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return new Date(iso).toLocaleString();
+}
+// Reply is only allowed within WhatsApp's ~24h customer service window,
+// measured from this contact's most recent inbound message. Kept a hair
+// under Meta's real 24h limit as a safety margin; the server enforces the
+// real cutoff independently, this is just so the button reflects reality
+// instead of only failing after the user already typed a reply.
+const REPLY_WINDOW_HOURS = 22;
+let replyTargetPhone = null;
+
+async function loadReceivedMessages() {
+  const res = await apiCall('/api/messages/received');
+  const container = document.getElementById('receivedMessagesList');
+  const badge = document.getElementById('receivedUnreadBadge');
+  if (!res.success) return;
+  if (badge) {
+    if (res.unread > 0) { badge.style.display = ''; badge.textContent = res.unread > 99 ? '99+' : res.unread; }
+    else badge.style.display = 'none';
+  }
+  const messages = res.messages || [];
+  if (!container) return;
+  if (!messages.length) { container.innerHTML = '<div class="empty-state"><div class="empty-icon">📥</div><p>No messages received yet</p></div>'; return; }
+  container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>From</th><th>Type</th><th>Message</th><th>Received</th><th></th></tr></thead><tbody>${messages.map(m => {
+    const hoursSince = (Date.now() - new Date(m.created_at).getTime()) / 3600000;
+    const withinWindow = hoursSince <= REPLY_WINDOW_HOURS;
+    const replyBtn = withinWindow
+      ? `<button class="btn btn-primary btn-xs" onclick='openReplyModal(${JSON.stringify(m.phone)}, ${JSON.stringify(m.message_body || '')})'>↩ Reply</button>`
+      : `<button class="btn btn-ghost btn-xs" disabled title="Reply window closed (over ${REPLY_WINDOW_HOURS}h since their last message)">↩ Expired</button>`;
+    return `<tr style="${m.is_read ? '' : 'font-weight:700;'}"><td style="font-family:'DM Mono',monospace;font-size:12px;">${escapeHtml(m.contact_name ? `${m.contact_name} (${m.phone})` : m.phone)}</td><td>${MSG_TYPE_ICON[m.message_type] || '💬'} ${escapeHtml(m.message_type || 'text')}</td><td style="max-width:340px;overflow-wrap:anywhere;">${escapeHtml(m.message_body || '')}</td><td style="font-size:11px;color:var(--text2);white-space:nowrap;">${timeAgo(m.created_at)}</td><td>${replyBtn}</td></tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+
+function openReplyModal(phone, originalMessage) {
+  replyTargetPhone = phone;
+  document.getElementById('replyOriginalMessage').textContent = originalMessage || '(no text content)';
+  document.getElementById('replyMessageInput').value = '';
+  document.getElementById('replyModal').classList.add('open');
+}
+
+async function sendReply() {
+  const message = document.getElementById('replyMessageInput').value.trim();
+  if (!replyTargetPhone) return;
+  if (!message) { showToast('Type a message first', true); return; }
+
+  const btn = document.getElementById('replySendBtn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const res = await apiCall('/api/messages/reply', 'POST', { phone: replyTargetPhone, message });
+  btn.disabled = false; btn.textContent = 'Send';
+
+  if (res.success) {
+    showToast('✓ Reply sent');
+    closeModal('replyModal');
+  } else {
+    showToast(res.error || 'Failed to send reply', true);
+  }
+}
+
+async function markReceivedRead() { const res = await apiCall('/api/messages/received/mark-read', 'POST'); if (res.success) { showToast('✓ Marked all read'); loadReceivedMessages(); } }
+function startReceivedPolling() { stopReceivedPolling(); receivedPollInterval = setInterval(loadReceivedMessages, 8000); }
+function stopReceivedPolling() { if (receivedPollInterval) { clearInterval(receivedPollInterval); receivedPollInterval = null; } }
+
+async function loadAutoReplyModels(selected) { const sel = document.getElementById('autoReplyModel'); try { const res = await apiCall('/api/ai/models'); const models = res.models || []; sel.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join(''); if (selected && models.includes(selected)) sel.value = selected; } catch (e) { sel.innerHTML = '<option value="moonshotai/kimi-k2.6">moonshotai/kimi-k2.6</option>'; } }
+
+async function loadSettings() { const res = await apiCall('/api/settings'); if (!res.success) return; const s = res.settings || {}; document.getElementById('settingHourLimit').value = s.hour_limit || ''; document.getElementById('settingDayLimit').value = s.day_limit || ''; document.getElementById('settingMinGap').value = s.min_gap || ''; document.getElementById('settingMaxGap').value = s.max_gap || ''; document.getElementById('autoReplyEnabled').checked = !!s.auto_reply; document.getElementById('autoReplyPrompt').value = s.auto_reply_prompt || ''; await loadAutoReplyModels(s.auto_reply_model); }
+async function saveLimitSettings() { const res = await apiCall('/api/settings', 'POST', { hour_limit: parseInt(document.getElementById('settingHourLimit').value) || 0, day_limit: parseInt(document.getElementById('settingDayLimit').value) || 0, min_gap: parseInt(document.getElementById('settingMinGap').value) || 5, max_gap: parseInt(document.getElementById('settingMaxGap').value) || 15 }); if (res.success) showToast('Limits saved'); else showToast(res.error || 'Save failed', true); }
+async function saveAutoReplySettings() { const res = await apiCall('/api/settings', 'POST', { auto_reply: document.getElementById('autoReplyEnabled').checked, auto_reply_prompt: document.getElementById('autoReplyPrompt').value, auto_reply_model: document.getElementById('autoReplyModel').value }); if (res.success) showToast('Auto-reply saved'); else showToast(res.error || 'Save failed', true); }
+
+async function updateProfile() { const res = await apiCall('/api/profile', 'PUT', { full_name: document.getElementById('profileName').value, email: document.getElementById('profileEmail').value }); if (res.success) { showToast('Profile updated'); document.getElementById('userName').textContent = document.getElementById('profileName').value; } else showToast(res.error || 'Update failed', true); }
+async function loadWaAccounts() { const res = await apiCall('/api/wa/accounts'); renderWaAccounts(res.accounts || []); }
+
+// ── Billing tab ──────────────────────────────────────────────────────
+let billingPeriod = 'month';
+let billingRows = []; // raw rows from /api/billing/analytics
+
+function setBillingPeriod(period) {
+  billingPeriod = period;
+  document.querySelectorAll('.billing-period-btn').forEach(b => {
+    b.classList.toggle('btn-primary', b.dataset.period === period);
+    b.classList.toggle('btn-secondary', b.dataset.period !== period);
+  });
+  loadBillingAnalytics();
+}
+
+async function loadBillingAnalytics() {
+  const box = document.getElementById('billingBreakdown');
+  const errBox = document.getElementById('billingErrorBox');
+  box.innerHTML = '<div class="empty-state"><div class="empty-icon">💳</div><p>Loading…</p></div>';
+  errBox.style.display = 'none';
+
+  const res = await apiCall(`/api/billing/analytics?period=${billingPeriod}`);
+  if (!res.success) {
+    errBox.textContent = res.error || 'Failed to load billing data';
+    errBox.style.display = 'block';
+    box.innerHTML = '';
+    return;
+  }
+  billingRows = res.rows || [];
+  if (res.errors?.length) {
+    errBox.textContent = res.errors.map(e => e.error).join(' · ');
+    errBox.style.display = 'block';
+  }
+  renderBillingAnalytics();
+}
+
+// pricing_type -> human label + whether it's free, per Meta's pricing_analytics
+// docs: REGULAR is billable/business-initiated; FREE_CUSTOMER_SERVICE is a
+// free reply inside the 24h service window; FREE_ENTRY_POINT is free inside
+// the 72h ad/CTA click-in window.
+const PRICING_TYPE_LABELS = {
+  REGULAR: 'Business-initiated (billed)',
+  FREE_CUSTOMER_SERVICE: 'Free — 24h reply window',
+  FREE_ENTRY_POINT: 'Free — 72h entry-point window',
+  UNKNOWN: 'Unknown'
+};
+
+function renderBillingAnalytics() {
+  const categoryFilter = document.getElementById('billingCategoryFilter').value;
+  const freePaidFilter = document.getElementById('billingFreePaidFilter').value;
+  const windowFilter = document.getElementById('billingWindowFilter').value;
+
+  const filtered = billingRows.filter(r => {
+    if (categoryFilter !== 'all' && r.pricing_category !== categoryFilter) return false;
+    if (windowFilter !== 'all' && r.pricing_type !== windowFilter) return false;
+    const isFree = r.pricing_type !== 'REGULAR';
+    if (freePaidFilter === 'free' && !isFree) return false;
+    if (freePaidFilter === 'paid' && isFree) return false;
+    return true;
+  });
+
+  const totalCost = filtered.reduce((s, r) => s + r.cost, 0);
+  const totalVolume = filtered.reduce((s, r) => s + r.volume, 0);
+  const freeVolume = filtered.filter(r => r.pricing_type !== 'REGULAR').reduce((s, r) => s + r.volume, 0);
+  const paidVolume = filtered.filter(r => r.pricing_type === 'REGULAR').reduce((s, r) => s + r.volume, 0);
+
+  document.getElementById('billingSummaryCards').innerHTML = `
+    <div class="limit-card"><label>Total Cost</label><div style="font-size:20px;font-weight:700;">${totalCost.toFixed(4)}</div></div>
+    <div class="limit-card"><label>Total Messages</label><div style="font-size:20px;font-weight:700;">${totalVolume}</div></div>
+    <div class="limit-card"><label>Free Messages</label><div style="font-size:20px;font-weight:700;color:var(--green);">${freeVolume}</div></div>
+    <div class="limit-card"><label>Paid Messages</label><div style="font-size:20px;font-weight:700;color:var(--red);">${paidVolume}</div></div>
+  `;
+
+  // Group by category + pricing_type for the breakdown table
+  const groups = {};
+  for (const r of filtered) {
+    const key = `${r.pricing_category}::${r.pricing_type}`;
+    if (!groups[key]) groups[key] = { category: r.pricing_category, pricing_type: r.pricing_type, cost: 0, volume: 0 };
+    groups[key].cost += r.cost;
+    groups[key].volume += r.volume;
+  }
+  const groupList = Object.values(groups).sort((a, b) => b.cost - a.cost);
+
+  const box = document.getElementById('billingBreakdown');
+  if (!groupList.length) {
+    box.innerHTML = '<div class="empty-state"><div class="empty-icon">💳</div><p>No messages match these filters for this period</p></div>';
+    return;
+  }
+  const maxCost = Math.max(...groupList.map(g => g.cost), 0.0001);
+  box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Type</th><th>Window</th><th>Messages</th><th>Cost</th><th></th></tr></thead><tbody>${groupList.map(g => `
+    <tr>
+      <td>${escapeHtml(g.category)}</td>
+      <td>${escapeHtml(PRICING_TYPE_LABELS[g.pricing_type] || g.pricing_type)}</td>
+      <td>${g.volume}</td>
+      <td>${g.cost.toFixed(4)}</td>
+      <td style="min-width:120px;"><div style="background:var(--bg2);border-radius:4px;height:8px;overflow:hidden;"><div style="background:${g.pricing_type === 'REGULAR' ? 'var(--red)' : 'var(--green)'};height:100%;width:${(g.cost / maxCost) * 100}%;"></div></div></td>
+    </tr>`).join('')}</tbody></table></div>`;
+}
+
+// Mirrors the templates tab's "Refresh Meta" pattern: pulls current
+// quality_rating for every connected number straight from Meta (quality
+// drifts over time based on recent sending behavior — the last-saved
+// value can go stale), rather than only showing whatever was cached
+// locally when the number was first connected.
+async function refreshWaQuality() {
+  const btn = document.getElementById('refreshWaQualityBtn');
+  const originalText = btn?.textContent || '🔄 Refresh';
+  if (btn) { btn.textContent = '⏳ Refreshing...'; btn.disabled = true; }
+
+  const res = await apiCall('/api/wa/accounts/refresh-quality', 'POST');
+  if (res.success) {
+    renderWaAccounts(res.accounts || []);
+    if (res.failed?.length) {
+      showToast(`Updated ${res.updated}, ${res.failed.length} failed`, true);
+    } else if (res.updated > 0) {
+      showToast(`✓ Quality ratings refreshed`);
+    }
+  } else {
+    showToast(res.error || 'Failed to refresh quality ratings', true);
+  }
+
+  if (btn) { btn.textContent = originalText; btn.disabled = false; }
+}
+function renderWaAccounts(accounts) { const div = document.getElementById('waAccountsList'); if (!accounts.length) { div.innerHTML = '<div class="empty-state"><div class="empty-icon"></div><p>No numbers connected</p></div>'; return; } div.innerHTML = accounts.map(a => `<div class="data-row"><div><div class="data-row-title">${escapeHtml(a.display_name || a.phone_number)}</div><div class="data-row-sub" style="font-family:'DM Mono',monospace;">${a.phone_number}</div><div style="margin-top:4px;display:flex;gap:6px;"><span class="badge badge-green">Quality: ${a.quality_rating||'N/A'}</span>${a.is_active ? '<span class="badge badge-green">● Active</span>' : ''}</div></div><button class="btn btn-danger btn-xs" onclick="disconnectNumber('${a.id}')">Disconnect</button></div>`).join(''); if (accounts.length > 0) { const acc = accounts[0]; document.getElementById('waNumberDisplay').textContent = acc.phone_number || '—'; document.getElementById('waStatus').className = 'badge badge-green'; document.getElementById('waStatus').textContent = '● Connected'; document.getElementById('waQuality').innerHTML = `<span class="badge badge-green">Quality: ${acc.quality_rating || 'N/A'}</span>`; } }
+async function disconnectNumber(id) { if (!confirm('Disconnect this number?')) return; const res = await apiCall(`/api/wa/accounts/${id}`, 'DELETE'); if (res.success) { showToast('Disconnected'); loadWaAccounts(); } else showToast(res.error || 'Failed', true); }
+
+function openWaConnectModal() { document.getElementById('waConnWabaId').value = ''; document.getElementById('waConnToken').value = ''; document.getElementById('waConnError1').textContent = ''; document.getElementById('waConnError2').textContent = ''; waResetConnectModal(); openModal('waConnectModal'); }
+function closeWaConnectModal() { closeModal('waConnectModal'); }
+async function waVerifyNumbers() { const wabaId = document.getElementById('waConnWabaId').value.trim(); const token = document.getElementById('waConnToken').value.trim(); const errEl = document.getElementById('waConnError1'); const btn = document.getElementById('waConnVerifyBtn'); errEl.textContent = ''; if (!wabaId || !token) { errEl.textContent = 'Both fields required.'; return; } btn.disabled = true; btn.textContent = 'Checking…'; try { const res = await fetch(`${API_BASE_URL}/api/wa/manual/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ waba_id: wabaId, access_token: token }) }); const data = await res.json(); if (!data.success) { errEl.textContent = data.error || 'Verification failed.'; btn.disabled = false; btn.textContent = 'Find My Numbers →'; return; } waConnNumbersCache = data.numbers; renderWaConnNumbers(); document.getElementById('waConnectStep1').style.display = 'none'; document.getElementById('waConnectStep2').style.display = 'block'; } catch (err) { errEl.textContent = 'Network error: ' + err.message; } finally { btn.disabled = false; btn.textContent = 'Find My Numbers →'; } }
+function renderWaConnNumbers() { const list = document.getElementById('waConnNumberList'); list.innerHTML = waConnNumbersCache.map((n, i) => `<div class="data-row" id="waConnNum${i}" style="cursor:pointer;border:2px solid var(--border2);" onclick="waSelectConnNumber(${i})"><div><div class="data-row-title">${escapeHtml(n.display_name)}</div><div class="data-row-sub" style="font-family:'DM Mono',monospace;">${n.phone_number} · ${n.quality_rating}</div></div></div>`).join(''); if (waConnNumbersCache.length === 1) waSelectConnNumber(0); }
+function waSelectConnNumber(i) { document.querySelectorAll('#waConnNumberList .data-row').forEach(el => el.style.borderColor = 'var(--border2)'); document.getElementById('waConnNum' + i).style.borderColor = 'var(--green)'; waConnSelectedNumber = waConnNumbersCache[i]; }
+async function waSaveNumber() { const errEl = document.getElementById('waConnError2'); const btn = document.getElementById('waConnSaveBtn'); errEl.textContent = ''; if (!waConnSelectedNumber) { errEl.textContent = 'Select a number first.'; return; } btn.disabled = true; btn.textContent = 'Connecting…'; try { const res = await fetch(`${API_BASE_URL}/api/wa/manual/save`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` }, body: JSON.stringify({ waba_id: document.getElementById('waConnWabaId').value.trim(), phone_number_id: waConnSelectedNumber.phone_number_id, access_token: document.getElementById('waConnToken').value.trim() }) }); const data = await res.json(); if (!data.success) { errEl.textContent = data.error || 'Failed to save.'; btn.disabled = false; btn.textContent = 'Connect This Number'; return; } showToast(`✅ ${data.phone_number} connected!`); closeWaConnectModal(); await loadWaAccounts(); } catch (err) { errEl.textContent = 'Network error: ' + err.message; } finally { btn.disabled = false; btn.textContent = 'Connect This Number'; } }
+function waResetConnectModal() { document.getElementById('waConnectStep2').style.display = 'none'; document.getElementById('waConnectStep1').style.display = 'block'; document.getElementById('waConnVerifyBtn').disabled = false; document.getElementById('waConnVerifyBtn').textContent = 'Find My Numbers →'; waConnSelectedNumber = null; waConnNumbersCache = []; }
+
+async function switchTab(tabName) { document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); const panel = document.getElementById(`tab-${tabName}`); const nav = document.querySelector(`[data-tab="${tabName}"]`); if (panel) panel.classList.add('active'); if (nav) nav.classList.add('active'); if (window.innerWidth <= 860) document.getElementById('sidebar').classList.remove('open'); if (tabName === 'send') loadActiveCampaign(); if (tabName === 'templates') renderTemplates(); if (tabName === 'contacts') renderContacts(); if (tabName === 'campaigns') { loadCampaigns(); loadTemplatesForCampaignSelect(); } if (tabName === 'logs') loadCampaigns(); if (tabName === 'received') { loadReceivedMessages(); startReceivedPolling(); } else stopReceivedPolling(); if (tabName === 'settings') loadSettings(); if (tabName === 'account') loadWaAccounts(); if (tabName === 'billing') setBillingPeriod(billingPeriod); }
+
+document.querySelectorAll('.nav-item').forEach(n => n.addEventListener('click', () => switchTab(n.dataset.tab)));
+// Catch OAuth hash if redirected from Google/FB (e.g. #access_token=...)
+if (window.location.hash && window.location.hash.includes('access_token')) {
+  const params = new URLSearchParams(window.location.hash.substring(1));
+  const hashToken = params.get('access_token');
+  if (hashToken) {
+    localStorage.setItem('supabase_token', hashToken);
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+}
+
+const savedToken = localStorage.getItem('supabase_token');
+if (savedToken) { authToken = savedToken; loadDashboard(); } else { window.location.href = '/login.html'; }
+
+window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.toggleCampaignScheduleInput = toggleCampaignScheduleInput; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates; window.updateCampaignContactCount = updateCampaignContactCount; window.renderCampaignGroups = renderCampaignGroups; window.openReplyModal = openReplyModal; window.sendReply = sendReply; window.refreshWaQuality = refreshWaQuality; window.setBillingPeriod = setBillingPeriod; window.loadBillingAnalytics = loadBillingAnalytics; window.renderBillingAnalytics = renderBillingAnalytics;
+</script>
+</body>
+</html>
