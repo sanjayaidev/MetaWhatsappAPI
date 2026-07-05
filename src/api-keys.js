@@ -1,5 +1,18 @@
+// src/api-keys.js — Supabase REST API (no pg driver)
+// Rewritten to match server.js's approach and avoid the pg/IPv6 connection
+// issue on Render: this module used to go through src/db.js (a raw `pg` Pool
+// on DATABASE_URL, which resolves to an IPv6-only Supabase host and fails
+// with ECONNREFUSED/ENETUNREACH on hosts without outbound IPv6). It now uses
+// @supabase/supabase-js exclusively, same as the rest of the app.
+
 const crypto = require('crypto');
-const pool = require('./db');
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY, // service_role bypasses RLS
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
 
 /**
  * Generate a secure API key
@@ -10,13 +23,13 @@ function generateApiKey() {
   const prefix = 'sk_live_';
   const randomPart = crypto.randomBytes(24).toString('hex');
   const apiKey = `${prefix}${randomPart}`;
-  
+
   // Hash the key for storage (SHA-256)
   const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
-  
+
   // Store first 8 chars after prefix for identification
   const keyPrefix = randomPart.substring(0, 8);
-  
+
   return { apiKey, keyHash, keyPrefix };
 }
 
@@ -29,40 +42,50 @@ async function verifyApiKey(apiKey) {
   if (!apiKey || !apiKey.startsWith('sk_live_')) {
     return null;
   }
-  
+
   const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
-  
+
   try {
-    const result = await pool.query(`
-      SELECT 
-        k.id, k.user_id, k.name, k.key_prefix,
-        k.can_send_messages, k.can_read_messages, k.can_manage_templates,
-        k.can_manage_contacts, k.can_manage_campaigns, k.can_manage_accounts,
-        k.can_access_analytics,
-        k.rate_limit_per_minute, k.rate_limit_per_hour, k.rate_limit_per_day,
-        k.scoped_phone_number_id, k.expires_at, k.is_active,
-        u.email as user_email
-      FROM wb_api_keys k
-      JOIN auth.users u ON k.user_id = u.id
-      WHERE k.key_hash = $1 AND k.is_active = true
-        AND (k.expires_at IS NULL OR k.expires_at > NOW())
-    `, [keyHash]);
-    
-    if (result.rows.length === 0) {
+    const nowIso = new Date().toISOString();
+
+    const { data: keyData, error } = await supabase
+      .from('wb_api_keys')
+      .select('*')
+      .eq('key_hash', keyHash)
+      .eq('is_active', true)
+      .or(`expires_at.is.null,expires_at.gt.${nowIso}`)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[API Key Verification Error]', error.message);
       return null;
     }
-    
-    const keyData = result.rows[0];
-    
-    // Update last_used_at
-    await pool.query(`
-      UPDATE wb_api_keys SET last_used_at = NOW() WHERE id = $1
-    `, [keyData.id]);
-    
+    if (!keyData) {
+      return null;
+    }
+
+    // Look up the owner's email (best-effort — not critical to auth)
+    let userEmail = null;
+    try {
+      const { data: userData } = await supabase.auth.admin.getUserById(keyData.user_id);
+      userEmail = userData?.user?.email || null;
+    } catch (e) {
+      console.error('[API Key Verification] Could not fetch user email:', e.message);
+    }
+
+    // Update last_used_at (fire-and-forget, don't block the request on it)
+    supabase
+      .from('wb_api_keys')
+      .update({ last_used_at: nowIso })
+      .eq('id', keyData.id)
+      .then(({ error: updateErr }) => {
+        if (updateErr) console.error('[API Key] last_used_at update failed:', updateErr.message);
+      });
+
     return {
       id: keyData.id,
       userId: keyData.user_id,
-      email: keyData.user_email,
+      email: userEmail,
       name: keyData.name,
       keyPrefix: keyData.key_prefix,
       permissions: {
@@ -88,7 +111,13 @@ async function verifyApiKey(apiKey) {
 }
 
 /**
- * Check rate limit for an API key
+ * Check rate limit for an API key.
+ * NOTE: this does a read-then-write increment per bucket instead of an atomic
+ * SQL `ON CONFLICT ... SET count = count + 1`, since that's not expressible
+ * through the Supabase REST client. Under very high concurrent request bursts
+ * from the *same* key this can under-count slightly — acceptable for
+ * per-customer API rate limiting, but worth knowing if you ever need
+ * hard, exact limits.
  * @param {string} apiKeyId - The API key ID
  * @param {number} perMinute - Max requests per minute
  * @param {number} perHour - Max requests per hour
@@ -100,58 +129,69 @@ async function checkRateLimit(apiKeyId, perMinute, perHour, perDay) {
   const minuteBucket = new Date(now.setSeconds(0, 0));
   const hourBucket = new Date(now.setMinutes(0, 0, 0));
   const dayBucket = new Date(now.setHours(0, 0, 0, 0));
-  
+  const minuteIso = minuteBucket.toISOString();
+  const hourIso = hourBucket.toISOString();
+  const dayIso = dayBucket.toISOString();
+
   try {
-    // Check all three time windows
-    const result = await pool.query(`
-      SELECT 
-        (SELECT COALESCE(SUM(request_count), 0) FROM wb_api_key_usage 
-         WHERE api_key_id = $1 AND minute_bucket = $2) as minute_count,
-        (SELECT COALESCE(SUM(request_count), 0) FROM wb_api_key_usage 
-         WHERE api_key_id = $1 AND hour_bucket = $3) as hour_count,
-        (SELECT COALESCE(SUM(request_count), 0) FROM wb_api_key_usage 
-         WHERE api_key_id = $1 AND day_bucket = $4) as day_count
-    `, [apiKeyId, minuteBucket.toISOString(), hourBucket.toISOString(), dayBucket.toISOString()]);
-    
-    const counts = result.rows[0];
-    
-    if (counts.minute_count >= perMinute) {
+    const sumFor = async (column, value) => {
+      const { data, error } = await supabase
+        .from('wb_api_key_usage')
+        .select('request_count')
+        .eq('api_key_id', apiKeyId)
+        .eq(column, value);
+      if (error) throw error;
+      return (data || []).reduce((sum, row) => sum + (row.request_count || 0), 0);
+    };
+
+    const [minuteCount, hourCount, dayCount] = await Promise.all([
+      sumFor('minute_bucket', minuteIso),
+      sumFor('hour_bucket', hourIso),
+      sumFor('day_bucket', dayIso)
+    ]);
+
+    if (minuteCount >= perMinute) {
       return { allowed: false, remaining: 0, resetAt: new Date(minuteBucket.getTime() + 60000), reason: 'minute' };
     }
-    if (counts.hour_count >= perHour) {
+    if (hourCount >= perHour) {
       return { allowed: false, remaining: 0, resetAt: new Date(hourBucket.getTime() + 3600000), reason: 'hour' };
     }
-    if (counts.day_count >= perDay) {
+    if (dayCount >= perDay) {
       return { allowed: false, remaining: 0, resetAt: new Date(dayBucket.getTime() + 86400000), reason: 'day' };
     }
-    
-    // Increment usage counters (upsert)
+
+    // Increment usage counters (upsert per bucket type, matching the three
+    // original unique constraints: (api_key_id, minute_bucket),
+    // (api_key_id, hour_bucket), (api_key_id, day_bucket))
+    const upsertBucket = async (conflictCols, currentCount) => {
+      const { error } = await supabase
+        .from('wb_api_key_usage')
+        .upsert(
+          {
+            api_key_id: apiKeyId,
+            minute_bucket: minuteIso,
+            hour_bucket: hourIso,
+            day_bucket: dayIso,
+            request_count: currentCount + 1,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: conflictCols }
+        );
+      if (error) throw error;
+    };
+
     await Promise.all([
-      pool.query(`
-        INSERT INTO wb_api_key_usage (api_key_id, minute_bucket, hour_bucket, day_bucket, request_count)
-        VALUES ($1, $2, $3, $4, 1)
-        ON CONFLICT (api_key_id, minute_bucket) DO UPDATE SET request_count = wb_api_key_usage.request_count + 1, updated_at = NOW()
-      `, [apiKeyId, minuteBucket.toISOString(), hourBucket.toISOString(), dayBucket.toISOString()]),
-      
-      pool.query(`
-        INSERT INTO wb_api_key_usage (api_key_id, minute_bucket, hour_bucket, day_bucket, request_count)
-        VALUES ($1, $2, $3, $4, 1)
-        ON CONFLICT (api_key_id, hour_bucket) DO UPDATE SET request_count = wb_api_key_usage.request_count + 1, updated_at = NOW()
-      `, [apiKeyId, minuteBucket.toISOString(), hourBucket.toISOString(), dayBucket.toISOString()]),
-      
-      pool.query(`
-        INSERT INTO wb_api_key_usage (api_key_id, minute_bucket, hour_bucket, day_bucket, request_count)
-        VALUES ($1, $2, $3, $4, 1)
-        ON CONFLICT (api_key_id, day_bucket) DO UPDATE SET request_count = wb_api_key_usage.request_count + 1, updated_at = NOW()
-      `, [apiKeyId, minuteBucket.toISOString(), hourBucket.toISOString(), dayBucket.toISOString()])
+      upsertBucket('api_key_id,minute_bucket', minuteCount),
+      upsertBucket('api_key_id,hour_bucket', hourCount),
+      upsertBucket('api_key_id,day_bucket', dayCount)
     ]);
-    
+
     const remaining = Math.min(
-      perMinute - counts.minute_count - 1,
-      perHour - counts.hour_count - 1,
-      perDay - counts.day_count - 1
+      perMinute - minuteCount - 1,
+      perHour - hourCount - 1,
+      perDay - dayCount - 1
     );
-    
+
     return { allowed: true, remaining, resetAt: new Date(minuteBucket.getTime() + 60000) };
   } catch (err) {
     console.error('[Rate Limit Check Error]', err.message);
@@ -166,45 +206,41 @@ async function checkRateLimit(apiKeyId, perMinute, perHour, perDay) {
  */
 async function createApiKey(params) {
   const { apiKey, keyHash, keyPrefix } = generateApiKey();
-  
-  const result = await pool.query(`
-    INSERT INTO wb_api_keys (
-      user_id, name, key_hash, key_prefix,
-      can_send_messages, can_read_messages, can_manage_templates,
-      can_manage_contacts, can_manage_campaigns, can_manage_accounts,
-      can_access_analytics,
-      rate_limit_per_minute, rate_limit_per_hour, rate_limit_per_day,
-      scoped_phone_number_id, description, expires_at
-    ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
-    )
-    RETURNING id, name, key_prefix, created_at
-  `, [
-    params.userId,
-    params.name,
-    keyHash,
-    keyPrefix,
-    params.permissions?.canSendMessages || false,
-    params.permissions?.canReadMessages || false,
-    params.permissions?.canManageTemplates || false,
-    params.permissions?.canManageContacts || false,
-    params.permissions?.canManageCampaigns || false,
-    params.permissions?.canManageAccounts || false,
-    params.permissions?.canAccessAnalytics || false,
-    params.rateLimits?.perMinute || 60,
-    params.rateLimits?.perHour || 1000,
-    params.rateLimits?.perDay || 10000,
-    params.scopedPhoneNumberId || null,
-    params.description || null,
-    params.expiresAt || null
-  ]);
-  
+
+  const { data, error } = await supabase
+    .from('wb_api_keys')
+    .insert({
+      user_id: params.userId,
+      name: params.name,
+      key_hash: keyHash,
+      key_prefix: keyPrefix,
+      can_send_messages: params.permissions?.canSendMessages || false,
+      can_read_messages: params.permissions?.canReadMessages || false,
+      can_manage_templates: params.permissions?.canManageTemplates || false,
+      can_manage_contacts: params.permissions?.canManageContacts || false,
+      can_manage_campaigns: params.permissions?.canManageCampaigns || false,
+      can_manage_accounts: params.permissions?.canManageAccounts || false,
+      can_access_analytics: params.permissions?.canAccessAnalytics || false,
+      rate_limit_per_minute: params.rateLimits?.perMinute || 60,
+      rate_limit_per_hour: params.rateLimits?.perHour || 1000,
+      rate_limit_per_day: params.rateLimits?.perDay || 10000,
+      scoped_phone_number_id: params.scopedPhoneNumberId || null,
+      description: params.description || null,
+      expires_at: params.expiresAt || null
+    })
+    .select('id, name, key_prefix, created_at')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
   return {
-    id: result.rows[0].id,
-    name: result.rows[0].name,
-    keyPrefix: result.rows[0].key_prefix,
+    id: data.id,
+    name: data.name,
+    keyPrefix: data.key_prefix,
     apiKey, // Return full key only once
-    createdAt: result.rows[0].created_at
+    createdAt: data.created_at
   };
 }
 
@@ -214,19 +250,24 @@ async function createApiKey(params) {
  * @returns {Promise<Array>} List of keys (without actual key values)
  */
 async function listApiKeys(userId) {
-  const result = await pool.query(`
-    SELECT id, name, key_prefix, 
-           can_send_messages, can_read_messages, can_manage_templates,
-           can_manage_contacts, can_manage_campaigns, can_manage_accounts,
-           can_access_analytics,
-           rate_limit_per_minute, rate_limit_per_hour, rate_limit_per_day,
-           scoped_phone_number_id, last_used_at, expires_at, is_active, created_at
-    FROM wb_api_keys
-    WHERE user_id = $1
-    ORDER BY created_at DESC
-  `, [userId]);
-  
-  return result.rows.map(row => ({
+  const { data, error } = await supabase
+    .from('wb_api_keys')
+    .select(`
+      id, name, key_prefix,
+      can_send_messages, can_read_messages, can_manage_templates,
+      can_manage_contacts, can_manage_campaigns, can_manage_accounts,
+      can_access_analytics,
+      rate_limit_per_minute, rate_limit_per_hour, rate_limit_per_day,
+      scoped_phone_number_id, last_used_at, expires_at, is_active, created_at
+    `)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data || []).map(row => ({
     id: row.id,
     name: row.name,
     keyPrefix: row.key_prefix,
@@ -259,13 +300,18 @@ async function listApiKeys(userId) {
  * @returns {Promise<boolean>} Success status
  */
 async function revokeApiKey(keyId, userId) {
-  const result = await pool.query(`
-    UPDATE wb_api_keys SET is_active = false, updated_at = NOW()
-    WHERE id = $1 AND user_id = $2
-    RETURNING id
-  `, [keyId, userId]);
-  
-  return result.rows.length > 0;
+  const { data, error } = await supabase
+    .from('wb_api_keys')
+    .update({ is_active: false, updated_at: new Date().toISOString() })
+    .eq('id', keyId)
+    .eq('user_id', userId)
+    .select('id');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data || []).length > 0;
 }
 
 module.exports = {
