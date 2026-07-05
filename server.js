@@ -1170,6 +1170,62 @@ app.delete('/api/wa/accounts/:id', verifyUser, async (req, res) => {
   res.json({ success: true, message: 'Number disconnected' });
 });
 
+// Pulls the current quality_rating (and display name) for every one of the
+// user's connected numbers straight from Meta, rather than trusting
+// whatever was last saved locally — quality can drift up/down over time
+// based on recent sending behavior, independent of any action taken here.
+app.post('/api/wa/accounts/refresh-quality', verifyUser, async (req, res) => {
+  const { data: accounts, error } = await supabase
+    .from('wa_accounts')
+    .select('id, phone_number_id, access_token')
+    .eq('user_id', req.user.id)
+    .eq('is_active', true);
+  if (error) return res.status(500).json({ error: error.message });
+  if (!accounts?.length) return res.json({ success: true, updated: 0, accounts: [] });
+
+  const results = await Promise.all(accounts.map(async (acc) => {
+    try {
+      const plainToken = decryptToken(acc.access_token);
+      const metaRes = await fetch(
+        `https://graph.facebook.com/${META_API_VERSION}/${acc.phone_number_id}?fields=quality_rating,verified_name,display_phone_number`,
+        { headers: { 'Authorization': `Bearer ${plainToken}` } }
+      );
+      const metaData = await metaRes.json();
+      if (!metaRes.ok) {
+        return { id: acc.id, ok: false, error: metaData.error?.message || `Meta API ${metaRes.status}` };
+      }
+      const { error: updateErr } = await supabase
+        .from('wa_accounts')
+        .update({
+          quality_rating: metaData.quality_rating || 'UNKNOWN',
+          display_name: metaData.verified_name || undefined,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', acc.id);
+      if (updateErr) {
+        console.error('[refresh-quality] failed to save for account', acc.id, updateErr);
+        return { id: acc.id, ok: false, error: updateErr.message };
+      }
+      return { id: acc.id, ok: true, quality_rating: metaData.quality_rating || 'UNKNOWN' };
+    } catch (err) {
+      return { id: acc.id, ok: false, error: err.message };
+    }
+  }));
+
+  const { data: refreshed } = await supabase
+    .from('wa_accounts')
+    .select('id, waba_id, phone_number_id, phone_number, display_name, quality_rating, is_active, created_at')
+    .eq('user_id', req.user.id)
+    .order('created_at', { ascending: false });
+
+  res.json({
+    success: true,
+    updated: results.filter(r => r.ok).length,
+    failed: results.filter(r => !r.ok),
+    accounts: refreshed || []
+  });
+});
+
 app.post('/api/wa/manual/verify', async (req, res) => {
   const { waba_id, access_token } = req.body;
   if (!waba_id || !access_token) return res.status(400).json({ error: 'waba_id and access_token required' });
@@ -1241,6 +1297,92 @@ app.post('/api/wa/manual/save', verifyUser, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ================================================================
+// 11b. BILLING (real Meta charges via pricing_analytics)
+// ================================================================
+// Pulls actual per-message cost/volume from Meta's pricing_analytics field
+// (WABA-level Graph API insight), broken down by pricing_category
+// (marketing/utility/authentication/service) and pricing_type:
+//   REGULAR               -> billable, business-initiated
+//   FREE_CUSTOMER_SERVICE  -> free, sent inside the 24h reply window
+//   FREE_ENTRY_POINT       -> free, sent inside a 72h ad/CTA click-in window
+// NOTE: field/parameter names here are taken directly from Meta's current
+// developer docs, but this endpoint has not been exercised against a live
+// WABA in this environment — verify the shape of one real response (e.g.
+// via the Graph API Explorer) before trusting these numbers for financial
+// decisions. If Meta changes the response shape, the parsing below may
+// need small adjustments.
+app.get('/api/billing/analytics', verifyUser, async (req, res) => {
+  const period = ['day', 'week', 'month'].includes(req.query.period) ? req.query.period : 'month';
+  const now = new Date();
+  let start;
+  if (period === 'day') {
+    start = new Date(now); start.setHours(0, 0, 0, 0);
+  } else if (period === 'week') {
+    start = new Date(now); start.setDate(now.getDate() - 6); start.setHours(0, 0, 0, 0);
+  } else {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+  const startTs = Math.floor(start.getTime() / 1000);
+  const endTs = Math.floor(now.getTime() / 1000);
+
+  const { data: accounts, error } = await supabase
+    .from('wa_accounts')
+    .select('waba_id, phone_number_id, access_token')
+    .eq('user_id', req.user.id)
+    .eq('is_active', true);
+  if (error) return res.status(500).json({ error: error.message });
+  if (!accounts?.length) {
+    return res.json({ success: true, period, start: startTs, end: endTs, rows: [], errors: [] });
+  }
+
+  // A single WABA can own multiple connected numbers — group so we call
+  // Meta once per WABA (scoped to just this user's connected numbers via
+  // phone_numbers filter), not once per number.
+  const byWaba = {};
+  for (const acc of accounts) {
+    if (!acc.waba_id) continue;
+    if (!byWaba[acc.waba_id]) byWaba[acc.waba_id] = { access_token: acc.access_token, phoneNumberIds: [] };
+    byWaba[acc.waba_id].phoneNumberIds.push(acc.phone_number_id);
+  }
+
+  const rows = [];
+  const errors = [];
+  await Promise.all(Object.entries(byWaba).map(async ([wabaId, info]) => {
+    try {
+      const plainToken = decryptToken(info.access_token);
+      const fieldsExpr =
+        `pricing_analytics.start(${startTs}).end(${endTs}).granularity(DAILY)` +
+        `.phone_numbers(${JSON.stringify(info.phoneNumberIds)})` +
+        `.metric_types(["COST","VOLUME"])` +
+        `.dimensions(["PRICING_CATEGORY","PRICING_TYPE"])`;
+      const url = `https://graph.facebook.com/${META_API_VERSION}/${wabaId}?fields=${encodeURIComponent(fieldsExpr)}`;
+      const metaRes = await fetch(url, { headers: { 'Authorization': `Bearer ${plainToken}` } });
+      const metaData = await metaRes.json();
+      if (!metaRes.ok) {
+        errors.push({ waba_id: wabaId, error: metaData.error?.message || `Meta API ${metaRes.status}` });
+        return;
+      }
+      const dataPoints = metaData.pricing_analytics?.data || [];
+      for (const dp of dataPoints) {
+        rows.push({
+          waba_id: wabaId,
+          start: dp.start, end: dp.end,
+          cost: Number(dp.cost) || 0,
+          volume: Number(dp.volume) || 0,
+          pricing_category: dp.pricing_category || 'UNKNOWN',
+          pricing_type: dp.pricing_type || 'UNKNOWN'
+        });
+      }
+    } catch (err) {
+      errors.push({ waba_id: wabaId, error: err.message });
+    }
+  }));
+
+  res.json({ success: true, period, start: startTs, end: endTs, rows, errors });
+});
+
 
 // ================================================================
 // 12. EXTERNAL API (n8n / Zapier)
