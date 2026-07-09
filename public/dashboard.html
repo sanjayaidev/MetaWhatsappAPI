@@ -305,7 +305,14 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 </div>
 <div class="card">
 <div class="card-header"><div class="card-title">📞 Connected Numbers</div><div style="display:flex;gap:8px;"><button id="refreshWaQualityBtn" class="btn btn-secondary btn-sm" onclick="refreshWaQuality()" title="Get latest quality rating from Meta">🔄 Refresh</button><button class="btn btn-primary btn-sm" onclick="openWaConnectModal()">➕ Connect Number</button></div></div>
-<div id="waAccountsList" style="margin-top:8px;"><div class="empty-state"><div class="empty-icon">📱</div><p>No numbers connected</p></div></div>
+<div style="margin-bottom:18px;">
+  <button class="btn btn-primary" style="width:100%;justify-content:center;" id="waEsConnectBtn" onclick="startEmbeddedSignup()">
+    <span id="waEsConnectBtnLabel">🔵 Login with Facebook</span>
+  </button>
+  <div id="waEsStatus" style="font-size:12px;color:var(--text2);margin-top:8px;min-height:16px;"></div>
+  <div style="text-align:center;font-size:11px;color:var(--text3);margin:14px 0;">— or connect manually —</div>
+</div>
+  <div id="waAccountsList" style="margin-top:8px;"><div class="empty-state"><div class="empty-icon">📱</div><p>No numbers connected</p></div></div>
 </div>
 </div>
 </div>
@@ -497,7 +504,103 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 </div>
 </div>
 <div class="toast" id="toast"></div>
-
+<script>
+// Point this at your deployed edge function base URL.
+const EDGE_FN_BASE = 'https://<YOUR-PROJECT-REF>.supabase.co/functions/v1/whatsapp-embedded-signup';
+ 
+let waEsPopup = null;
+let waEsPopupWatcher = null;
+let waEsCurrentState = null;
+ 
+async function startEmbeddedSignup() {
+  const btn = document.getElementById('waEsConnectBtn');
+  const statusEl = document.getElementById('waEsStatus');
+  btn.disabled = true;
+  statusEl.textContent = 'Opening Facebook login…';
+ 
+  try {
+    const res = await fetch(`${EDGE_FN_BASE}/start`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${authToken}` }
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Failed to start signup');
+ 
+    waEsCurrentState = data.state;
+    waEsPopup = window.open(data.landingUrl, 'wa_embedded_signup', 'width=600,height=800');
+    if (!waEsPopup) throw new Error('Popup blocked — please allow popups for this site and try again');
+ 
+    statusEl.textContent = 'Complete the steps in the popup window…';
+    window.addEventListener('message', handleWaEsMessage);
+ 
+    clearInterval(waEsPopupWatcher);
+    waEsPopupWatcher = setInterval(() => {
+      if (waEsPopup && waEsPopup.closed) {
+        clearInterval(waEsPopupWatcher);
+        window.removeEventListener('message', handleWaEsMessage);
+        btn.disabled = false;
+        // The popup may have closed itself right after success, or the
+        // user may have closed it manually — either way, refresh from
+        // the server rather than guessing which happened.
+        statusEl.textContent = 'Checking connection status…';
+        loadWaAccounts().then(() => { statusEl.textContent = ''; });
+      }
+    }, 800);
+  } catch (err) {
+    statusEl.textContent = '';
+    btn.disabled = false;
+    showToast(err.message, true);
+  }
+}
+ 
+async function handleWaEsMessage(event) {
+  const msg = event.data;
+  if (!msg || typeof msg !== 'object') return;
+ 
+  // Fired mid-flow, once the customer has picked/created a WABA + number
+  // (before Meta redirects the popup for the OAuth code exchange).
+  if (msg.type === 'WA_EMBEDDED_SIGNUP' && msg.event === 'FINISH' && msg.data) {
+    const statusEl = document.getElementById('waEsStatus');
+    if (statusEl) statusEl.textContent = 'Number selected — finishing setup…';
+    try {
+      await fetch(`${EDGE_FN_BASE}/session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          state: waEsCurrentState,
+          waba_id: msg.data.waba_id,
+          phone_number_id: msg.data.phone_number_id
+        })
+      });
+    } catch (e) {
+      console.error('Failed to record embedded signup session:', e);
+    }
+  }
+ 
+  if (msg.type === 'WA_EMBEDDED_SIGNUP' && (msg.event === 'CANCEL' || msg.event === 'ERROR')) {
+    const statusEl = document.getElementById('waEsStatus');
+    if (statusEl) statusEl.textContent = '';
+    showToast('Signup was cancelled', true);
+  }
+ 
+  // Fired by the edge function's /callback page right before it closes itself.
+  if (msg.type === 'WA_ES_SERVER_RESULT') {
+    window.removeEventListener('message', handleWaEsMessage);
+    clearInterval(waEsPopupWatcher);
+    document.getElementById('waEsConnectBtn').disabled = false;
+    document.getElementById('waEsStatus').textContent = '';
+    if (msg.ok) {
+      showToast(`✅ ${msg.phone_number} connected!`);
+      closeWaConnectModal();
+      await loadWaAccounts();
+    } else {
+      showToast(msg.error || 'Failed to connect number', true);
+    }
+  }
+}
+ 
+window.startEmbeddedSignup = startEmbeddedSignup;
+</script>
 <script>
 const API_BASE_URL = window.location.origin;
 let authToken = null, currentUser = null, contacts = [], templates = [], campaigns = [];
