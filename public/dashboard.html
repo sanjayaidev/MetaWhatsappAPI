@@ -86,7 +86,18 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 .empty-state { text-align: center; padding: 40px 20px; color: var(--text3); } .empty-state .empty-icon { font-size: 36px; margin-bottom: 12px; } .empty-state p { font-size: 13px; }
 </style>
 </head>
-<body>
+<body><div id="fb-root"></div>
+<script>
+  window.fbAsyncInit = function() {
+    FB.init({
+      appId: '1316992410378026',   // your META_APP_ID
+      autoLogAppEvents: true,
+      xfbml: false,
+      version: 'v25.0'             // match what the dashboard tool showed
+    });
+  };
+</script>
+<script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
 <div class="app" id="app">
 <div class="mobile-topbar">
 <button class="menu-btn" onclick="toggleSidebar()"></button>
@@ -508,18 +519,18 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 // Point this at your deployed edge function base URL.
 const EDGE_FN_BASE = 'https://vnytcmoyvfyrvcmshwsz.supabase.co/functions/v1/whatsapp-embedded-signup';
  
-let waEsPopup = null;
-let waEsPopupWatcher = null;
 let waEsCurrentState = null;
-let waEsCompleting = false; // guards against double-firing /complete if Meta sends multiple messages
- 
+let waEsAuthCode = null;
+let waEsSessionInfo = null; // { waba_id, phone_number_id }
+
 async function startEmbeddedSignup() {
   const btn = document.getElementById('waEsConnectBtn');
   const statusEl = document.getElementById('waEsStatus');
   btn.disabled = true;
-  waEsCompleting = false;
+  waEsAuthCode = null;
+  waEsSessionInfo = null;
   statusEl.textContent = 'Opening Facebook login…';
- 
+
   try {
     const res = await fetch(`${EDGE_FN_BASE}/start`, {
       method: 'POST',
@@ -527,101 +538,89 @@ async function startEmbeddedSignup() {
     });
     const data = await res.json();
     if (!data.success) throw new Error(data.error || 'Failed to start signup');
- 
     waEsCurrentState = data.state;
-    waEsPopup = window.open(data.landingUrl, 'wa_embedded_signup', 'width=600,height=800');
-    if (!waEsPopup) throw new Error('Popup blocked — please allow popups for this site and try again');
- 
-    statusEl.textContent = 'Complete the steps in the popup window…';
-    window.addEventListener('message', handleWaEsMessage);
- 
-    clearInterval(waEsPopupWatcher);
-    waEsPopupWatcher = setInterval(() => {
-      if (waEsPopup && waEsPopup.closed) {
-        clearInterval(waEsPopupWatcher);
-        window.removeEventListener('message', handleWaEsMessage);
+
+    FB.login((response) => {
+      if (response.authResponse?.code) {
+        waEsAuthCode = response.authResponse.code;
+        maybeFinishEmbeddedSignup();
+      } else {
+        statusEl.textContent = '';
         btn.disabled = false;
-        if (!waEsCompleting) {
-          // Popup closed without us ever getting a usable postMessage —
-          // most likely the user closed it manually, or cancelled partway.
-          statusEl.textContent = '';
-        }
+        showToast('Facebook login was cancelled or denied', true);
       }
-    }, 800);
+    }, {
+      config_id: data.configId, // server hands this back, see step 4
+      response_type: 'code',
+      override_default_response_type: true,
+      extras: { sessionInfoVersion: '3' }
+    });
   } catch (err) {
     statusEl.textContent = '';
     btn.disabled = false;
     showToast(err.message, true);
   }
 }
- 
-async function handleWaEsMessage(event) {
-  const msg = event.data;
-  if (!msg || typeof msg !== 'object') return;
- 
-  // Log EVERYTHING we get from Meta while we're still confirming the exact
-  // payload shape Hosted ES sends. Once confirmed, this can be trimmed down.
-  console.log('[wa embedded signup] postMessage received:', msg);
- 
-  if (msg.type !== 'WA_EMBEDDED_SIGNUP') return;
- 
+
+window.addEventListener('message', (event) => {
+  if (!event.origin.endsWith('facebook.com')) return;
+  let data;
+  try { data = JSON.parse(event.data); } catch { return; }
+  if (data.type !== 'WA_EMBEDDED_SIGNUP') return;
+
+  console.log('[wa embedded signup] postMessage:', data);
   const statusEl = document.getElementById('waEsStatus');
- 
-  if (msg.event === 'CANCEL' || msg.event === 'ERROR') {
-    if (statusEl) statusEl.textContent = '';
-    showToast(msg.event === 'CANCEL' ? 'Signup was cancelled' : 'Signup failed in the Facebook flow', true);
-    return;
+
+  if (data.event === 'FINISH' || data.event === 'FINISH_ONLY_WABA') {
+    waEsSessionInfo = data.data; // { waba_id, phone_number_id }
+    maybeFinishEmbeddedSignup();
+  } else if (data.event === 'CANCEL') {
+    statusEl.textContent = '';
+    document.getElementById('waEsConnectBtn').disabled = false;
+    showToast('Signup cancelled at step: ' + (data.data?.current_step || '?'), true);
+  } else if (data.event === 'ERROR') {
+    statusEl.textContent = '';
+    document.getElementById('waEsConnectBtn').disabled = false;
+    showToast('Signup error: ' + (data.data?.error_message || 'unknown'), true);
   }
- 
-  // FINISH (and possibly FINISH_ONLY_WABA) carry the data we need. Grab
-  // waba_id/phone_number_id from msg.data, and look for a code anywhere it
-  // might plausibly be — top-level, under data, or under an authResponse
-  // shape — since we haven't 100% confirmed which key Hosted ES uses yet.
-  if (msg.event === 'FINISH' || msg.event === 'FINISH_ONLY_WABA') {
-    if (waEsCompleting) return; // avoid double-submitting on duplicate messages
-    waEsCompleting = true;
- 
-    const waba_id = msg.data?.waba_id;
-    const phone_number_id = msg.data?.phone_number_id;
-    const code = msg.code || msg.data?.code || msg.authResponse?.code || msg.data?.authResponse?.code;
- 
-    if (statusEl) statusEl.textContent = 'Finishing setup…';
- 
-    try {
-      const res = await fetch(`${EDGE_FN_BASE}/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          state: waEsCurrentState,
-          waba_id,
-          phone_number_id,
-          code,
-          raw: msg // send the full raw message too, so the edge function's log shows exactly what arrived
-        })
-      });
-      const data = await res.json();
- 
-      if (statusEl) statusEl.textContent = '';
-      window.removeEventListener('message', handleWaEsMessage);
-      clearInterval(waEsPopupWatcher);
-      document.getElementById('waEsConnectBtn').disabled = false;
-      if (waEsPopup && !waEsPopup.closed) waEsPopup.close();
- 
-      if (data.success) {
-        showToast(`✅ ${data.phone_number} connected!`);
-        closeWaConnectModal();
-        await loadWaAccounts();
-      } else {
-        showToast(data.error || 'Failed to connect number — check the browser console for the raw payload', true);
-      }
-    } catch (err) {
-      if (statusEl) statusEl.textContent = '';
-      showToast('Network error finishing signup: ' + err.message, true);
-      waEsCompleting = false;
+});
+
+// Both the code (from FB.login callback) and the session info (from
+// postMessage) arrive independently and in no guaranteed order — only
+// fire /complete once we have both.
+async function maybeFinishEmbeddedSignup() {
+  if (!waEsAuthCode || !waEsSessionInfo) return;
+  const statusEl = document.getElementById('waEsStatus');
+  const btn = document.getElementById('waEsConnectBtn');
+  statusEl.textContent = 'Finishing setup…';
+
+  try {
+    const res = await fetch(`${EDGE_FN_BASE}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+      body: JSON.stringify({
+        state: waEsCurrentState,
+        code: waEsAuthCode,
+        waba_id: waEsSessionInfo.waba_id,
+        phone_number_id: waEsSessionInfo.phone_number_id
+      })
+    });
+    const data = await res.json();
+    statusEl.textContent = '';
+    btn.disabled = false;
+    if (data.success) {
+      showToast(`✅ ${data.phone_number} connected!`);
+      closeWaConnectModal();
+      await loadWaAccounts();
+    } else {
+      showToast(data.error || 'Failed to connect number', true);
     }
+  } catch (err) {
+    statusEl.textContent = '';
+    btn.disabled = false;
+    showToast('Network error: ' + err.message, true);
   }
 }
- 
 window.startEmbeddedSignup = startEmbeddedSignup;
 </script>
 <script>
