@@ -306,7 +306,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="card">
 <div class="card-header"><div class="card-title">📞 Connected Numbers</div><div style="display:flex;gap:8px;"><button id="refreshWaQualityBtn" class="btn btn-secondary btn-sm" onclick="refreshWaQuality()" title="Get latest quality rating from Meta">🔄 Refresh</button><button class="btn btn-primary btn-sm" onclick="openWaConnectModal()">➕ Connect Number</button></div></div>
 <div style="margin-bottom:18px;">
-  <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center;" id="waEsConnectBtn" onclick="startEmbeddedSignup()">
+  <button class="btn btn-primary" style="width:100%;justify-content:center;" id="waEsConnectBtn" onclick="startEmbeddedSignup()">
     <span id="waEsConnectBtnLabel">🔵 Login with Facebook</span>
   </button>
   <div id="waEsStatus" style="font-size:12px;color:var(--text2);margin-top:8px;min-height:16px;"></div>
@@ -511,11 +511,13 @@ const EDGE_FN_BASE = 'https://vnytcmoyvfyrvcmshwsz.supabase.co/functions/v1/what
 let waEsPopup = null;
 let waEsPopupWatcher = null;
 let waEsCurrentState = null;
+let waEsCompleting = false; // guards against double-firing /complete if Meta sends multiple messages
  
 async function startEmbeddedSignup() {
   const btn = document.getElementById('waEsConnectBtn');
   const statusEl = document.getElementById('waEsStatus');
   btn.disabled = true;
+  waEsCompleting = false;
   statusEl.textContent = 'Opening Facebook login…';
  
   try {
@@ -539,11 +541,11 @@ async function startEmbeddedSignup() {
         clearInterval(waEsPopupWatcher);
         window.removeEventListener('message', handleWaEsMessage);
         btn.disabled = false;
-        // The popup may have closed itself right after success, or the
-        // user may have closed it manually — either way, refresh from
-        // the server rather than guessing which happened.
-        statusEl.textContent = 'Checking connection status…';
-        loadWaAccounts().then(() => { statusEl.textContent = ''; });
+        if (!waEsCompleting) {
+          // Popup closed without us ever getting a usable postMessage —
+          // most likely the user closed it manually, or cancelled partway.
+          statusEl.textContent = '';
+        }
       }
     }, 800);
   } catch (err) {
@@ -557,44 +559,65 @@ async function handleWaEsMessage(event) {
   const msg = event.data;
   if (!msg || typeof msg !== 'object') return;
  
-  // Fired mid-flow, once the customer has picked/created a WABA + number
-  // (before Meta redirects the popup for the OAuth code exchange).
-  if (msg.type === 'WA_EMBEDDED_SIGNUP' && msg.event === 'FINISH' && msg.data) {
-    const statusEl = document.getElementById('waEsStatus');
-    if (statusEl) statusEl.textContent = 'Number selected — finishing setup…';
+  // Log EVERYTHING we get from Meta while we're still confirming the exact
+  // payload shape Hosted ES sends. Once confirmed, this can be trimmed down.
+  console.log('[wa embedded signup] postMessage received:', msg);
+ 
+  if (msg.type !== 'WA_EMBEDDED_SIGNUP') return;
+ 
+  const statusEl = document.getElementById('waEsStatus');
+ 
+  if (msg.event === 'CANCEL' || msg.event === 'ERROR') {
+    if (statusEl) statusEl.textContent = '';
+    showToast(msg.event === 'CANCEL' ? 'Signup was cancelled' : 'Signup failed in the Facebook flow', true);
+    return;
+  }
+ 
+  // FINISH (and possibly FINISH_ONLY_WABA) carry the data we need. Grab
+  // waba_id/phone_number_id from msg.data, and look for a code anywhere it
+  // might plausibly be — top-level, under data, or under an authResponse
+  // shape — since we haven't 100% confirmed which key Hosted ES uses yet.
+  if (msg.event === 'FINISH' || msg.event === 'FINISH_ONLY_WABA') {
+    if (waEsCompleting) return; // avoid double-submitting on duplicate messages
+    waEsCompleting = true;
+ 
+    const waba_id = msg.data?.waba_id;
+    const phone_number_id = msg.data?.phone_number_id;
+    const code = msg.code || msg.data?.code || msg.authResponse?.code || msg.data?.authResponse?.code;
+ 
+    if (statusEl) statusEl.textContent = 'Finishing setup…';
+ 
     try {
-      await fetch(`${EDGE_FN_BASE}/session`, {
+      const res = await fetch(`${EDGE_FN_BASE}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           state: waEsCurrentState,
-          waba_id: msg.data.waba_id,
-          phone_number_id: msg.data.phone_number_id
+          waba_id,
+          phone_number_id,
+          code,
+          raw: msg // send the full raw message too, so the edge function's log shows exactly what arrived
         })
       });
-    } catch (e) {
-      console.error('Failed to record embedded signup session:', e);
-    }
-  }
+      const data = await res.json();
  
-  if (msg.type === 'WA_EMBEDDED_SIGNUP' && (msg.event === 'CANCEL' || msg.event === 'ERROR')) {
-    const statusEl = document.getElementById('waEsStatus');
-    if (statusEl) statusEl.textContent = '';
-    showToast('Signup was cancelled', true);
-  }
+      if (statusEl) statusEl.textContent = '';
+      window.removeEventListener('message', handleWaEsMessage);
+      clearInterval(waEsPopupWatcher);
+      document.getElementById('waEsConnectBtn').disabled = false;
+      if (waEsPopup && !waEsPopup.closed) waEsPopup.close();
  
-  // Fired by the edge function's /callback page right before it closes itself.
-  if (msg.type === 'WA_ES_SERVER_RESULT') {
-    window.removeEventListener('message', handleWaEsMessage);
-    clearInterval(waEsPopupWatcher);
-    document.getElementById('waEsConnectBtn').disabled = false;
-    document.getElementById('waEsStatus').textContent = '';
-    if (msg.ok) {
-      showToast(`✅ ${msg.phone_number} connected!`);
-      closeWaConnectModal();
-      await loadWaAccounts();
-    } else {
-      showToast(msg.error || 'Failed to connect number', true);
+      if (data.success) {
+        showToast(`✅ ${data.phone_number} connected!`);
+        closeWaConnectModal();
+        await loadWaAccounts();
+      } else {
+        showToast(data.error || 'Failed to connect number — check the browser console for the raw payload', true);
+      }
+    } catch (err) {
+      if (statusEl) statusEl.textContent = '';
+      showToast('Network error finishing signup: ' + err.message, true);
+      waEsCompleting = false;
     }
   }
 }
