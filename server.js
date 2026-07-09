@@ -1232,6 +1232,7 @@ app.get('/api/wa/accounts', verifyUser, async (req, res) => {
     .from('wa_accounts')
     .select('id, waba_id, phone_number_id, phone_number, display_name, quality_rating, is_active, created_at')
     .eq('user_id', req.user.id)
+    .eq('is_active', true)
     .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true, accounts: data || [] });
