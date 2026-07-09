@@ -287,7 +287,69 @@ app.put('/api/profile', verifyUser, async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
 });
+// ============================================================
+// Add this block to server.js, near the other /api/wa/* routes
+// (e.g. right after app.post('/api/wa/manual/save', ...)).
+//
+// Also add to your .env / Render environment:
+//   INTERNAL_API_SECRET=<a long random string, matching the edge function's secret>
+// ============================================================
 
+// Guards the one endpoint the whatsapp-embedded-signup edge function is
+// allowed to call. This is intentionally NOT verifyUser — the edge function
+// has already authenticated the end user itself (via their Supabase JWT in
+// /start) and is acting as a trusted backend, not as that user's browser.
+const verifyInternalSecret = (req, res, next) => {
+  const provided = req.headers['x-internal-secret'];
+  if (!process.env.INTERNAL_API_SECRET || provided !== process.env.INTERNAL_API_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  next();
+};
+
+// Final step of the Embedded Signup flow: the edge function has already
+// exchanged the code, subscribed webhooks, and registered the number by the
+// time this is called. All this does is encrypt the token and persist the
+// account — the same shape as /api/wa/manual/save, minus the Meta calls.
+app.post('/api/internal/wa/embedded-signup-complete', verifyInternalSecret, async (req, res) => {
+  const { user_id, waba_id, phone_number_id, access_token, phone_number, display_name, quality_rating } = req.body || {};
+  if (!user_id || !waba_id || !phone_number_id || !access_token || !phone_number) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  try {
+    const encryptedToken = encryptToken(access_token);
+
+    const { data: inserted, error: insertErr } = await supabase
+      .from('wa_accounts')
+      .insert({
+        user_id,
+        waba_id,
+        phone_number_id,
+        phone_number,
+        display_name: display_name || phone_number,
+        access_token: encryptedToken,
+        quality_rating: quality_rating || 'UNKNOWN',
+        is_active: true,
+        messages_sent_today: 0,
+        last_reset_date: new Date().toISOString().split('T')[0],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select('id')
+      .single();
+
+    if (insertErr) {
+      console.error('[embedded-signup-complete] insert failed', insertErr);
+      return res.status(500).json({ error: 'Failed to save account: ' + insertErr.message });
+    }
+
+    res.json({ success: true, account_id: inserted.id });
+  } catch (err) {
+    console.error('[embedded-signup-complete] error', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 // ================================================================
 // 7. TEMPLATES ROUTES
 // ================================================================
