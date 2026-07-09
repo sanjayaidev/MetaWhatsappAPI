@@ -1616,7 +1616,11 @@ app.post('/webhook', async (req, res) => {
         }
       }
     }
-  }
+  } else {
+  // Catches account_update and anything else not explicitly handled above.
+  console.log(`[webhook] UNHANDLED field "${field}" for WABA ${entry.id}:`);
+  console.log(JSON.stringify(value, null, 2));
+}
 });
 
 // Pulls a readable preview + type out of any inbound WhatsApp message payload,
