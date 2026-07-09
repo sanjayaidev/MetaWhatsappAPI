@@ -1614,13 +1614,15 @@ app.post('/webhook', async (req, res) => {
         } else {
           console.warn('[webhook] template_status_update: no wa_account found for WABA', entry.id);
         }
+      } else {
+        // TEMPORARY diagnostic branch — catches account_update and anything
+        // else not explicitly handled above, so we can see the real payload
+        // shape. Remove once account_update handling is built for real.
+        console.log(`[webhook] UNHANDLED field "${field}" for WABA ${entry.id}:`);
+        console.log(JSON.stringify(value, null, 2));
       }
     }
-  } else {
-  // Catches account_update and anything else not explicitly handled above.
-  console.log(`[webhook] UNHANDLED field "${field}" for WABA ${entry.id}:`);
-  console.log(JSON.stringify(value, null, 2));
-}
+  }
 });
 
 // Pulls a readable preview + type out of any inbound WhatsApp message payload,
