@@ -2141,7 +2141,7 @@ app.listen(PORT, () => {
     } catch (_) {}
   }, 14 * 60 * 1000);
 });
-function validateAndCoerce(reply: WhatsAppReply): WhatsAppReply {
+function validateAndCoerce(reply) {
   if (reply.type === "button") {
     reply.buttons = reply.buttons.slice(0, 3).map(b => ({
       ...b,
