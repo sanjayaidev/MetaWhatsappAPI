@@ -1,0 +1,151 @@
+// ---- Core message shapes matching Meta's Cloud API payloads ----
+
+interface SendText {
+  type: "text";
+  body: string; // max 4096 chars (Meta limit), but keep replies <1000 for readability
+}
+
+interface SendButtonMessage {
+  type: "button";
+  header?: { type: "text"; text: string } | { type: "image"; url: string }; // header text max 60 chars
+  body: string; // max 1024 chars
+  footer?: string; // max 60 chars
+  buttons: Array<{
+    id: string;        // unique, used in webhook when tapped
+    title: string;     // MAX 20 CHARS — hard Meta limit
+  }>; // MAX 3 BUTTONS — hard Meta limit
+}
+
+interface SendListMessage {
+  type: "list";
+  header?: string; // max 60 chars
+  body: string; // max 1024 chars
+  footer?: string; // max 60 chars
+  button_text: string; // the "Menu" trigger label, max 20 chars
+  sections: Array<{
+    title: string; // MAX 24 CHARS
+    rows: Array<{
+      id: string;
+      title: string;       // max 24 chars
+      description?: string; // max 72 chars
+    }>;
+  }>; // TOTAL rows across all sections MAX 10 — hard Meta limit
+}
+
+interface SendCtaUrl {
+  type: "cta_url";
+  header?: string;
+  body: string;
+  footer?: string;
+  button_text: string; // max 20 chars
+  url: string;
+}
+
+interface SendImage {
+  type: "image";
+  url: string;
+  caption?: string; // max 1024 chars
+}
+
+interface SendLocationRequest {
+  type: "location_request";
+  body: string;
+}
+
+type WhatsAppReply =
+  | SendText
+  | SendButtonMessage
+  | SendListMessage
+  | SendCtaUrl
+  | SendImage
+  | SendLocationRequest;
+
+[
+  {
+    "name": "send_text",
+    "description": "Plain text reply. Use for general conversation, explanations, or anything not needing quick actions.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "body": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["body"]
+    }
+  },
+  {
+    "name": "send_buttons",
+    "description": "Use when offering the user up to 3 quick tap choices (e.g. Yes/No, Track Order/Cancel/Help).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "body": { "type": "string", "maxLength": 1024 },
+        "buttons": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string", "maxLength": 20 }
+            },
+            "required": ["id", "title"]
+          }
+        }
+      },
+      "required": ["body", "buttons"]
+    }
+  },
+  {
+    "name": "send_list",
+    "description": "Use when offering 4-10 options (e.g. product categories, FAQ topics) — more than buttons can hold.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "body": { "type": "string", "maxLength": 1024 },
+        "button_text": { "type": "string", "maxLength": 20 },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string", "maxLength": 24 },
+              "description": { "type": "string", "maxLength": 72 }
+            },
+            "required": ["id", "title"]
+          }
+        }
+      },
+      "required": ["body", "button_text", "rows"]
+    }
+  },
+  {
+    "name": "send_cta_url",
+    "description": "Use when directing the user to an external link (payment page, website, form).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "body": { "type": "string", "maxLength": 1024 },
+        "button_text": { "type": "string", "maxLength": 20 },
+        "url": { "type": "string" }
+      },
+      "required": ["body", "button_text", "url"]
+    }
+  },
+  {
+    "name": "send_image",
+    "description": "Use when a visual (product photo, receipt, screenshot) helps the reply.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "caption": { "type": "string", "maxLength": 1024 }
+      },
+      "required": ["url"]
+    }
+  }
+]
+
