@@ -763,7 +763,6 @@ app.post('/api/settings', verifyUser, async (req, res) => {
   if (req.body.auto_reply !== undefined) update.auto_reply = req.body.auto_reply;
   if (req.body.auto_reply_prompt !== undefined) update.auto_reply_prompt = req.body.auto_reply_prompt;
   if (req.body.auto_reply_model !== undefined) update.auto_reply_model = req.body.auto_reply_model;
-  if (req.body.groq_key !== undefined && req.body.groq_key !== '••••••••') update.groq_key = req.body.groq_key;
 
   const { error } = await supabase
     .from('wb_settings')
