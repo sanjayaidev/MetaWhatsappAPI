@@ -2141,3 +2141,26 @@ app.listen(PORT, () => {
     } catch (_) {}
   }, 14 * 60 * 1000);
 });
+function validateAndCoerce(reply: WhatsAppReply): WhatsAppReply {
+  if (reply.type === "button") {
+    reply.buttons = reply.buttons.slice(0, 3).map(b => ({
+      ...b,
+      title: b.title.slice(0, 20)
+    }));
+    if (reply.buttons.length === 0) {
+      return { type: "text", body: reply.body }; // graceful fallback
+    }
+  }
+  if (reply.type === "list") {
+    reply.sections.forEach(s => {
+      s.title = s.title.slice(0, 24);
+      s.rows = s.rows.slice(0, 10).map(r => ({
+        ...r,
+        title: r.title.slice(0, 24),
+        description: r.description?.slice(0, 72)
+      }));
+    });
+    // enforce total rows ≤10 across all sections
+  }
+  return reply;
+}
