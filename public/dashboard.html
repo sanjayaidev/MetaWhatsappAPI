@@ -1060,7 +1060,7 @@ function parsePaste() {
 }
 async function saveContactsToDb() { const res = await apiCall('/api/contacts', 'POST', { contacts }); if (res.success) { showToast('Contacts saved'); loadContacts(); } else showToast(res.error || 'Save failed', true); }
 function clearContacts() { if (!confirm('Clear all contacts?')) return; contacts = []; renderContacts(); }
-const RESERVED_CONTACT_COLUMNS = new Set(['name', 'phone', 'mobile', 'message', 'group']);
+const RESERVED_CONTACT_COLUMNS = new Set(['name', 'phone', 'mobile', 'number', 'phonenumber', 'message', 'group']);
 function extractCustomFields(row) {
   const fields = {};
   for (const key of Object.keys(row)) {
@@ -1073,15 +1073,34 @@ function extractCustomFields(row) {
   }
   return Object.keys(fields).length ? fields : null;
 }
+// Quote-aware CSV line splitter: handles commas and escaped quotes ("") inside "quoted" fields.
+function parseCsvLine(line) {
+  const out = []; let cur = ''; let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; } // escaped quote
+        else { inQuotes = false; }
+      } else { cur += ch; }
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { out.push(cur); cur = ''; }
+      else cur += ch;
+    }
+  }
+  out.push(cur);
+  return out.map(v => v.trim());
+}
 async function importFile() {
   const file = document.getElementById('importFile').files[0]; const group = document.getElementById('pasteGroup').value.trim() || 'Default';
   if (!file) { showToast('Select a file first', true); return; }
   const ext = file.name.split('.').pop().toLowerCase(); let data = [];
-  if (ext === 'csv') { const text = await file.text(); const lines = text.split(/\r?\n/); const headers = lines[0].split(',').map(h => h.toLowerCase().trim()); for (let i = 1; i < lines.length; i++) { const vals = lines[i].split(','); if (!vals.join('').trim()) continue; const row = {}; headers.forEach((h, idx) => row[h] = vals[idx]?.trim() || ''); data.push(row); } }
+  if (ext === 'csv') { const text = await file.text(); const lines = text.split(/\r?\n/).filter(l => l.trim() !== ''); const headers = parseCsvLine(lines[0]).map(h => h.toLowerCase().trim()); for (let i = 1; i < lines.length; i++) { const vals = parseCsvLine(lines[i]); if (!vals.join('').trim()) continue; const row = {}; headers.forEach((h, idx) => row[h] = vals[idx]?.trim() || ''); data.push(row); } }
   else { const buf = await file.arrayBuffer(); const wb = XLSX.read(buf); const ws = wb.Sheets[wb.SheetNames[0]]; data = XLSX.utils.sheet_to_json(ws); }
   let added = 0, extraCols = new Set();
   for (const row of data) {
-    let phone = String(row.phone || row.mobile || '').replace(/\D/g,'');
+    let phone = String(row.phone || row.mobile || row.number || row.phonenumber || '').replace(/\D/g,'');
     if (phone.length === 10) phone = '91' + phone;
     if (phone.length >= 10 && !contacts.some(c => c.phone === phone)) {
       const custom_fields = extractCustomFields(row);
