@@ -97,7 +97,8 @@ module.exports = function flowsRouter(deps) {
     let authUrl;
     if (service === 'google') {
       const clientId = process.env.GOOGLE_CLIENT_ID;
-      const redirectUri = `${process.env.APP_URL || ''}/api/oauth/google/callback`;
+      const baseUrl = (process.env.APP_URL || '').replace(/\/$/, ''); // Remove trailing slash
+      const redirectUri = `${baseUrl}/api/oauth/google/callback`;
       if (!clientId || !redirectUri) {
         return res.status(500).json({ error: 'Google OAuth not configured' });
       }
@@ -149,7 +150,7 @@ module.exports = function flowsRouter(deps) {
           body: new URLSearchParams({
             code, client_id: process.env.GOOGLE_CLIENT_ID,
             client_secret: process.env.GOOGLE_CLIENT_SECRET,
-            redirect_uri: `${process.env.APP_URL || ''}/api/oauth/google/callback`,
+            redirect_uri: `${(process.env.APP_URL || '').replace(/\/$/, '')}/api/oauth/google/callback`,
             grant_type: 'authorization_code'
           })
         });
