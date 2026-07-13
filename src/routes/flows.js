@@ -1,5 +1,6 @@
 // src/routes/flows.js — Visual flow builder for multi-step automations
 const express = require('express');
+const crypto = require('crypto');
 
 module.exports = function flowsRouter(deps) {
   const { supabase, encryptToken, decryptToken, verifyUser, fetch } = deps;
