@@ -88,11 +88,13 @@ module.exports = function flowsRouter(deps) {
     }
 
     const state = crypto.randomBytes(16).toString('hex');
+    console.log('[OAuth URL] Generating state:', state, 'for user:', req.user.id);
     // Store pending state
-    await supabase.from('wb_oauth_tokens').upsert({
+    const { data: upsertData, error: upsertError } = await supabase.from('wb_oauth_tokens').upsert({
       user_id: req.user.id, service, token_type: 'oauth2',
       access_token_enc: 'pending:' + state, metadata: { oauth_state: state }
     }, { onConflict: 'user_id,service' });
+    console.log('[OAuth URL] Upsert result:', upsertError || 'success');
 
     let authUrl;
     if (service === 'google') {
@@ -132,12 +134,14 @@ module.exports = function flowsRouter(deps) {
   router.get('/:service/callback', async (req, res) => {
     const { service } = req.params;
     const { code, state, error: oauthError } = req.query;
+    console.log('[OAuth Callback] service:', service, 'state:', state, 'code:', code ? 'present' : 'missing');
     if (oauthError) return res.status(400).send(`OAuth failed: ${oauthError}`);
     if (!code || !state) return res.status(400).send('Missing code/state');
 
     // Find pending connection
-    const { data: pending } = await supabase.from('wb_oauth_tokens')
+    const { data: pending, error: lookupError } = await supabase.from('wb_oauth_tokens')
       .select('*').eq('service', service).contains('metadata', { oauth_state: state }).single();
+    console.log('[OAuth Lookup] found:', !!pending, 'error:', lookupError);
     if (!pending) return res.status(400).send('Could not match OAuth state');
 
     try {
