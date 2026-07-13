@@ -5,7 +5,7 @@
 A unified **Leads** module added on top of the existing WaBlast Pro backend (Express + Postgres/Supabase, Meta Cloud API for WhatsApp). One lead record aggregates every channel it touched, with a per-channel conversation tab, automated first-touch messaging, meeting sync, subscription gating, and an AI chatbot (website widget + in-dashboard assistant).
 
 Channels in scope:
-- **Google Sheets** (lead source, poll or Apps Script push trigger)
+- **Google Sheets** (lead source, poll or Apps Script push trigger) — now with improved UI: dropdowns for selecting sheets and pages, automatic column header detection
 - **Web Forms** (generic webhook receiver, any form builder can POST to it)
 - **Instagram** DMs + comments (Meta Graph API — you're building the Meta app)
 - **Facebook Page** DMs + comments (Meta Graph API — same app as above)
@@ -13,6 +13,36 @@ Channels in scope:
 - **WhatsApp** — already exists, gets wired into the unified lead record
 - **smbooking** — your own booking product; meetings synced onto the lead timeline
 - **Website AI chatbot widget** — becomes a lead source too (web channel)
+
+## Google Sheets Integration Improvements
+
+### Enhanced User Experience
+The Google Sheets connection interface has been significantly improved:
+
+1. **Sheet Filtering**: Only actual Google Spreadsheet files are now shown in the dropdown (non-sheet files like Docs, PDFs, etc. are filtered out by mimeType check)
+
+2. **Visual Flow Indicator**: An arrow (→) is displayed between the Sheet and Page dropdowns to clearly indicate the relationship and flow
+
+3. **Automatic Column Detection**: When a sheet and page are selected, column headers are automatically fetched from the first row of the worksheet and populated into a dropdown menu in the field mapping section
+
+4. **Dropdown-Based Field Mapping**: Instead of manually typing column names, users can now select from a dropdown populated with actual column headers from their selected sheet
+
+5. **User Feedback**: Toast notifications inform users when columns are successfully loaded or if there's an error
+
+### How It Works
+1. User connects Google account via OAuth
+2. System fetches only spreadsheet files from Google Drive (filtered by `mimeType='application/vnd.google-apps.spreadsheet'`)
+3. User selects a spreadsheet from the dropdown
+4. System fetches all worksheets (pages/tabs) within that spreadsheet
+5. User selects a worksheet from the second dropdown
+6. System reads the first row (A1:Z1) to extract column headers
+7. Column headers populate the "Column Header" dropdown in the Field Mapping section
+8. Users map these columns to CRM fields (name, phone, email, tag, custom) using dropdowns
+
+### Backend Changes
+- Updated `/api/oauth/google/sheets` endpoint to use proper query syntax and filter results by mimeType
+- Added client-side filtering as a safety measure to ensure only spreadsheets are displayed
+- Enhanced error handling with user-friendly toast notifications
 
 ## 2. Data model (new tables, `wb_` prefix, Postgres/Supabase, RLS per user_id)
 
