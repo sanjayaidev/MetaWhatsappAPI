@@ -249,8 +249,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="card-header"><div class="card-title">📧 Gmail</div><span class="badge badge-gray" id="badge-gmail">Not connected</span></div>
 <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Sends automated follow-up emails to leads from your Gmail account. (Outbound only — Gmail is not a lead capture source.)</p>
 <div id="gmailConnectedInfo" style="display:none;font-size:12.5px;color:var(--text2);margin-bottom:10px;">Sending as <strong id="gmailConnectedEmail" style="color:var(--text);"></strong></div>
-<button class="btn btn-secondary btn-sm" id="gmailConnectBtn" onclick="connectOAuth('google')">G Connect Gmail Account</button>
-<button class="btn btn-ghost btn-sm" id="gmailDisconnectBtn" style="display:none;" onclick="disconnectOAuth('google')">Disconnect</button>
+<button class="btn btn-secondary btn-sm" id="gmailConnectBtn" onclick="connectGmail()">G Connect Gmail Account</button>
+<button class="btn btn-ghost btn-sm" id="gmailDisconnectBtn" style="display:none;" onclick="disconnectGmail()">Disconnect</button>
 </div>
 
 <div class="card">
@@ -716,6 +716,19 @@ async function disconnectOAuth(service) {
   const data = await apiCall(`/api/oauth/${service}/disconnect`, 'POST');
   if (data.error) { showToast('Failed: ' + data.error, true); return; }
   showToast('Disconnected'); loadOAuthStatuses(); loadIntegrations();
+}
+
+async function connectGmail() {
+  const data = await apiCall('/api/integrations/gmail/oauth-url');
+  if (data.error || !data.url) { showToast('Gmail OAuth not configured: ' + (data.error || 'Missing URL'), true); return; }
+  window.location.href = data.url;
+}
+
+async function disconnectGmail() {
+  if (!confirm('Disconnect Gmail?')) return;
+  const data = await apiCall('/api/integrations/gmail/disconnect', 'POST');
+  if (data.error) { showToast('Failed: ' + data.error, true); return; }
+  showToast('Disconnected'); loadIntegrations();
 }
 
 async function loadOAuthStatuses() {
