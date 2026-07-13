@@ -231,8 +231,12 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">New rows in a connected sheet become leads automatically.</p>
 <div id="sheetConnectedInfo" style="display:none;font-size:12.5px;color:var(--text2);margin-bottom:10px;">
   Connected to <strong id="sheetConnectedEmail" style="color:var(--text);"></strong>
-  <div style="margin-top:8px;"><label style="font-size:11px;color:var(--text3);">Select Sheet:</label>
-  <select id="sheetSelect" style="width:100%;margin-top:4px;" onchange="saveSheetSelection()"></select></div>
+  <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+    <div style="flex:1;min-width:140px;"><label style="font-size:11px;color:var(--text3);">Select Sheet:</label>
+    <select id="sheetSelect" style="width:100%;margin-top:4px;" onchange="onSheetSelected()"></select></div>
+    <div style="flex:1;min-width:140px;"><label style="font-size:11px;color:var(--text3);">Select Page:</label>
+    <select id="worksheetSelect" style="width:100%;margin-top:4px;" onchange="saveSheetSelection()" disabled><option value="">Select sheet first</option></select></div>
+  </div>
 </div>
 <button class="btn btn-secondary btn-sm" id="sheetConnectBtn" onclick="connectOAuth('google')">G Connect with Google</button>
 <button class="btn btn-ghost btn-sm" id="sheetDisconnectBtn" style="display:none;" onclick="disconnectOAuth('google')">Disconnect</button>
@@ -300,7 +304,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 
 <div class="card">
 <div class="card-header"><div class="card-title">📊 Google Sheet Columns</div><button class="btn btn-ghost btn-xs" onclick="addMappingRow('sheet')">➕ Add Column</button></div>
-<p style="font-size:12px;color:var(--text2);margin-bottom:10px;">The column header in your connected sheet → what it maps to.</p>
+<p style="font-size:12px;color:var(--text2);margin-bottom:10px;">Select a column from your connected sheet → what it maps to.</p>
 <div class="table-wrap">
 <table>
 <thead><tr><th>Column Header</th><th>Maps To</th><th>Merge Tag</th><th></th></tr></thead>
@@ -796,12 +800,93 @@ async function loadGoogleSheets() {
     return;
   }
   select.innerHTML = data.sheets.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+  
+  // Restore previously selected sheet
+  const savedSheetId = localStorage.getItem('crm_selected_sheet_id');
+  if (savedSheetId && data.sheets.some(s => s.id === savedSheetId)) {
+    select.value = savedSheetId;
+    onSheetSelected();
+  }
+}
+
+async function onSheetSelected() {
+  const sheetSelect = document.getElementById('sheetSelect');
+  const worksheetSelect = document.getElementById('worksheetSelect');
+  const spreadsheetId = sheetSelect.value;
+  
+  if (!spreadsheetId) {
+    worksheetSelect.innerHTML = '<option value="">Select sheet first</option>';
+    worksheetSelect.disabled = true;
+    sheetColumnsCache = [];
+    renderFieldMapping('sheet');
+    return;
+  }
+  
+  // Load worksheets for selected spreadsheet
+  worksheetSelect.innerHTML = '<option value="">Loading pages...</option>';
+  worksheetSelect.disabled = true;
+  
+  try {
+    const data = await apiCall(`/api/oauth/google/worksheets/${spreadsheetId}`);
+    if (data.error || !data.worksheets) {
+      worksheetSelect.innerHTML = '<option value="">Failed to load pages</option>';
+      worksheetSelect.disabled = false;
+      return;
+    }
+    
+    if (!data.worksheets.length) {
+      worksheetSelect.innerHTML = '<option value="">No pages found in this sheet</option>';
+      worksheetSelect.disabled = false;
+      return;
+    }
+    
+    worksheetSelect.innerHTML = data.worksheets.map(w => `<option value="${escapeHtml(w)}">${escapeHtml(w)}</option>`).join('');
+    worksheetSelect.disabled = false;
+    
+    // Restore previously selected worksheet
+    const savedWorksheet = localStorage.getItem('crm_selected_worksheet');
+    if (savedWorksheet && data.worksheets.includes(savedWorksheet)) {
+      worksheetSelect.value = savedWorksheet;
+    }
+    
+    // Load columns for the selected (or restored) worksheet
+    await loadSheetColumns(spreadsheetId, worksheetSelect.value || data.worksheets[0]);
+  } catch (err) {
+    worksheetSelect.innerHTML = '<option value="">Error loading pages</option>';
+    worksheetSelect.disabled = false;
+    console.error('[onSheetSelected]', err);
+  }
+}
+
+async function loadSheetColumns(spreadsheetId, worksheet) {
+  if (!spreadsheetId || !worksheet) {
+    sheetColumnsCache = [];
+    renderFieldMapping('sheet');
+    return;
+  }
+  
+  try {
+    const data = await apiCall(`/api/oauth/google/columns/${encodeURIComponent(spreadsheetId)}/${encodeURIComponent(worksheet)}`);
+    if (data.error || !data.columns) {
+      sheetColumnsCache = [];
+    } else {
+      sheetColumnsCache = data.columns;
+    }
+    renderFieldMapping('sheet');
+  } catch (err) {
+    sheetColumnsCache = [];
+    console.error('[loadSheetColumns]', err);
+  }
 }
 
 function saveSheetSelection() {
-  const select = document.getElementById('sheetSelect');
-  localStorage.setItem('crm_selected_sheet_id', select.value);
-  showToast('✅ Sheet selected');
+  const sheetSelect = document.getElementById('sheetSelect');
+  const worksheetSelect = document.getElementById('worksheetSelect');
+  localStorage.setItem('crm_selected_sheet_id', sheetSelect.value);
+  if (worksheetSelect.value) {
+    localStorage.setItem('crm_selected_worksheet', worksheetSelect.value);
+  }
+  showToast('✅ Sheet & page selection saved');
 }
 
 function populatePageSelects(pages) {
@@ -851,23 +936,43 @@ async function generateWebhook(channel) {
 
 // ── FIELD MAPPING ──
 let fieldMappings = { webform: [], sheet: [] };
+let sheetColumnsCache = []; // Cache of column headers from selected sheet
 const MAP_TARGETS = ['name','phone','email','tag','custom'];
+
 function addMappingRow(channel) {
   fieldMappings[channel].push({ source_field: '', maps_to: 'custom', tag: '' });
   renderFieldMapping(channel);
 }
+
 function renderFieldMapping(channel) {
   const body = document.getElementById(channel === 'webform' ? 'webformMappingBody' : 'sheetMappingBody');
   const rows = fieldMappings[channel];
   if (!rows.length) { body.innerHTML = `<tr><td colspan="4"><div class="empty-state"><p>No fields mapped yet.</p></div></td></tr>`; return; }
-  body.innerHTML = rows.map((r,i) => `<tr>
-    <td><input type="text" value="${escapeHtml(r.source_field)}" onchange="fieldMappings.${channel}[${i}].source_field=this.value" placeholder="e.g. full_name"></td>
-    <td><select onchange="fieldMappings.${channel}[${i}].maps_to=this.value;renderFieldMapping('${channel}')">
-      ${MAP_TARGETS.map(t => `<option value="${t}" ${r.maps_to===t?'selected':''}>${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}
-    </select></td>
-    <td>${r.maps_to==='custom' ? `<input type="text" value="${escapeHtml(r.tag)}" onchange="fieldMappings.${channel}[${i}].tag=this.value" placeholder="tag_name">` : `<span class="tag-chip">{${r.maps_to}}</span>`}</td>
-    <td><button class="btn btn-ghost btn-xs" onclick="fieldMappings.${channel}.splice(${i},1);renderFieldMapping('${channel}')">🗑</button></td>
-  </tr>`).join('');
+  
+  if (channel === 'sheet' && sheetColumnsCache.length > 0) {
+    // For sheet mapping, use dropdown for column selection
+    body.innerHTML = rows.map((r,i) => `<tr>
+      <td><select onchange="fieldMappings.${channel}[${i}].source_field=this.value">
+        <option value="">-- Select Column --</option>
+        ${sheetColumnsCache.map(c => `<option value="${escapeHtml(c)}" ${r.source_field===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+      </select></td>
+      <td><select onchange="fieldMappings.${channel}[${i}].maps_to=this.value;renderFieldMapping('${channel}')">
+        ${MAP_TARGETS.map(t => `<option value="${t}" ${r.maps_to===t?'selected':''}>${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}
+      </select></td>
+      <td>${r.maps_to==='custom' ? `<input type="text" value="${escapeHtml(r.tag)}" onchange="fieldMappings.${channel}[${i}].tag=this.value" placeholder="tag_name">` : `<span class="tag-chip">{${r.maps_to}}</span>`}</td>
+      <td><button class="btn btn-ghost btn-xs" onclick="fieldMappings.${channel}.splice(${i},1);renderFieldMapping('${channel}')">🗑</button></td>
+    </tr>`).join('');
+  } else {
+    // For webform or when no columns cached, use text input
+    body.innerHTML = rows.map((r,i) => `<tr>
+      <td><input type="text" value="${escapeHtml(r.source_field)}" onchange="fieldMappings.${channel}[${i}].source_field=this.value" placeholder="e.g. full_name"></td>
+      <td><select onchange="fieldMappings.${channel}[${i}].maps_to=this.value;renderFieldMapping('${channel}')">
+        ${MAP_TARGETS.map(t => `<option value="${t}" ${r.maps_to===t?'selected':''}>${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}
+      </select></td>
+      <td>${r.maps_to==='custom' ? `<input type="text" value="${escapeHtml(r.tag)}" onchange="fieldMappings.${channel}[${i}].tag=this.value" placeholder="tag_name">` : `<span class="tag-chip">{${r.maps_to}}</span>`}</td>
+      <td><button class="btn btn-ghost btn-xs" onclick="fieldMappings.${channel}.splice(${i},1);renderFieldMapping('${channel}')">🗑</button></td>
+    </tr>`).join('');
+  }
 }
 async function loadFieldMappings(channel) {
   const data = await apiCall(`/api/field-mappings?channel=${channel}`);

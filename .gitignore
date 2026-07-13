@@ -1,1 +1,54 @@
-(src/routes/flows.js)
+```
+# Migration backups and temporary files
+*.sql.bak
+*.sql~
+*.tmp
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Dependencies
+.venv/
+venv/
+.env/
+node_modules/
+
+# Build outputs
+dist/
+build/
+target/
+*.out
+*.exe
+*.dll
+*.so
+*.a
+*.obj
+
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
+
+# OS generated files
+.DS_Store
+Thumbs.db
+```
