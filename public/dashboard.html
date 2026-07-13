@@ -353,10 +353,26 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <input type="checkbox" id="autoReplyEnabled" style="width:16px;height:16px;">
 <label for="autoReplyEnabled" style="font-size:13px;cursor:pointer;">Enable auto-reply</label>
 </div>
+
+<span class="form-label">Reply with</span>
+<div style="display:flex;gap:6px;margin-bottom:12px;">
+<button class="btn btn-ghost btn-xs auto-reply-mode-btn" data-mode="ai" onclick="setAutoReplyMode('ai')">🧠 AI-generated</button>
+<button class="btn btn-ghost btn-xs auto-reply-mode-btn" data-mode="template" onclick="setAutoReplyMode('template')">📋 Fixed Template</button>
+</div>
+
+<div id="autoReplyAiFields">
 <span class="form-label">AI Model</span>
 <select id="autoReplyModel" style="margin-bottom:12px;"></select>
 <span class="form-label">System Prompt</span>
 <textarea id="autoReplyPrompt" rows="3" placeholder="You are a helpful business assistant."></textarea>
+</div>
+
+<div id="autoReplyTemplateFields" style="display:none;">
+<span class="form-label">Template to send</span>
+<select id="autoReplyTemplateSelect" style="margin-bottom:6px;"></select>
+<div style="font-size:11px;color:var(--text2);margin-bottom:12px;">Supports <code>{{name}}</code> and <code>{{phone}}</code> — filled in from the contact who messaged you. If no template is selected here, auto-reply falls back to AI.</div>
+</div>
+
 <div class="btn-row"><button class="btn btn-primary" onclick="saveAutoReplySettings()">💾 Save Auto-Reply</button></div>
 </div>
 </div>
@@ -1502,11 +1518,33 @@ async function markReceivedRead() { const res = await apiCall('/api/messages/rec
 function startReceivedPolling() { stopReceivedPolling(); receivedPollInterval = setInterval(loadReceivedMessages, 8000); }
 function stopReceivedPolling() { if (receivedPollInterval) { clearInterval(receivedPollInterval); receivedPollInterval = null; } }
 
+let autoReplyMode = 'ai';
+
+function setAutoReplyMode(mode) {
+  autoReplyMode = mode;
+  document.getElementById('autoReplyAiFields').style.display = mode === 'ai' ? 'block' : 'none';
+  document.getElementById('autoReplyTemplateFields').style.display = mode === 'template' ? 'block' : 'none';
+  document.querySelectorAll('.auto-reply-mode-btn').forEach(b => {
+    b.classList.toggle('btn-primary', b.dataset.mode === mode);
+    b.classList.toggle('btn-ghost', b.dataset.mode !== mode);
+  });
+  if (mode === 'template') loadAutoReplyTemplates();
+}
+
+async function loadAutoReplyTemplates(selectedId) {
+  const res = await apiCall('/api/interactive-templates');
+  const templates = res.templates || [];
+  const sel = document.getElementById('autoReplyTemplateSelect');
+  sel.innerHTML = '<option value="">— Select a template —</option>' +
+    templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)} (${t.kind})</option>`).join('');
+  if (selectedId) sel.value = selectedId;
+}
+
 async function loadAutoReplyModels(selected) { const sel = document.getElementById('autoReplyModel'); try { const res = await apiCall('/api/ai/models'); const models = res.models || []; sel.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join(''); if (selected && models.includes(selected)) sel.value = selected; } catch (e) { sel.innerHTML = '<option value="moonshotai/kimi-k2.6">moonshotai/kimi-k2.6</option>'; } }
 
-async function loadSettings() { const res = await apiCall('/api/settings'); if (!res.success) return; const s = res.settings || {}; document.getElementById('settingHourLimit').value = s.hour_limit || ''; document.getElementById('settingDayLimit').value = s.day_limit || ''; document.getElementById('settingMinGap').value = s.min_gap || ''; document.getElementById('settingMaxGap').value = s.max_gap || ''; document.getElementById('autoReplyEnabled').checked = !!s.auto_reply; document.getElementById('autoReplyPrompt').value = s.auto_reply_prompt || ''; await loadAutoReplyModels(s.auto_reply_model); }
+async function loadSettings() { const res = await apiCall('/api/settings'); if (!res.success) return; const s = res.settings || {}; document.getElementById('settingHourLimit').value = s.hour_limit || ''; document.getElementById('settingDayLimit').value = s.day_limit || ''; document.getElementById('settingMinGap').value = s.min_gap || ''; document.getElementById('settingMaxGap').value = s.max_gap || ''; document.getElementById('autoReplyEnabled').checked = !!s.auto_reply; document.getElementById('autoReplyPrompt').value = s.auto_reply_prompt || ''; await loadAutoReplyModels(s.auto_reply_model); setAutoReplyMode(s.auto_reply_mode || 'ai'); if ((s.auto_reply_mode || 'ai') === 'template') await loadAutoReplyTemplates(s.auto_reply_template_id); }
 async function saveLimitSettings() { const res = await apiCall('/api/settings', 'POST', { hour_limit: parseInt(document.getElementById('settingHourLimit').value) || 0, day_limit: parseInt(document.getElementById('settingDayLimit').value) || 0, min_gap: parseInt(document.getElementById('settingMinGap').value) || 5, max_gap: parseInt(document.getElementById('settingMaxGap').value) || 15 }); if (res.success) showToast('Limits saved'); else showToast(res.error || 'Save failed', true); }
-async function saveAutoReplySettings() { const res = await apiCall('/api/settings', 'POST', { auto_reply: document.getElementById('autoReplyEnabled').checked, auto_reply_prompt: document.getElementById('autoReplyPrompt').value, auto_reply_model: document.getElementById('autoReplyModel').value }); if (res.success) showToast('Auto-reply saved'); else showToast(res.error || 'Save failed', true); }
+async function saveAutoReplySettings() { const templateId = document.getElementById('autoReplyTemplateSelect').value || null; const res = await apiCall('/api/settings', 'POST', { auto_reply: document.getElementById('autoReplyEnabled').checked, auto_reply_prompt: document.getElementById('autoReplyPrompt').value, auto_reply_model: document.getElementById('autoReplyModel').value, auto_reply_mode: autoReplyMode, auto_reply_template_id: autoReplyMode === 'template' ? templateId : null }); if (res.success) showToast('Auto-reply saved'); else showToast(res.error || 'Save failed', true); }
 
 async function updateProfile() { const res = await apiCall('/api/profile', 'PUT', { full_name: document.getElementById('profileName').value, email: document.getElementById('profileEmail').value }); if (res.success) { showToast('Profile updated'); document.getElementById('userName').textContent = document.getElementById('profileName').value; } else showToast(res.error || 'Update failed', true); }
 async function loadWaAccounts() { const res = await apiCall('/api/wa/accounts'); renderWaAccounts(res.accounts || []); }
@@ -1659,7 +1697,7 @@ if (window.location.hash && window.location.hash.includes('access_token')) {
 const savedToken = localStorage.getItem('supabase_token');
 if (savedToken) { authToken = savedToken; loadDashboard(); } else { window.location.href = '/login.html'; }
 
-window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.toggleCampaignScheduleInput = toggleCampaignScheduleInput; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates; window.updateCampaignContactCount = updateCampaignContactCount; window.renderCampaignGroups = renderCampaignGroups; window.openReplyModal = openReplyModal; window.sendReply = sendReply; window.refreshWaQuality = refreshWaQuality; window.setBillingPeriod = setBillingPeriod; window.loadBillingAnalytics = loadBillingAnalytics; window.renderBillingAnalytics = renderBillingAnalytics;
+window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.toggleCampaignScheduleInput = toggleCampaignScheduleInput; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.setAutoReplyMode = setAutoReplyMode; window.setReplyMode = setReplyMode; window.onTemplateSelected = onTemplateSelected; window.customizeTemplateWithAI = customizeTemplateWithAI; window.saveJsonAsTemplate = saveJsonAsTemplate; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates; window.updateCampaignContactCount = updateCampaignContactCount; window.renderCampaignGroups = renderCampaignGroups; window.openReplyModal = openReplyModal; window.sendReply = sendReply; window.refreshWaQuality = refreshWaQuality; window.setBillingPeriod = setBillingPeriod; window.loadBillingAnalytics = loadBillingAnalytics; window.renderBillingAnalytics = renderBillingAnalytics;
 </script>
 </body>
 </html>

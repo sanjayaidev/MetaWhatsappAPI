@@ -765,6 +765,8 @@ app.post('/api/settings', verifyUser, async (req, res) => {
   if (req.body.auto_reply !== undefined) update.auto_reply = req.body.auto_reply;
   if (req.body.auto_reply_prompt !== undefined) update.auto_reply_prompt = req.body.auto_reply_prompt;
   if (req.body.auto_reply_model !== undefined) update.auto_reply_model = req.body.auto_reply_model;
+  if (req.body.auto_reply_mode !== undefined) update.auto_reply_mode = req.body.auto_reply_mode;
+  if (req.body.auto_reply_template_id !== undefined) update.auto_reply_template_id = req.body.auto_reply_template_id || null;
 
   const { error } = await supabase
     .from('wb_settings')
@@ -1855,10 +1857,43 @@ async function handleIncomingMessage(value, msg) {
 
   const { data: settings } = await supabase
     .from('wb_settings')
-    .select('auto_reply, auto_reply_prompt, auto_reply_model')
+    .select('auto_reply, auto_reply_prompt, auto_reply_model, auto_reply_mode, auto_reply_template_id')
     .eq('user_id', waAccount.user_id)
     .single();
   if (!settings?.auto_reply) return;
+
+  // Template mode: send a fixed interactive/text template as-is, no AI call.
+  // Falls back to the AI flow below if no template is actually selected,
+  // so flipping the mode toggle without picking a template doesn't go silent.
+  if (settings.auto_reply_mode === 'template' && settings.auto_reply_template_id) {
+    try {
+      const { data: tpl, error: tplErr } = await supabase
+        .from('wb_interactive_templates')
+        .select('kind, config')
+        .eq('id', settings.auto_reply_template_id)
+        .eq('user_id', waAccount.user_id)
+        .single();
+      if (tplErr || !tpl) {
+        console.error('[webhook] auto-reply template not found, falling back to no reply');
+        return;
+      }
+      const vars = { name: contactName || msg.from, phone: msg.from };
+      const payload = buildMessagePayload(tpl.kind, tpl.config, msg.from, vars);
+
+      const plainToken = decryptToken(waAccount.access_token);
+      await fetch(
+        `https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${plainToken}` },
+          body: JSON.stringify(payload),
+        }
+      );
+    } catch (err) {
+      console.error('[webhook] template auto-reply failed:', err.message);
+    }
+    return;
+  }
 
   let replyText;
   try {
