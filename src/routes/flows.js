@@ -247,8 +247,8 @@ module.exports = function flowsRouter(deps) {
     }
   });
 
-  // DELETE /api/oauth/:service/disconnect — revoke OAuth connection
-  router.delete('/:service/disconnect', verifyUser, async (req, res) => {
+  // POST /api/oauth/:service/disconnect — revoke OAuth connection
+  router.post('/:service/disconnect', verifyUser, async (req, res) => {
     const { service } = req.params;
     const { error } = await supabase.from('wb_oauth_tokens').delete()
       .eq('user_id', req.user.id).eq('service', service);
