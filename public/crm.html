@@ -80,7 +80,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 .filter-bar select, .filter-bar input { width: auto; min-width: 130px; padding: 8px 12px; font-size: 12.5px; }
 .filter-bar input[type="text"] { min-width: 200px; flex: 1; }
 .source-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; font-size: 12px; background: var(--surface3); }
-.source-whatsapp { background: rgba(34,209,114,.15); } .source-instagram { background: linear-gradient(135deg, rgba(236,72,153,.2), rgba(157,120,250,.2)); } .source-facebook { background: rgba(61,142,245,.15); } .source-webform { background: rgba(245,166,35,.15); } .source-sheet { background: rgba(34,209,114,.1); } .source-web_chat { background: rgba(157,120,250,.15); }
+.source-whatsapp { background: rgba(34,209,114,.15); } .source-instagram { background: linear-gradient(135deg, rgba(236,72,153,.2), rgba(157,120,250,.2)); } .source-facebook { background: rgba(61,142,245,.15); } .source-webform { background: rgba(245,166,35,.15); } .source-sheet { background: rgba(34,209,114,.1); } .source-web_chat { background: rgba(157,120,250,.15); } .source-email { background: rgba(240,79,110,.15); }
 .lead-name-cell { display: flex; align-items: center; gap: 10px; }
 .lead-avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, var(--purple), var(--blue)); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; color: #fff; flex-shrink: 0; }
 /* Lead detail modal */
@@ -135,6 +135,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="nav-section">
 <div class="nav-section-label">Capture & Automate</div>
 <div class="nav-item" data-tab="sources"><span class="nav-icon">🔌</span> Sources</div>
+<div class="nav-item" data-tab="fieldmapping"><span class="nav-icon">🗂️</span> Field Mapping</div>
 <div class="nav-item" data-tab="automations"><span class="nav-icon">⚡</span> Automations</div>
 <div class="nav-item" data-tab="chatbot"><span class="nav-icon">🤖</span> AI Chatbot</div>
 </div>
@@ -182,6 +183,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <option value="facebook">👥 Facebook</option>
 <option value="webform">📝 Web Form</option>
 <option value="sheet">📊 Sheet</option>
+<option value="email">📧 Email</option>
 <option value="web_chat">🤖 Web Chatbot</option>
 </select>
 <select id="filterStatusSel" onchange="loadLeads()">
@@ -238,6 +240,14 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 </div>
 
 <div class="card">
+<div class="card-header"><div class="card-title">📧 Gmail</div><span class="badge badge-gray" id="badge-gmail">Not connected</span></div>
+<p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Sends automated follow-up emails to leads from your Gmail account. (Outbound only — Gmail is not a lead capture source.)</p>
+<div id="gmailConnectedInfo" style="display:none;font-size:12.5px;color:var(--text2);margin-bottom:10px;">Sending as <strong id="gmailConnectedEmail" style="color:var(--text);"></strong></div>
+<button class="btn btn-secondary btn-sm" id="gmailConnectBtn" onclick="connectGmail()">G Connect Gmail Account</button>
+<button class="btn btn-ghost btn-sm" id="gmailDisconnectBtn" style="display:none;" onclick="disconnectIntegration('gmail')">Disconnect</button>
+</div>
+
+<div class="card">
 <div class="card-header"><div class="card-title">📷 Instagram</div><span class="badge badge-gray" id="badge-instagram">Not connected</span></div>
 <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Capture DMs and comments as leads, and reply from the Leads tab.</p>
 <button class="btn btn-secondary btn-sm" onclick="openIntegrationModal('instagram')">Connect Instagram</button>
@@ -253,6 +263,35 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="card-header"><div class="card-title">📅 smbooking</div><span class="badge badge-gray" id="badge-smbooking">Not connected</span></div>
 <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Sync scheduled meetings onto the lead timeline.</p>
 <button class="btn btn-secondary btn-sm" onclick="openIntegrationModal('smbooking')">Connect smbooking</button>
+</div>
+</div>
+
+<!-- ══ FIELD MAPPING ══ -->
+<div class="tab-panel" id="tab-fieldmapping">
+<div class="page-header"><div><div class="page-title">Field Mapping</div><div class="page-sub">Map incoming columns/fields so they're usable as merge tags in automations</div></div></div>
+
+<div class="card">
+<div class="card-header"><div class="card-title">📝 Web Form Fields</div><button class="btn btn-ghost btn-xs" onclick="addMappingRow('webform')">➕ Add Field</button></div>
+<p style="font-size:12px;color:var(--text2);margin-bottom:10px;">The field name your form sends (e.g. <code>full_name</code>) → what it maps to. Mapped fields become <code>{tag}</code> options when writing an automation message.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Incoming Field</th><th>Maps To</th><th>Merge Tag</th><th></th></tr></thead>
+<tbody id="webformMappingBody"><tr><td colspan="4"><div class="empty-state"><p>No fields mapped yet.</p></div></td></tr></tbody>
+</table>
+</div>
+<button class="btn btn-primary btn-sm" style="margin-top:12px;" onclick="saveFieldMapping('webform')">💾 Save Web Form Mapping</button>
+</div>
+
+<div class="card">
+<div class="card-header"><div class="card-title">📊 Google Sheet Columns</div><button class="btn btn-ghost btn-xs" onclick="addMappingRow('sheet')">➕ Add Column</button></div>
+<p style="font-size:12px;color:var(--text2);margin-bottom:10px;">The column header in your connected sheet → what it maps to.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Column Header</th><th>Maps To</th><th>Merge Tag</th><th></th></tr></thead>
+<tbody id="sheetMappingBody"><tr><td colspan="4"><div class="empty-state"><p>No columns mapped yet.</p></div></td></tr></tbody>
+</table>
+</div>
+<button class="btn btn-primary btn-sm" style="margin-top:12px;" onclick="saveFieldMapping('sheet')">💾 Save Sheet Mapping</button>
 </div>
 </div>
 
@@ -347,6 +386,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="channel-tab" data-ctab="whatsapp" onclick="switchChannelTab('whatsapp')">📱 WhatsApp</div>
 <div class="channel-tab" data-ctab="instagram" onclick="switchChannelTab('instagram')">📷 Instagram</div>
 <div class="channel-tab" data-ctab="facebook" onclick="switchChannelTab('facebook')">👥 Facebook</div>
+<div class="channel-tab" data-ctab="email" onclick="switchChannelTab('email')">📧 Email</div>
 <div class="channel-tab" data-ctab="meetings" onclick="switchChannelTab('meetings')">📅 Meetings</div>
 <div class="channel-tab" data-ctab="notes" onclick="switchChannelTab('notes')">🗒 Notes</div>
 </div>
@@ -367,6 +407,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="thread" id="thread-facebook"></div>
 <div class="reply-box"><textarea id="reply-facebook" placeholder="Reply on Facebook…"></textarea><button class="btn btn-primary" onclick="sendChannelMessage('facebook')">Send</button></div>
 </div>
+<div class="channel-tab-panel" id="ctab-email">
+<div class="thread" id="thread-email"></div>
+<div class="reply-box"><textarea id="reply-email" placeholder="Send an email…"></textarea><button class="btn btn-primary" onclick="sendChannelMessage('email')">Send</button></div>
+</div>
 <div class="channel-tab-panel" id="ctab-meetings">
 <div id="leadMeetingsList"><div class="empty-state"><p>No meetings for this lead.</p></div></div>
 </div>
@@ -385,7 +429,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="form-label">Phone</div><input type="tel" id="newLeadPhone">
 <div class="form-label">Email</div><input type="email" id="newLeadEmail">
 <div class="form-label">Source</div>
-<select id="newLeadSource"><option value="whatsapp">WhatsApp</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="webform">Web Form</option><option value="sheet">Sheet</option><option value="web_chat">Web Chatbot</option><option value="manual">Manual</option></select>
+<select id="newLeadSource"><option value="whatsapp">WhatsApp</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="webform">Web Form</option><option value="sheet">Sheet</option><option value="email">Email</option><option value="web_chat">Web Chatbot</option><option value="manual">Manual</option></select>
 <button class="btn btn-primary" style="margin-top:18px;width:100%;" onclick="createLead()">Add Lead</button>
 </div>
 </div>
@@ -404,11 +448,27 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="modal-box">
 <div class="modal-header"><div class="modal-title">New Automation Rule</div><button class="modal-close" onclick="closeModal('automationModal')">✕</button></div>
 <div class="form-label">When a new lead arrives from</div>
-<select id="autoTrigger"><option value="any">Any source</option><option value="whatsapp">WhatsApp</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="webform">Web Form</option><option value="sheet">Sheet</option></select>
-<div class="form-label">Send message via</div>
-<select id="autoChannel"><option value="whatsapp">📱 WhatsApp</option><option value="instagram">📷 Instagram</option><option value="facebook">👥 Facebook</option></select>
+<select id="autoTrigger" onchange="renderAutomationFieldChips()">
+<option value="any">🌐 Any source</option>
+<option value="whatsapp">📱 WhatsApp</option>
+<option value="instagram">📷 Instagram</option>
+<option value="facebook">👥 Facebook</option>
+<option value="webform">📝 Web Form</option>
+<option value="sheet">📊 Sheet</option>
+<option value="email">📧 Email</option>
+</select>
+<div class="form-label">Respond to / send via</div>
+<select id="autoChannel">
+<option value="all">🌐 All Channels</option>
+<option value="whatsapp">📱 WhatsApp</option>
+<option value="instagram">📷 Instagram</option>
+<option value="facebook">👥 Facebook</option>
+<option value="email">📧 Email</option>
+</select>
 <div class="form-label">Message</div>
 <textarea id="autoMessage" placeholder="Hi {name}, thanks for reaching out! …"></textarea>
+<div style="margin-top:6px;font-size:11px;color:var(--text3);">Insert field:</div>
+<div id="autoFieldChips" style="margin-top:4px;"></div>
 <div class="form-label">Delay (minutes, 0 = instant)</div>
 <input type="number" id="autoDelay" value="0" min="0">
 <button class="btn btn-primary" style="margin-top:18px;width:100%;" onclick="createAutomation()">Save Rule</button>
@@ -458,7 +518,7 @@ function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('o
 function doLogout() { authToken = null; currentUser = null; localStorage.removeItem('supabase_token'); window.location.href = '/login.html'; }
 function timeAgo(iso) { if (!iso) return '—'; const d = new Date(iso), s = (Date.now()-d)/1000;
   if (s<60) return 'just now'; if (s<3600) return Math.floor(s/60)+'m ago'; if (s<86400) return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago'; }
-const SOURCE_ICON = { whatsapp:'📱', instagram:'📷', facebook:'👥', webform:'📝', sheet:'📊', web_chat:'🤖', manual:'✍️' };
+const SOURCE_ICON = { whatsapp:'📱', instagram:'📷', facebook:'👥', webform:'📝', sheet:'📊', web_chat:'🤖', manual:'✍️', email:'📧' };
 const STATUS_BADGE = { new:'amber', contacted:'purple', engaged:'pink', booked:'blue', won:'green', follow_up:'purple', cold:'red' };
 
 // ── NAV ──
@@ -476,6 +536,7 @@ function loadTabData(tab) {
   if (tab === 'leads') loadLeads();
   if (tab === 'meetings') loadMeetings();
   if (tab === 'sources') loadIntegrations();
+  if (tab === 'fieldmapping') { loadFieldMappings('webform'); loadFieldMappings('sheet'); }
   if (tab === 'automations') loadAutomations();
   if (tab === 'chatbot') loadChatbotConfig();
   if (tab === 'billing') loadBilling();
@@ -543,7 +604,7 @@ async function openLead(id) {
   document.getElementById('leadDetailTags').innerHTML = (data.lead.tags||[]).map(t => `<span class="tag-chip">${escapeHtml(t)}</span>`).join('');
   document.getElementById('leadStatusSelect').value = data.lead.status || 'new';
   switchChannelTab('overview');
-  loadLeadTimeline(id); loadLeadMessages(id, 'whatsapp'); loadLeadMessages(id, 'instagram'); loadLeadMessages(id, 'facebook'); loadLeadMeetings(id); loadLeadNotes(id);
+  loadLeadTimeline(id); loadLeadMessages(id, 'whatsapp'); loadLeadMessages(id, 'instagram'); loadLeadMessages(id, 'facebook'); loadLeadMessages(id, 'email'); loadLeadMeetings(id); loadLeadNotes(id);
   openModal('leadModal');
 }
 function switchChannelTab(tab) {
@@ -616,6 +677,13 @@ async function loadIntegrations() {
   data.integrations.forEach(i => {
     const badge = document.getElementById('badge-' + i.type);
     if (badge) { badge.textContent = i.status === 'connected' ? 'Connected' : 'Not connected'; badge.className = 'badge ' + (i.status === 'connected' ? 'badge-green' : 'badge-gray'); }
+    if (i.type === 'gmail') {
+      const connected = i.status === 'connected';
+      document.getElementById('gmailConnectBtn').style.display = connected ? 'none' : 'inline-flex';
+      document.getElementById('gmailDisconnectBtn').style.display = connected ? 'inline-flex' : 'none';
+      document.getElementById('gmailConnectedInfo').style.display = connected ? 'block' : 'none';
+      if (connected) document.getElementById('gmailConnectedEmail').textContent = (i.config && i.config.email) || '';
+    }
   });
 }
 let currentIntegrationType = null;
@@ -645,6 +713,48 @@ async function generateWebhook(channel) {
   document.getElementById('webformUrlBox').textContent = data.url;
   document.getElementById('badge-webform').textContent = 'Connected'; document.getElementById('badge-webform').className = 'badge badge-green';
 }
+async function connectGmail() {
+  const data = await apiCall('/api/integrations/gmail/oauth-url');
+  if (data.error || !data.url) { showToast('Gmail connect not wired up yet', true); return; }
+  window.location.href = data.url;
+}
+async function disconnectIntegration(type) {
+  if (!confirm('Disconnect ' + type + '?')) return;
+  const data = await apiCall(`/api/integrations/${type}/disconnect`, 'POST');
+  if (data.error) { showToast('Failed: ' + data.error, true); return; }
+  showToast('Disconnected'); loadIntegrations();
+}
+
+// ── FIELD MAPPING ──
+let fieldMappings = { webform: [], sheet: [] };
+const MAP_TARGETS = ['name','phone','email','tag','custom'];
+function addMappingRow(channel) {
+  fieldMappings[channel].push({ source_field: '', maps_to: 'custom', tag: '' });
+  renderFieldMapping(channel);
+}
+function renderFieldMapping(channel) {
+  const body = document.getElementById(channel === 'webform' ? 'webformMappingBody' : 'sheetMappingBody');
+  const rows = fieldMappings[channel];
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="4"><div class="empty-state"><p>No fields mapped yet.</p></div></td></tr>`; return; }
+  body.innerHTML = rows.map((r,i) => `<tr>
+    <td><input type="text" value="${escapeHtml(r.source_field)}" onchange="fieldMappings.${channel}[${i}].source_field=this.value" placeholder="e.g. full_name"></td>
+    <td><select onchange="fieldMappings.${channel}[${i}].maps_to=this.value;renderFieldMapping('${channel}')">
+      ${MAP_TARGETS.map(t => `<option value="${t}" ${r.maps_to===t?'selected':''}>${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}
+    </select></td>
+    <td>${r.maps_to==='custom' ? `<input type="text" value="${escapeHtml(r.tag)}" onchange="fieldMappings.${channel}[${i}].tag=this.value" placeholder="tag_name">` : `<span class="tag-chip">{${r.maps_to}}</span>`}</td>
+    <td><button class="btn btn-ghost btn-xs" onclick="fieldMappings.${channel}.splice(${i},1);renderFieldMapping('${channel}')">🗑</button></td>
+  </tr>`).join('');
+}
+async function loadFieldMappings(channel) {
+  const data = await apiCall(`/api/field-mappings?channel=${channel}`);
+  fieldMappings[channel] = (data && data.mappings) ? data.mappings : [];
+  renderFieldMapping(channel);
+}
+async function saveFieldMapping(channel) {
+  const data = await apiCall('/api/field-mappings', 'POST', { channel, mappings: fieldMappings[channel] });
+  if (data.error) { showToast('Failed: ' + data.error, true); return; }
+  showToast('✅ Mapping saved');
+}
 
 // ── AUTOMATIONS ──
 async function loadAutomations() {
@@ -654,7 +764,27 @@ async function loadAutomations() {
   el.innerHTML = data.automations.map(a => `<div class="data-row"><div><div class="data-row-title">${a.trigger_source} → ${a.channel}</div><div class="data-row-sub">${escapeHtml((a.message_body||'').slice(0,60))} · delay ${a.delay_minutes}m</div></div>
     <div class="data-row-actions"><span class="badge ${a.active?'badge-green':'badge-gray'}">${a.active?'Active':'Paused'}</span><button class="btn btn-ghost btn-xs" onclick="deleteAutomation('${a.id}')">🗑</button></div></div>`).join('');
 }
-function openAutomationModal() { openModal('automationModal'); }
+async function openAutomationModal() {
+  openModal('automationModal');
+  if (!fieldMappings.webform.length) await loadFieldMappings('webform');
+  if (!fieldMappings.sheet.length) await loadFieldMappings('sheet');
+  renderAutomationFieldChips();
+}
+function renderAutomationFieldChips() {
+  const source = document.getElementById('autoTrigger').value;
+  const base = ['name','phone','email'];
+  let tags = base.slice();
+  if (source === 'webform') tags = tags.concat(fieldMappings.webform.filter(m=>m.maps_to==='custom'&&m.tag).map(m=>m.tag));
+  if (source === 'sheet') tags = tags.concat(fieldMappings.sheet.filter(m=>m.maps_to==='custom'&&m.tag).map(m=>m.tag));
+  document.getElementById('autoFieldChips').innerHTML = tags.map(t =>
+    `<span class="tag-chip" style="cursor:pointer;" onclick="insertFieldTag('${t}')">+{${t}}</span>`).join(' ');
+}
+function insertFieldTag(tag) {
+  const ta = document.getElementById('autoMessage');
+  const pos = ta.selectionStart || ta.value.length;
+  ta.value = ta.value.slice(0, pos) + `{${tag}}` + ta.value.slice(pos);
+  ta.focus();
+}
 async function createAutomation() {
   const body = { trigger_source: document.getElementById('autoTrigger').value, channel: document.getElementById('autoChannel').value,
     message_body: document.getElementById('autoMessage').value.trim(), delay_minutes: parseInt(document.getElementById('autoDelay').value)||0 };
