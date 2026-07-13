@@ -293,9 +293,43 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div style="margin-bottom:12px;"><label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Their message</label>
 <div id="replyOriginalMessage" style="background:var(--bg2);border-radius:8px;padding:12px;font-size:13px;color:var(--text2);max-height:120px;overflow-y:auto;overflow-wrap:anywhere;"></div>
 </div>
-<div style="margin-bottom:4px;"><label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Your reply</label>
+
+<!-- Mode switch: Plain text | Template | Manual JSON -->
+<div style="display:flex;gap:6px;margin-bottom:10px;">
+<button class="btn btn-ghost btn-xs reply-mode-btn" data-mode="text" onclick="setReplyMode('text')">Plain text</button>
+<button class="btn btn-ghost btn-xs reply-mode-btn" data-mode="template" onclick="setReplyMode('template')">Template</button>
+<button class="btn btn-ghost btn-xs reply-mode-btn" data-mode="json" onclick="setReplyMode('json')">Manual JSON</button>
+</div>
+
+<!-- Plain text mode -->
+<div id="replyModeText">
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Your reply</label>
 <textarea id="replyMessageInput" rows="4" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text1);font-family:inherit;font-size:13px;" placeholder="Type your message…"></textarea>
 </div>
+
+<!-- Template mode: pick a saved template, optionally ask AI to customize it -->
+<div id="replyModeTemplate" style="display:none;">
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Template</label>
+<select id="replyTemplateSelect" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text1);font-size:13px;margin-bottom:10px;" onchange="onTemplateSelected()"></select>
+
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Customize with AI (optional)</label>
+<div style="display:flex;gap:6px;margin-bottom:10px;">
+<input id="replyAiInstruction" type="text" placeholder="e.g. make it more casual, mention a 20% discount…" style="flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text1);font-size:13px;">
+<button class="btn btn-ghost btn-sm" onclick="customizeTemplateWithAI()" id="replyAiBtn">✨ Customize</button>
+</div>
+
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Preview (editable JSON before send)</label>
+<textarea id="replyTemplatePreview" rows="8" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text1);font-family:'DM Mono',monospace;font-size:12px;" placeholder="Pick a template above…"></textarea>
+</div>
+
+<!-- Manual JSON mode: paste a raw `interactive` object, sent as-is -->
+<div id="replyModeJson" style="display:none;">
+<label style="display:block;font-size:11px;color:var(--text2);text-transform:uppercase;margin-bottom:6px;">Raw interactive JSON</label>
+<div style="font-size:11px;color:var(--text2);margin-bottom:6px;">Paste just the <code>interactive</code> object, e.g. <code>{"type":"button","body":{"text":"..."},"action":{"buttons":[...]}}</code></div>
+<textarea id="replyJsonInput" rows="10" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text1);font-family:'DM Mono',monospace;font-size:12px;" placeholder='{"type":"button","body":{"text":"Hi!"},"action":{"buttons":[{"type":"reply","reply":{"id":"yes","title":"Yes"}}]}}'></textarea>
+<button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="saveJsonAsTemplate()">💾 Save as Template</button>
+</div>
+
 <div class="btn-row" style="margin-top:10px;"><button class="btn btn-primary" onclick="sendReply()" id="replySendBtn">Send</button><button class="btn btn-ghost" onclick="closeModal('replyModal')">Cancel</button></div>
 </div>
 <!-- ══ SETTINGS ══ -->
@@ -1328,21 +1362,132 @@ async function loadReceivedMessages() {
   }).join('')}</tbody></table></div>`;
 }
 
+let replyMode = 'text';
+let replySelectedTemplateId = null;
+let replyTemplatesCache = [];
+
+function setReplyMode(mode) {
+  replyMode = mode;
+  document.getElementById('replyModeText').style.display = mode === 'text' ? 'block' : 'none';
+  document.getElementById('replyModeTemplate').style.display = mode === 'template' ? 'block' : 'none';
+  document.getElementById('replyModeJson').style.display = mode === 'json' ? 'block' : 'none';
+  document.querySelectorAll('.reply-mode-btn').forEach(b => {
+    b.classList.toggle('btn-primary', b.dataset.mode === mode);
+    b.classList.toggle('btn-ghost', b.dataset.mode !== mode);
+  });
+  if (mode === 'template' && !replyTemplatesCache.length) loadReplyTemplates();
+}
+
+async function loadReplyTemplates() {
+  const res = await apiCall('/api/interactive-templates');
+  replyTemplatesCache = res.templates || [];
+  const sel = document.getElementById('replyTemplateSelect');
+  sel.innerHTML = '<option value="">— Select a template —</option>' +
+    replyTemplatesCache.map(t => `<option value="${t.id}">${escapeHtml(t.name)} (${t.kind})</option>`).join('');
+}
+
+function onTemplateSelected() {
+  const id = document.getElementById('replyTemplateSelect').value;
+  replySelectedTemplateId = id || null;
+  const tpl = replyTemplatesCache.find(t => t.id === id);
+  document.getElementById('replyTemplatePreview').value = tpl ? JSON.stringify(tpl.config, null, 2) : '';
+}
+
+async function customizeTemplateWithAI() {
+  if (!replySelectedTemplateId) { showToast('Pick a template first', true); return; }
+  const instruction = document.getElementById('replyAiInstruction').value.trim();
+  if (!instruction) { showToast('Describe how to customize it first', true); return; }
+
+  const btn = document.getElementById('replyAiBtn');
+  btn.disabled = true; btn.textContent = 'Customizing…';
+  const res = await apiCall(`/api/interactive-templates/${replySelectedTemplateId}/customize-ai`, 'POST', { instruction });
+  btn.disabled = false; btn.textContent = '✨ Customize';
+
+  if (res.success) {
+    document.getElementById('replyTemplatePreview').value = JSON.stringify(res.config, null, 2);
+    showToast('✓ Preview updated — review before sending');
+  } else {
+    showToast(res.error || 'AI customization failed', true);
+  }
+}
+
+async function saveJsonAsTemplate() {
+  const raw = document.getElementById('replyJsonInput').value.trim();
+  if (!raw) { showToast('Paste an interactive JSON object first', true); return; }
+  let interactive;
+  try {
+    interactive = JSON.parse(raw);
+  } catch (e) {
+    showToast('That is not valid JSON', true);
+    return;
+  }
+  const name = prompt('Name this template:');
+  if (!name || !name.trim()) return;
+
+  const res = await apiCall('/api/interactive-templates', 'POST', {
+    name: name.trim(),
+    kind: 'raw',
+    config: { interactive },
+  });
+
+  if (res.success) {
+    showToast('✓ Saved as template');
+    replyTemplatesCache = []; // force reload next time Template tab is opened
+  } else {
+    showToast(res.error || 'Failed to save template', true);
+  }
+}
+
 function openReplyModal(phone, originalMessage) {
   replyTargetPhone = phone;
+  replySelectedTemplateId = null;
   document.getElementById('replyOriginalMessage').textContent = originalMessage || '(no text content)';
   document.getElementById('replyMessageInput').value = '';
+  document.getElementById('replyJsonInput').value = '';
+  document.getElementById('replyTemplatePreview').value = '';
+  document.getElementById('replyAiInstruction').value = '';
+  setReplyMode('text');
   document.getElementById('replyModal').classList.add('open');
 }
 
 async function sendReply() {
-  const message = document.getElementById('replyMessageInput').value.trim();
   if (!replyTargetPhone) return;
-  if (!message) { showToast('Type a message first', true); return; }
-
   const btn = document.getElementById('replySendBtn');
-  btn.disabled = true; btn.textContent = 'Sending…';
-  const res = await apiCall('/api/messages/reply', 'POST', { phone: replyTargetPhone, message });
+  let res;
+
+  if (replyMode === 'text') {
+    const message = document.getElementById('replyMessageInput').value.trim();
+    if (!message) { showToast('Type a message first', true); return; }
+    btn.disabled = true; btn.textContent = 'Sending…';
+    res = await apiCall('/api/messages/reply', 'POST', { phone: replyTargetPhone, message });
+
+  } else if (replyMode === 'template') {
+    const tpl = replyTemplatesCache.find(t => t.id === replySelectedTemplateId);
+    if (!tpl) { showToast('Pick a template first', true); return; }
+    let config;
+    try {
+      config = JSON.parse(document.getElementById('replyTemplatePreview').value);
+    } catch (e) {
+      showToast('Preview is not valid JSON — fix it or reselect the template', true);
+      return;
+    }
+    btn.disabled = true; btn.textContent = 'Sending…';
+    res = await apiCall('/api/messages/reply-interactive', 'POST', { phone: replyTargetPhone, kind: tpl.kind, config });
+
+  } else { // json mode
+    const raw = document.getElementById('replyJsonInput').value.trim();
+    if (!raw) { showToast('Paste an interactive JSON object first', true); return; }
+    let raw_interactive;
+    try {
+      raw_interactive = JSON.parse(raw);
+    } catch (e) {
+      showToast('That is not valid JSON', true);
+      return;
+    }
+    btn.disabled = true; btn.textContent = 'Sending…';
+    res = await apiCall('/api/messages/reply-interactive', 'POST', { phone: replyTargetPhone, raw_interactive });
+  }
+
   btn.disabled = false; btn.textContent = 'Send';
 
   if (res.success) {

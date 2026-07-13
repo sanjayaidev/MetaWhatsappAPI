@@ -18,6 +18,8 @@ const { generateReply, DEFAULT_MODEL: DEFAULT_AI_MODEL } = aiChatRouter;
 const { encryptToken, decryptToken } = require('./src/crypto');
 const apiKeys = require('./src/api-keys');
 const { verifyApiKey, requirePermission, requireScopedAccount } = require('./src/middleware/api-auth');
+const interactiveTemplates = require('./src/interactive-templates');
+const { buildMessagePayload, WhatsAppValidationError } = require('./src/whatsapp-interactive');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1211,6 +1213,153 @@ app.post('/api/messages/reply', verifyUser, async (req, res) => {
           type: 'text',
           text: { body: message.trim() }
         })
+      }
+    );
+    const responseData = await result.json();
+    if (!result.ok || !responseData.messages?.[0]?.id) {
+      return res.status(502).json({ error: responseData.error?.message || `Meta API ${result.status}` });
+    }
+    res.json({ success: true, wa_message_id: responseData.messages[0].id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================================
+// 10b. INTERACTIVE MESSAGE TEMPLATES (buttons / lists / cta_url)
+// Free-form messages sendable within the same 24h session window as
+// /api/messages/reply above — reuses the same REPLY_WINDOW_HOURS check.
+// ================================================================
+
+app.get('/api/interactive-templates', verifyUser, async (req, res) => {
+  try {
+    const templates = await interactiveTemplates.listTemplates(req.user.id);
+    res.json({ success: true, templates });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/interactive-templates', verifyUser, async (req, res) => {
+  const { name, kind, config } = req.body || {};
+  if (!name || !kind || !config) {
+    return res.status(400).json({ error: 'name, kind, and config are required' });
+  }
+  try {
+    const template = await interactiveTemplates.createTemplate(req.user.id, { name, kind, config });
+    res.json({ success: true, template });
+  } catch (err) {
+    const status = err instanceof WhatsAppValidationError ? 400 : 500;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+app.delete('/api/interactive-templates/:id', verifyUser, async (req, res) => {
+  try {
+    await interactiveTemplates.deleteTemplate(req.user.id, req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Preview-only: rewrites a template's copy per a free-text instruction via
+// AI, re-validates the result, and returns it WITHOUT sending anything.
+// The UI should show this as an editable preview before the user hits Send.
+app.post('/api/interactive-templates/:id/customize-ai', verifyUser, async (req, res) => {
+  const { instruction, model } = req.body || {};
+  if (!instruction || !instruction.trim()) {
+    return res.status(400).json({ error: 'instruction is required' });
+  }
+  try {
+    const template = await interactiveTemplates.getTemplate(req.user.id, req.params.id);
+    const customizedConfig = await interactiveTemplates.customizeTemplateWithAI({
+      generateReply,
+      kind: template.kind,
+      config: template.config,
+      instruction,
+      model: model || DEFAULT_AI_MODEL,
+    });
+    res.json({ success: true, kind: template.kind, config: customizedConfig });
+  } catch (err) {
+    const status = err instanceof WhatsAppValidationError ? 400 : 500;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// Sends a free-form interactive (or text) reply within the 24h session
+// window. Two ways to call it:
+//   1) { phone, kind, config, vars }        — build from a template/config
+//   2) { phone, raw_interactive: {...} }     — power-user manual JSON,
+//      passed straight through as the `interactive` block after a basic
+//      shape check. Useful for pasting a payload copied from Meta's docs
+//      or from the wa-json-builder library directly.
+app.post('/api/messages/reply-interactive', verifyUser, async (req, res) => {
+  const { phone, kind, config, vars, raw_interactive } = req.body || {};
+  if (!phone) return res.status(400).json({ error: 'phone is required' });
+  if (!kind && !raw_interactive) {
+    return res.status(400).json({ error: 'Provide either { kind, config } or { raw_interactive }' });
+  }
+
+  // Same 24h session-window enforcement as /api/messages/reply
+  const { data: lastInbound, error: lastErr } = await supabase
+    .from('wb_inbound_messages')
+    .select('created_at')
+    .eq('user_id', req.user.id)
+    .eq('phone', phone)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+  if (lastErr || !lastInbound) {
+    return res.status(400).json({ error: 'No inbound message found for this contact' });
+  }
+  const hoursSince = (Date.now() - new Date(lastInbound.created_at).getTime()) / 3600000;
+  if (hoursSince > REPLY_WINDOW_HOURS) {
+    return res.status(403).json({
+      error: `Reply window has closed (${hoursSince.toFixed(1)}h since their last message, limit is ${REPLY_WINDOW_HOURS}h). Use an approved template instead.`
+    });
+  }
+
+  const { data: waAccounts } = await supabase
+    .from('wa_accounts')
+    .select('*')
+    .eq('user_id', req.user.id)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (!waAccounts?.length) {
+    return res.status(400).json({ error: 'No active WhatsApp account connected' });
+  }
+  const waAccount = waAccounts[0];
+
+  let payload;
+  try {
+    if (raw_interactive) {
+      if (!raw_interactive.type) {
+        return res.status(400).json({ error: 'raw_interactive.type is required (e.g. "button", "list", "cta_url")' });
+      }
+      payload = {
+        messaging_product: 'whatsapp',
+        to: phone,
+        type: 'interactive',
+        interactive: raw_interactive,
+      };
+    } else {
+      payload = buildMessagePayload(kind, config, phone, vars || {});
+    }
+  } catch (err) {
+    const status = err instanceof WhatsAppValidationError ? 400 : 500;
+    return res.status(status).json({ error: err.message });
+  }
+
+  try {
+    const plainToken = decryptToken(waAccount.access_token);
+    const result = await fetch(
+      `https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${plainToken}` },
+        body: JSON.stringify(payload),
       }
     );
     const responseData = await result.json();
