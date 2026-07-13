@@ -247,6 +247,53 @@ module.exports = function flowsRouter(deps) {
     }
   });
 
+  // GET /api/oauth/google/worksheets/:spreadsheetId — list worksheets in a spreadsheet
+  router.get('/google/worksheets/:spreadsheetId', verifyUser, async (req, res) => {
+    const { data: tokenData } = await supabase.from('wb_oauth_tokens')
+      .select('*').eq('user_id', req.user.id).eq('service', 'google').single();
+    if (!tokenData || !tokenData.access_token_enc) {
+      return res.status(401).json({ error: 'Google not connected' });
+    }
+    const accessToken = decryptToken(tokenData.access_token_enc);
+    const spreadsheetId = req.params.spreadsheetId;
+
+    try {
+      const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets(properties(title))`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const metaData = await metaRes.json();
+      if (!metaRes.ok) throw new Error(metaData.error?.message || 'Failed to fetch worksheets');
+      const worksheets = (metaData.sheets || []).map(s => s.properties.title).filter(Boolean);
+      res.json({ worksheets });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/oauth/google/columns/:spreadsheetId/:worksheet — list column headers from a worksheet
+  router.get('/google/columns/:spreadsheetId/:worksheet', verifyUser, async (req, res) => {
+    const { data: tokenData } = await supabase.from('wb_oauth_tokens')
+      .select('*').eq('user_id', req.user.id).eq('service', 'google').single();
+    if (!tokenData || !tokenData.access_token_enc) {
+      return res.status(401).json({ error: 'Google not connected' });
+    }
+    const accessToken = decryptToken(tokenData.access_token_enc);
+    const { spreadsheetId, worksheet } = req.params;
+
+    try {
+      const range = `${worksheet}!A1:Z1`;
+      const valuesRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const valuesData = await valuesRes.json();
+      if (!valuesRes.ok) throw new Error(valuesData.error?.message || 'Failed to fetch columns');
+      const columns = (valuesData.values && valuesData.values[0]) ? valuesData.values[0].filter(c => c && c.trim()) : [];
+      res.json({ columns });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/oauth/:service/disconnect — revoke OAuth connection
   router.post('/:service/disconnect', verifyUser, async (req, res) => {
     const { service } = req.params;
