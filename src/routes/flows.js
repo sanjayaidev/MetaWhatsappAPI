@@ -198,8 +198,30 @@ module.exports = function flowsRouter(deps) {
       connected: isConnected, 
       email: data.metadata?.email,
       expires_at: data.expires_at,
-      scopes: data.scopes
+      scopes: data.scopes,
+      pages: data.metadata?.pages || []
     });
+  });
+
+  // GET /api/oauth/google/sheets — list Google Sheets accessible to user
+  router.get('/google/sheets', verifyUser, async (req, res) => {
+    const { data: tokenData } = await supabase.from('wb_oauth_tokens')
+      .select('*').eq('user_id', req.user.id).eq('service', 'google').single();
+    if (!tokenData || !tokenData.access_token_enc) {
+      return res.status(401).json({ error: 'Google not connected' });
+    }
+    const accessToken = decryptToken(tokenData.access_token_enc);
+    
+    try {
+      const sheetsRes = await fetch('https://sheets.googleapis.com/drive/v3/files?mimeType=application/vnd.google-apps.spreadsheet&fields=files(id,name)', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const sheetsData = await sheetsRes.json();
+      if (!sheetsRes.ok) throw new Error(sheetsData.error?.message || 'Failed to fetch sheets');
+      res.json({ sheets: sheetsData.files || [] });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // DELETE /api/oauth/:service/disconnect — revoke OAuth connection

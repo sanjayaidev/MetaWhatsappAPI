@@ -225,12 +225,18 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 
 <!-- ══ SOURCES / INTEGRATIONS ══ -->
 <div class="tab-panel" id="tab-sources">
-<div class="page-header"><div><div class="page-title">Sources</div><div class="page-sub">Connect where leads come from</div></div></div>
+<div class="page-header"><div><div class="page-title">Sources</div><div class="page-sub">Connect where leads come from via OAuth</div></div></div>
 
 <div class="card">
 <div class="card-header"><div class="card-title">📊 Google Sheets</div><span class="badge badge-gray" id="badge-sheet">Not connected</span></div>
 <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">New rows in a connected sheet become leads automatically.</p>
-<button class="btn btn-secondary btn-sm" onclick="openIntegrationModal('sheet')">Connect Sheet</button>
+<div id="sheetConnectedInfo" style="display:none;font-size:12.5px;color:var(--text2);margin-bottom:10px;">
+  Connected to <strong id="sheetConnectedEmail" style="color:var(--text);"></strong>
+  <div style="margin-top:8px;"><label style="font-size:11px;color:var(--text3);">Select Sheet:</label>
+  <select id="sheetSelect" style="width:100%;margin-top:4px;" onchange="saveSheetSelection()"></select></div>
+</div>
+<button class="btn btn-secondary btn-sm" id="sheetConnectBtn" onclick="connectOAuth('google')">G Connect with Google</button>
+<button class="btn btn-ghost btn-sm" id="sheetDisconnectBtn" style="display:none;" onclick="disconnectOAuth('google')">Disconnect</button>
 </div>
 
 <div class="card">
@@ -244,20 +250,30 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="card-header"><div class="card-title">📧 Gmail</div><span class="badge badge-gray" id="badge-gmail">Not connected</span></div>
 <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Sends automated follow-up emails to leads from your Gmail account. (Outbound only — Gmail is not a lead capture source.)</p>
 <div id="gmailConnectedInfo" style="display:none;font-size:12.5px;color:var(--text2);margin-bottom:10px;">Sending as <strong id="gmailConnectedEmail" style="color:var(--text);"></strong></div>
-<button class="btn btn-secondary btn-sm" id="gmailConnectBtn" onclick="connectGmail()">G Connect Gmail Account</button>
-<button class="btn btn-ghost btn-sm" id="gmailDisconnectBtn" style="display:none;" onclick="disconnectIntegration('gmail')">Disconnect</button>
+<button class="btn btn-secondary btn-sm" id="gmailConnectBtn" onclick="connectOAuth('google')">G Connect Gmail Account</button>
+<button class="btn btn-ghost btn-sm" id="gmailDisconnectBtn" style="display:none;" onclick="disconnectOAuth('google')">Disconnect</button>
 </div>
 
 <div class="card">
 <div class="card-header"><div class="card-title">📷 Instagram</div><span class="badge badge-gray" id="badge-instagram">Not connected</span></div>
 <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Capture DMs and comments as leads, and reply from the Leads tab.</p>
-<button class="btn btn-secondary btn-sm" onclick="openIntegrationModal('instagram')">Connect Instagram</button>
+<div id="instagramConnectedInfo" style="display:none;font-size:12.5px;color:var(--text2);margin-bottom:10px;">
+  <label style="font-size:11px;color:var(--text3);">Select Page:</label>
+  <select id="instagramPageSelect" style="width:100%;margin-top:4px;" onchange="saveInstagramSelection()"></select>
+</div>
+<button class="btn btn-secondary btn-sm" id="instagramConnectBtn" onclick="connectOAuth('facebook')">F Connect with Facebook</button>
+<button class="btn btn-ghost btn-sm" id="instagramDisconnectBtn" style="display:none;" onclick="disconnectOAuth('facebook')">Disconnect</button>
 </div>
 
 <div class="card">
 <div class="card-header"><div class="card-title">👥 Facebook Page</div><span class="badge badge-gray" id="badge-facebook">Not connected</span></div>
 <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Capture Page messages and comments as leads.</p>
-<button class="btn btn-secondary btn-sm" onclick="openIntegrationModal('facebook')">Connect Facebook</button>
+<div id="facebookConnectedInfo" style="display:none;font-size:12.5px;color:var(--text2);margin-bottom:10px;">
+  <label style="font-size:11px;color:var(--text3);">Select Page:</label>
+  <select id="facebookPageSelect" style="width:100%;margin-top:4px;" onchange="saveFacebookSelection()"></select>
+</div>
+<button class="btn btn-secondary btn-sm" id="facebookConnectBtn" onclick="connectOAuth('facebook')">F Connect with Facebook</button>
+<button class="btn btn-ghost btn-sm" id="facebookDisconnectBtn" style="display:none;" onclick="disconnectOAuth('facebook')">Disconnect</button>
 </div>
 
 <div class="card">
@@ -729,7 +745,7 @@ async function loadMeetings() {
   tbody.innerHTML = data.meetings.map(m => `<tr><td>${escapeHtml(m.lead_name||'—')}</td><td>${escapeHtml(m.event_name)}</td><td>${new Date(m.start_time).toLocaleString()}</td><td><span class="badge badge-blue">${m.status}</span></td><td><button class="btn btn-ghost btn-xs" onclick="openLead('${m.lead_id}')">View Lead</button></td></tr>`).join('');
 }
 
-// ── SOURCES / INTEGRATIONS ──
+// ── SOURCES / INTEGRATIONS / OAUTH ──
 async function loadIntegrations() {
   const data = await apiCall('/api/integrations');
   if (data.error || !data.integrations) return;
@@ -744,12 +760,103 @@ async function loadIntegrations() {
       if (connected) document.getElementById('gmailConnectedEmail').textContent = (i.config && i.config.email) || '';
     }
   });
+  // Load OAuth connection statuses for flow builder
+  loadOAuthStatuses();
 }
+
+// OAuth connection functions
+async function connectOAuth(service) {
+  const data = await apiCall(`/api/oauth/${service}/oauth-url`);
+  if (data.error || !data.url) { showToast('OAuth not configured: ' + (data.error || 'Missing URL'), true); return; }
+  window.location.href = data.url;
+}
+
+async function disconnectOAuth(service) {
+  if (!confirm(`Disconnect ${service}? This will stop all flows using this connection.`)) return;
+  const data = await apiCall(`/api/oauth/${service}/disconnect`, 'POST');
+  if (data.error) { showToast('Failed: ' + data.error, true); return; }
+  showToast('Disconnected'); loadOAuthStatuses(); loadIntegrations();
+}
+
+async function loadOAuthStatuses() {
+  // Google (Sheets/Gmail)
+  try {
+    const googleData = await apiCall('/api/oauth/google/status');
+    const connected = googleData && googleData.connected;
+    const isSheetTab = document.getElementById('tab-sources').classList.contains('active');
+    if (connected) {
+      document.getElementById('sheetConnectBtn').style.display = 'none';
+      document.getElementById('sheetDisconnectBtn').style.display = 'inline-flex';
+      document.getElementById('sheetConnectedInfo').style.display = 'block';
+      if (googleData.email) document.getElementById('sheetConnectedEmail').textContent = googleData.email;
+      if (isSheetTab) loadGoogleSheets();
+    } else {
+      document.getElementById('sheetConnectBtn').style.display = 'inline-flex';
+      document.getElementById('sheetDisconnectBtn').style.display = 'none';
+      document.getElementById('sheetConnectedInfo').style.display = 'none';
+    }
+  } catch(e) {}
+  
+  // Facebook/Instagram
+  try {
+    const fbData = await apiCall('/api/oauth/facebook/status');
+    const connected = fbData && fbData.connected;
+    if (connected) {
+      document.getElementById('instagramConnectBtn').style.display = 'none';
+      document.getElementById('instagramDisconnectBtn').style.display = 'inline-flex';
+      document.getElementById('instagramConnectedInfo').style.display = 'block';
+      document.getElementById('facebookConnectBtn').style.display = 'none';
+      document.getElementById('facebookDisconnectBtn').style.display = 'inline-flex';
+      document.getElementById('facebookConnectedInfo').style.display = 'block';
+      if (fbData.pages && fbData.pages.length) {
+        populatePageSelects(fbData.pages);
+      }
+    } else {
+      document.getElementById('instagramConnectBtn').style.display = 'inline-flex';
+      document.getElementById('instagramDisconnectBtn').style.display = 'none';
+      document.getElementById('instagramConnectedInfo').style.display = 'none';
+      document.getElementById('facebookConnectBtn').style.display = 'inline-flex';
+      document.getElementById('facebookDisconnectBtn').style.display = 'none';
+      document.getElementById('facebookConnectedInfo').style.display = 'none';
+    }
+  } catch(e) {}
+}
+
+async function loadGoogleSheets() {
+  const data = await apiCall('/api/oauth/google/sheets');
+  if (data.error || !data.sheets) return;
+  const select = document.getElementById('sheetSelect');
+  select.innerHTML = data.sheets.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+}
+
+function saveSheetSelection() {
+  const select = document.getElementById('sheetSelect');
+  localStorage.setItem('crm_selected_sheet_id', select.value);
+  showToast('✅ Sheet selected');
+}
+
+function populatePageSelects(pages) {
+  const igSelect = document.getElementById('instagramPageSelect');
+  const fbSelect = document.getElementById('facebookPageSelect');
+  const options = pages.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+  igSelect.innerHTML = options;
+  fbSelect.innerHTML = options;
+}
+
+function saveInstagramSelection() {
+  const select = document.getElementById('instagramPageSelect');
+  localStorage.setItem('crm_selected_instagram_page', select.value);
+  showToast('✅ Instagram page selected');
+}
+
+function saveFacebookSelection() {
+  const select = document.getElementById('facebookPageSelect');
+  localStorage.setItem('crm_selected_facebook_page', select.value);
+  showToast('✅ Facebook page selected');
+}
+
 let currentIntegrationType = null;
 const INTEGRATION_FIELDS = {
-  sheet: [{k:'sheet_id',l:'Google Sheet ID'},{k:'tab_name',l:'Tab Name'}],
-  instagram: [{k:'access_token',l:'Instagram Access Token'},{k:'page_id',l:'Connected Page ID'}],
-  facebook: [{k:'access_token',l:'Facebook Page Access Token'},{k:'page_id',l:'Page ID'}],
   smbooking: [{k:'api_key',l:'smbooking API Key'},{k:'webhook_secret',l:'Webhook Secret'}],
 };
 function openIntegrationModal(type) {
@@ -771,17 +878,6 @@ async function generateWebhook(channel) {
   if (data.error || !data.url) { showToast('Failed to generate (backend not wired yet)', true); return; }
   document.getElementById('webformUrlBox').textContent = data.url;
   document.getElementById('badge-webform').textContent = 'Connected'; document.getElementById('badge-webform').className = 'badge badge-green';
-}
-async function connectGmail() {
-  const data = await apiCall('/api/integrations/gmail/oauth-url');
-  if (data.error || !data.url) { showToast('Gmail connect not wired up yet', true); return; }
-  window.location.href = data.url;
-}
-async function disconnectIntegration(type) {
-  if (!confirm('Disconnect ' + type + '?')) return;
-  const data = await apiCall(`/api/integrations/${type}/disconnect`, 'POST');
-  if (data.error) { showToast('Failed: ' + data.error, true); return; }
-  showToast('Disconnected'); loadIntegrations();
 }
 
 // ── FIELD MAPPING ──
