@@ -1,0 +1,80 @@
+// src/routes/chatbot.js — website widget + dashboard assistant config, and the
+// dashboard assistant's chat endpoint (reuses the existing NVIDIA-backed
+// generateReply() from src/routes/ai-chat.js rather than a second AI client).
+const express = require('express');
+const crypto = require('crypto');
+
+module.exports = function chatbotRouter(deps) {
+  const { supabase, generateReply, verifyUser } = deps;
+  const router = express.Router();
+
+  // GET /api/chatbot-config?type=website_widget|dashboard_assistant
+  router.get('/chatbot-config', verifyUser, async (req, res) => {
+    const { type } = req.query;
+    if (!['website_widget', 'dashboard_assistant'].includes(type)) return res.status(400).json({ error: 'invalid type' });
+    const { data } = await supabase.from('wb_chatbot_config').select('*').eq('user_id', req.user.id).eq('type', type).single();
+    res.json({ config: data || null });
+  });
+
+  // POST /api/chatbot-config
+  router.post('/chatbot-config', verifyUser, async (req, res) => {
+    const { type, system_prompt, knowledge_urls = [], active = true } = req.body || {};
+    if (!['website_widget', 'dashboard_assistant'].includes(type)) return res.status(400).json({ error: 'invalid type' });
+
+    const patch = { user_id: req.user.id, type, system_prompt, knowledge_urls: type === 'website_widget' ? knowledge_urls.slice(0, 5) : [], active, updated_at: new Date().toISOString() };
+    if (type === 'website_widget') {
+      const { data: existing } = await supabase.from('wb_chatbot_config').select('bot_token').eq('user_id', req.user.id).eq('type', type).single();
+      patch.bot_token = existing?.bot_token || crypto.randomBytes(16).toString('hex');
+    }
+
+    const { data, error } = await supabase.from('wb_chatbot_config').upsert(patch, { onConflict: 'user_id,type' }).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ config: data });
+  });
+
+  // POST /api/chatbot/assistant-message — the dashboard's floating AI assistant
+  router.post('/chatbot/assistant-message', verifyUser, async (req, res) => {
+    const { message } = req.body || {};
+    if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
+
+    const { data: config } = await supabase.from('wb_chatbot_config').select('*').eq('user_id', req.user.id).eq('type', 'dashboard_assistant').single();
+    const systemPrompt = config?.system_prompt || 'You are a helpful CRM assistant. Help the user triage leads, draft replies, and summarize conversations.';
+
+    try {
+      const reply = await generateReply({ systemPrompt, userText: message.trim() });
+      res.json({ reply });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/chatbot/widget-message — public endpoint the embedded website widget calls (auth via bot_token).
+  router.post('/chatbot/widget-message', async (req, res) => {
+    const { bot_token, message, visitor } = req.body || {};
+    if (!bot_token || !message?.trim()) return res.status(400).json({ error: 'bot_token and message are required' });
+
+    const { data: config } = await supabase.from('wb_chatbot_config').select('*').eq('bot_token', bot_token).eq('type', 'website_widget').eq('active', true).single();
+    if (!config) return res.status(404).json({ error: 'Invalid or inactive widget token' });
+
+    try {
+      const reply = await generateReply({ systemPrompt: config.system_prompt || 'You are a helpful sales assistant for this website.', userText: message.trim() });
+
+      // First message from a visitor becomes a web_chat lead.
+      if (visitor?.name || visitor?.email || visitor?.phone) {
+        const { data: lead } = await supabase.from('wb_leads').insert({
+          user_id: config.user_id, name: visitor.name, email: visitor.email, phone: visitor.phone, primary_source: 'web_chat'
+        }).select().single();
+        if (lead) await supabase.from('wb_channel_messages').insert([
+          { lead_id: lead.id, user_id: config.user_id, channel: 'web_chat', direction: 'in', body: message.trim() },
+          { lead_id: lead.id, user_id: config.user_id, channel: 'web_chat', direction: 'out', body: reply }
+        ]);
+      }
+
+      res.json({ reply });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  return router;
+};

@@ -21,6 +21,18 @@ const { verifyApiKey, requirePermission, requireScopedAccount } = require('./src
 const interactiveTemplates = require('./src/interactive-templates');
 const { buildMessagePayload, WhatsAppValidationError } = require('./src/whatsapp-interactive');
 
+// CRM module route factories — each exports a function that takes a shared
+// `deps` object (supabase client, crypto helpers, verifyUser, etc.) so none
+// of them duplicate the client setup that already lives in this file.
+const leadsRouter = require('./src/routes/leads');
+const integrationsRouter = require('./src/routes/integrations');
+const fieldMappingsRouter = require('./src/routes/field-mappings');
+const automationsRouter = require('./src/routes/automations');
+const meetingsRouter = require('./src/routes/meetings');
+const chatbotRouter = require('./src/routes/chatbot');
+const billingRouter = require('./src/routes/billing');
+const webhooksInboundRouter = require('./src/routes/webhooks-inbound');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
@@ -2224,6 +2236,35 @@ async function updateCampaignProgress(campaignId, sendSuccess) {
 // 15. AI CHAT ROUTES (NVIDIA API)
 // ================================================================
 app.use('/api/ai', aiChatRouter);
+
+// ================================================================
+// 15b. CRM ROUTES (Leads, Sources/Integrations, Field Mapping,
+// Automations, Meetings, AI Chatbot, Billing)
+// ================================================================
+const crmDeps = {
+  supabase, verifyUser, encryptToken, decryptToken, fetch,
+  META_API_VERSION, SELF_URL, generateReply,
+};
+
+// /api/leads — every route here needs a logged-in user, so verifyUser is
+// applied once at the mount level (unlike the routers below, which have
+// a couple of public/webhook routes mixed in and gate per-route instead).
+app.use('/api/leads', verifyUser, leadsRouter(crmDeps));
+app.use('/api/field-mappings', verifyUser, fieldMappingsRouter(crmDeps));
+app.use('/api/automations', verifyUser, automationsRouter(crmDeps));
+
+// These three mix authenticated dashboard routes with public callback/webhook
+// routes (Google OAuth redirect, smbooking webhook, website chatbot widget) —
+// each router applies verifyUser itself, per-route.
+app.use('/api/integrations', integrationsRouter(crmDeps));
+app.use('/api/meetings', meetingsRouter(crmDeps));
+app.use('/api', chatbotRouter(crmDeps)); // exposes /api/chatbot-config, /api/chatbot/*
+app.use('/api/billing', billingRouter(crmDeps));
+
+// Public lead-capture endpoints (Google Sheet Apps Script, generic form tools)
+// and the authenticated "generate my webhook URL" endpoint that feeds them.
+app.use('/api/hooks', webhooksInboundRouter(crmDeps));
+app.use('/api/webhook-endpoints', webhooksInboundRouter.endpointsRouter(crmDeps));
 
 // ================================================================
 // 16. API KEY MANAGEMENT ROUTES
