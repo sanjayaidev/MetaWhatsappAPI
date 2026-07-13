@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Flow Builder · sm-server</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #1a2233;
+    --navy-2: #232d42;
+    --ink: #1f2430;
+    --ink-dim: #6b7280;
+    --line: #e3e6ec;
+    --surface: #ffffff;
+    --canvas-bg: #f6f7fb;
+    --accent: #3b5bfd;
+    --accent-dim: #eef1ff;
+    --ok: #16a34a;
+    --danger: #dc2626;
+    --sans: 'Inter', system-ui, sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--sans); color: var(--ink); background: var(--canvas-bg); }
+  a { color: inherit; }
+  button { font-family: var(--sans); cursor: pointer; }
+
+  /* ---- topbar ---- */
+  .topbar {
+    height: 56px; background: var(--navy); color: #fff; display: flex; align-items: center;
+    padding: 0 20px; gap: 16px; flex-shrink: 0;
+  }
+  .hamburger { background: none; border: none; color: #fff; font-size: 18px; padding: 6px; border-radius: 6px; }
+  .hamburger:hover { background: rgba(255,255,255,0.08); }
+  .brand { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
+  .topbar .spacer { flex: 1; }
+  .top-link { font-size: 13px; color: #c7cde0; text-decoration: none; padding: 6px 10px; border-radius: 6px; }
+  .top-link:hover { background: rgba(255,255,255,0.08); color: #fff; }
+  .keypill { font-family: var(--mono); font-size: 11px; color: #c7cde0; background: rgba(255,255,255,0.08); padding: 6px 10px; border-radius: 6px; }
+
+  /* ---- module bar ---- */
+  .module-bar { display: flex; gap: 14px; padding: 18px 20px; overflow-x: auto; background: var(--surface); border-bottom: 1px solid var(--line); }
+  .module-card {
+    flex: 0 0 150px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 12px; text-align: center; transition: box-shadow .15s, border-color .15s; cursor: pointer;
+  }
+  .module-card:hover { border-color: var(--accent); box-shadow: 0 4px 14px rgba(59,91,253,0.12); }
+  .module-card .icon { font-size: 30px; line-height: 1; margin-bottom: 8px; }
+  .module-card .name { font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+  .module-card .connect-btn {
+    background: var(--navy); color: #fff; border: none; border-radius: 999px; padding: 6px 16px;
+    font-size: 12px; font-weight: 600;
+  }
+  .module-card .connect-btn:hover { background: var(--navy-2); }
+  .module-card .conn-status { font-size: 11px; color: var(--ink-dim); margin-top: 10px; line-height: 1.4; }
+  .module-card .conn-status.on { color: var(--ok); }
+  .module-card .add-hint { font-size: 10px; color: var(--accent); margin-top: 6px; opacity: 0; transition: opacity .15s; }
+  .module-card:hover .add-hint { opacity: 1; }
+  .acc-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--canvas-bg); border: 1px solid var(--line); border-radius: 999px; padding: 1px 3px 1px 8px; margin: 2px 2px 0 0; }
+  .acc-chip-x { border: none; background: none; color: var(--danger); font-size: 12px; line-height: 1; cursor: pointer; padding: 2px 5px; border-radius: 50%; }
+  .acc-chip-x:hover { background: rgba(220,38,38,0.12); }
+
+  /* ---- builder layout ---- */
+  .builder { display: flex; height: calc(100vh - 56px - 106px); }
+  .node-side {
+    width: 260px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--line);
+    overflow-y: auto; transition: margin-left .15s;
+  }
+  .node-side.collapsed { margin-left: -260px; }
+  .node-side-empty { padding: 24px 18px; color: var(--ink-dim); font-size: 13px; }
+  .node-side h2 { font-size: 15px; margin: 16px 18px 4px; display: flex; align-items: center; gap: 8px; }
+  .node-side .group-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-dim); margin: 16px 18px 6px; }
+  .op-item {
+    display: flex; align-items: center; gap: 10px; padding: 9px 18px; font-size: 13px; cursor: pointer;
+  }
+  .op-item:hover { background: var(--canvas-bg); }
+  .op-item.selected { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+  .op-marker { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #c6cad3; flex-shrink: 0; }
+  .op-item.selected .op-marker { border-color: var(--accent); background: var(--accent); }
+  .op-item.trigger .op-marker { border-radius: 4px; }
+
+  /* ---- canvas ---- */
+  .canvas-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .canvas-toolbar {
+    display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--surface);
+    border-bottom: 1px solid var(--line);
+  }
+  .canvas-toolbar input[type=text] {
+    border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font-size: 13px; width: 220px;
+  }
+  .tbtn { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 7px 14px; font-size: 13px; font-weight: 600; }
+  .tbtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tbtn.primary:hover { background: #2b4ae0; }
+  .tbtn:hover { border-color: var(--accent); }
+  .canvas-toolbar select { border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+  .canvas-toolbar .spacer { flex: 1; }
+  .canvas-status { font-size: 12px; color: var(--ink-dim); }
+  .zoom-group { display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .zoom-group button { border: none; background: var(--surface); padding: 7px 10px; font-size: 14px; font-weight: 700; border-right: 1px solid var(--line); }
+  .zoom-group button:last-child { border-right: none; }
+  .zoom-group button:hover { background: var(--canvas-bg); }
+  .zoom-pct { font-size: 11px; color: var(--ink-dim); width: 40px; text-align: center; font-family: var(--mono); }
+
+  .canvas-scroll {
+    flex: 1; position: relative; overflow: hidden; background-color: var(--canvas-bg);
+    background-image: radial-gradient(circle, #dcdfe8 1px, transparent 1px);
+    background-size: calc(22px * var(--zoom, 1)) calc(22px * var(--zoom, 1));
+    background-position: var(--panx, 0px) var(--pany, 0px);
+    cursor: grab;
+  }
+  .canvas-scroll.panning { cursor: grabbing; }
+  .canvas-inner {
+    position: absolute; top: 0; left: 0; width: 2400px; height: 1600px;
+    transform-origin: 0 0;
+    transform: translate(var(--panx, 0px), var(--pany, 0px)) scale(var(--zoom, 1));
+  }
+  #edgesSvg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  #edgesSvg path.edge-line { fill: none; stroke: #9aa3b8; stroke-width: 2.5; pointer-events: stroke; cursor: pointer; }
+  #edgesSvg path.edge-line:hover { stroke: var(--danger); }
+  #edgesSvg path.edge-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
+  #edgesSvg path.edge-drawing { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 6 4; pointer-events: none; }
+  .edge-del-btn { pointer-events: auto; cursor: pointer; }
+  .edge-del-btn circle { fill: #fff; stroke: var(--danger); stroke-width: 1.5; }
+  .edge-del-btn text { fill: var(--danger); font-size: 11px; font-family: var(--sans); text-anchor: middle; dominant-baseline: central; font-weight: 700; }
+  .edge-del-btn:hover circle { fill: var(--danger); }
+  .edge-del-btn:hover text { fill: #fff; }
+
+  .node-box {
+    position: absolute; width: 190px; background: var(--surface); border: 2px solid var(--line);
+    border-radius: 10px; padding: 10px 12px; cursor: grab; user-select: none; box-shadow: 0 2px 6px rgba(20,25,40,0.06);
+  }
+  .node-box.selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .node-box.drag-target { border-color: var(--ok); box-shadow: 0 0 0 3px rgba(22,163,74,0.18); }
+  .node-box .nb-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
+  .node-box .nb-icon { font-size: 18px; }
+  .node-box .nb-sub { font-size: 11px; color: var(--ink-dim); margin-top: 4px; padding-left: 26px; }
+  .node-box .nb-role { position: absolute; top: -9px; left: 10px; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; background: var(--navy); color: #fff; padding: 1px 7px; border-radius: 999px; }
+  .node-box .nb-remove { position: absolute; top: -9px; right: -9px; width: 20px; height: 20px; border-radius: 50%; background: #fff; border: 1px solid var(--line); font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center; color: var(--danger); z-index: 3; }
+  .node-box .nb-socket {
+    position: absolute; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; border-radius: 50%;
+    background: #fff; border: 2px solid #9aa3b8; z-index: 2; cursor: crosshair;
+  }
+  .node-box .nb-socket:hover { border-color: var(--accent); background: var(--accent-dim); transform: translateY(-50%) scale(1.2); }
+  .node-box .nb-socket.out { right: -7px; }
+  .node-box .nb-socket.in { left: -7px; }
+  .node-box .nb-socket.filled { background: var(--accent); border-color: var(--accent); }
+
+  .canvas-empty { position: absolute; top: 40%; left: 50%; transform: translate(-50%,-50%); text-align: center; color: var(--ink-dim); font-size: 14px; max-width: 340px; z-index: -1; }
+  .canvas-empty b { color: var(--ink); }
+  .canvas-hint { position: absolute; bottom: 14px; left: 14px; background: rgba(26,34,51,0.88); color: #fff; font-size: 11px; padding: 8px 12px; border-radius: 8px; line-height: 1.7; font-family: var(--mono); z-index: 5; }
+  .canvas-hint b { color: #9db4ff; }
+
+  /* ---- quick add node search (Tab) ---- */
+  .quick-add { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); width: 320px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 32px rgba(20,25,40,0.18); z-index: 20; display: none; overflow: hidden; }
+  .quick-add.open { display: block; }
+  .quick-add input { width: 100%; border: none; border-bottom: 1px solid var(--line); padding: 12px 14px; font-size: 14px; outline: none; box-sizing: border-box; }
+  .quick-add-list { max-height: 320px; overflow-y: auto; }
+  .quick-add-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; font-size: 13px; cursor: pointer; }
+  .quick-add-item:hover, .quick-add-item.active { background: var(--accent-dim); }
+  .quick-add-item .icon { font-size: 16px; }
+  .quick-add-empty { padding: 14px; font-size: 12px; color: var(--ink-dim); }
+
+  /* ---- properties panel ---- */
+  .props-panel { width: 300px; flex-shrink: 0; background: var(--surface); border-left: 1px solid var(--line); overflow-y: auto; padding: 18px; }
+  .props-panel h2 { font-size: 15px; margin: 0 0 14px; }
+  .props-empty { color: var(--ink-dim); font-size: 13px; }
+  .pfield { margin-bottom: 14px; }
+  .pfield label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+  .pfield input[type=text], .pfield input[type=number], .pfield select, .pfield textarea {
+    width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: var(--sans);
+  }
+  .pfield textarea { resize: vertical; min-height: 60px; }
+  .pfield .hint { font-size: 11px; color: var(--ink-dim); margin-top: 4px; }
+  .conn-select-row { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+
+  .toast { position: fixed; bottom: 20px; right: 20px; background: var(--ink); color: #fff; padding: 12px 16px; border-radius: 8px; font-size: 13px; max-width: 340px; box-shadow: 0 8px 24px rgba(0,0,0,0.2); z-index: 50; }
+  .toast.error { background: var(--danger); }
+  .toast.ok { background: var(--ok); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="hamburger" id="toggleSideBtn">☰</button>
+  <div class="brand">Google APIs</div>
+  <div class="spacer"></div>
+  <a class="top-link" href="/">Classic dashboard</a>
+  <div class="keypill" id="keyPill">no API key</div>
+</div>
+
+<div class="module-bar" id="moduleBar"></div>
+
+<div class="builder">
+  <aside class="node-side" id="nodeSide">
+    <div class="node-side-empty" id="nodeSideEmpty">Select a node on the canvas to see its triggers and actions here.</div>
+  </aside>
+
+  <div class="canvas-wrap">
+    <div class="canvas-toolbar">
+      <input type="text" id="flowNameInput" placeholder="Untitled flow" />
+      <button class="tbtn primary" id="saveFlowBtn">Save flow</button>
+      <button class="tbtn" id="runFlowBtn">Run now</button>
+      <div class="zoom-group">
+        <button type="button" id="zoomOutBtn" title="Zoom out (-)">−</button>
+        <span class="zoom-pct" id="zoomPct">100%</span>
+        <button type="button" id="zoomInBtn" title="Zoom in (+)">+</button>
+        <button type="button" id="zoomResetBtn" title="Reset zoom (0)">⤢</button>
+      </div>
+      <button class="tbtn" id="quickAddBtn" title="Add node (Tab)">+ Add node</button>
+      <div class="spacer"></div>
+      <span class="canvas-status" id="canvasStatus"></span>
+      <select id="flowSelect"><option value="">My saved flows…</option></select>
+    </div>
+    <div class="canvas-scroll" id="canvasScroll">
+      <div class="canvas-inner" id="canvasInner">
+        <svg id="edgesSvg"></svg>
+        <div id="canvas"></div>
+      </div>
+      <div class="canvas-empty" id="canvasEmpty">
+        Click a module above, or press <b>Tab</b>, to drop its first node here — <b>the first node you add is the trigger</b>,
+        then connect each next node's input socket to the previous node's output socket to build the run order.
+      </div>
+      <div class="canvas-hint">
+        <b>Scroll</b> zoom · <b>drag canvas</b> pan · <b>drag node</b> move · <b>drag socket→socket</b> connect ·
+        <b>click edge</b> disconnect · <b>Del</b> remove node · <b>Tab</b> add node · <b>0</b> reset zoom
+      </div>
+      <div class="quick-add" id="quickAdd">
+        <input type="text" id="quickAddInput" placeholder="Search modules, triggers, actions…" />
+        <div class="quick-add-list" id="quickAddList"></div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="props-panel" id="propsPanel">
+    <h2>Node Properties</h2>
+    <div class="props-empty" id="propsEmpty">Nothing selected.</div>
+  </aside>
+</div>
+
+<script src="js/nodeDefs.js"></script>
+<script src="js/flow-builder.js"></script>
+</body>
+</html>
