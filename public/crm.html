@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>CRM | WaBlast Pro</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&family=Syne:wght@700;800;900&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+--bg: #080b10; --bg2: #0c1018; --surface: #0f1520; --surface2: #141c2a; --surface3: #1a2335;
+--border: #1e2d42; --border2: #263550; --text: #e8f0fb; --text2: #7a90b0; --text3: #445570;
+--green: #22d172; --green-dim: rgba(34,209,114,0.10); --amber: #f5a623; --amber-dim: rgba(245,166,35,0.12);
+--red: #f04f6e; --red-dim: rgba(240,79,110,0.12); --blue: #3d8ef5; --blue-dim: rgba(61,142,245,0.12);
+--purple: #9d78fa; --purple-dim: rgba(157,120,250,0.12); --pink: #ec4899; --pink-dim: rgba(236,72,153,0.12);
+--sidebar-w: 256px; --radius: 16px; --radius-sm: 10px;
+}
+body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.55; }
+::-webkit-scrollbar { width: 4px; height: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+.app { display: none; min-height: 100vh; }
+.mobile-topbar { display: none; position: sticky; top: 0; background: var(--surface); border-bottom: 1px solid var(--border); padding: 13px 18px; align-items: center; justify-content: space-between; z-index: 200; }
+.menu-btn { background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; }
+.sidebar { width: var(--sidebar-w); background: var(--surface); border-right: 1px solid var(--border); position: fixed; top: 0; left: 0; bottom: 0; z-index: 150; display: flex; flex-direction: column; overflow-y: auto; transition: transform .25s ease; }
+.sidebar-logo { padding: 22px 18px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+.logo-icon { width: 34px; height: 34px; background: var(--green); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.logo-name { font-family: 'Syne', sans-serif; font-size: 17px; font-weight: 800; } .logo-name span { color: var(--green); }
+.nav-section { padding: 8px 10px 4px; }
+.nav-section-label { font-size: 10px; font-weight: 600; color: var(--text3); letter-spacing: .08em; text-transform: uppercase; padding: 0 8px; margin-bottom: 4px; }
+.nav-item { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 10px; font-size: 13.5px; font-weight: 500; cursor: pointer; color: var(--text2); transition: background .12s, color .12s; }
+.nav-item:hover { background: var(--surface2); color: var(--text); } .nav-item.active { background: var(--green-dim); color: var(--green); font-weight: 600; }
+.nav-icon { font-size: 15px; width: 18px; text-align: center; }
+.nav-item .nav-count { margin-left: auto; font-size: 10px; font-weight: 700; background: var(--surface3); color: var(--text2); border-radius: 10px; padding: 1px 7px; }
+.nav-item.active .nav-count { background: var(--green); color: #000; }
+.sidebar-bottom { margin-top: auto; border-top: 1px solid var(--border); padding: 14px; }
+.user-row { display: flex; align-items: center; gap: 10px; background: var(--surface2); border-radius: 12px; padding: 10px; margin-bottom: 10px; }
+.user-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, var(--purple), var(--blue)); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: #fff; flex-shrink: 0; }
+.user-info { overflow: hidden; } .user-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .user-email { font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.logout-btn { width: 100%; padding: 9px; background: transparent; border: 1px solid var(--border2); border-radius: 10px; color: var(--text2); cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 13px; }
+.logout-btn:hover { border-color: var(--red); color: var(--red); }
+.main { margin-left: var(--sidebar-w); padding: 28px 32px; min-height: 100vh; }
+@media (max-width: 860px) { .mobile-topbar { display: flex; } .sidebar { transform: translateX(-100%); top: 57px; } .sidebar.open { transform: translateX(0); } .main { margin-left: 0; padding: 18px 16px; } }
+.tab-panel { display: none; } .tab-panel.active { display: block; }
+.page-header { margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+.page-title { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; } .page-sub { font-size: 13px; color: var(--text2); margin-top: 3px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 22px; margin-bottom: 20px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+.card-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+.stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 22px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; position: relative; overflow: hidden; cursor: pointer; transition: border-color .12s; }
+.stat-card:hover { border-color: var(--border2); }
+.stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
+.stat-card.green::before { background: var(--green); } .stat-card.amber::before { background: var(--amber); } .stat-card.blue::before { background: var(--blue); } .stat-card.purple::before { background: var(--purple); } .stat-card.red::before { background: var(--red); } .stat-card.pink::before { background: var(--pink); }
+.stat-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); margin-bottom: 6px; }
+.stat-value { font-family: 'DM Mono', monospace; font-size: 26px; font-weight: 500; line-height: 1; }
+.stat-card.green .stat-value { color: var(--green); } .stat-card.amber .stat-value { color: var(--amber); } .stat-card.blue .stat-value { color: var(--blue); } .stat-card.purple .stat-value { color: var(--purple); } .stat-card.red .stat-value { color: var(--red); } .stat-card.pink .stat-value { color: var(--pink); }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; border: none; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all .15s; white-space: nowrap; }
+.btn-primary { background: var(--green); color: #000; } .btn-primary:hover { background: #1bbf64; } .btn-primary:disabled { background: var(--border2); color: var(--text3); cursor: not-allowed; }
+.btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border2); } .btn-secondary:hover { border-color: var(--green); color: var(--green); }
+.btn-danger { background: var(--red); color: #fff; } .btn-danger:hover { background: #d93f5c; }
+.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border2); } .btn-ghost:hover { color: var(--text); border-color: var(--border2); }
+.btn-sm { padding: 5px 12px; font-size: 12px; border-radius: 8px; } .btn-xs { padding: 3px 9px; font-size: 11px; border-radius: 7px; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+.badge-green { background: var(--green-dim); color: var(--green); } .badge-amber { background: var(--amber-dim); color: var(--amber); } .badge-red { background: var(--red-dim); color: var(--red); } .badge-blue { background: var(--blue-dim); color: var(--blue); } .badge-purple { background: var(--purple-dim); color: var(--purple); } .badge-pink { background: var(--pink-dim); color: var(--pink); } .badge-gray { background: var(--surface3); color: var(--text2); }
+.data-row { display: flex; align-items: center; justify-content: space-between; background: var(--surface2); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
+.data-row:last-child { margin-bottom: 0; } .data-row-title { font-weight: 600; font-size: 13px; margin-bottom: 2px; } .data-row-sub { font-size: 11px; color: var(--text3); } .data-row-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.form-label { display: block; font-size: 11px; font-weight: 600; color: var(--text2); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 7px; margin-top: 14px; } .form-label:first-child { margin-top: 0; }
+input[type="text"], input[type="email"], input[type="password"], input[type="url"], input[type="tel"], input[type="number"], input[type="datetime-local"], select, textarea { width: 100%; background: var(--bg2); border: 1px solid var(--border2); border-radius: 12px; padding: 11px 13px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 13px; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--green); } select option { background: var(--surface2); } textarea { resize: vertical; min-height: 80px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; } @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+.table-wrap { overflow-x: auto; } table { width: 100%; border-collapse: collapse; } th { text-align: left; padding: 8px 10px; font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--border); } td { padding: 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; vertical-align: middle; } tr:last-child td { border-bottom: none; } tr.clickable { cursor: pointer; } tr:hover td { background: var(--surface2); } hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+.modal { display: none; position: fixed; inset: 0; align-items: center; justify-content: center; z-index: 1000; background: rgba(0,0,0,.75); backdrop-filter: blur(6px); padding: 20px; } .modal.open { display: flex; }
+.modal-box { background: var(--surface); border: 1px solid var(--border2); border-radius: 24px; padding: 28px; width: 100%; max-width: 580px; max-height: 88vh; overflow-y: auto; } .modal-box.wide { max-width: 880px; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; } .modal-title { font-family: 'Syne', sans-serif; font-size: 17px; font-weight: 800; }
+.modal-close { background: none; border: none; color: var(--text2); font-size: 20px; cursor: pointer; line-height: 1; }
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface2); border: 1px solid var(--border2); padding: 10px 22px; border-radius: 40px; font-size: 13px; z-index: 9999; display: none; white-space: nowrap; box-shadow: 0 8px 32px rgba(0,0,0,.4); }
+.spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--border2); border-top-color: var(--green); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; } @keyframes spin { to { transform: rotate(360deg); } }
+.empty-state { text-align: center; padding: 40px 20px; color: var(--text3); } .empty-state .empty-icon { font-size: 36px; margin-bottom: 12px; } .empty-state p { font-size: 13px; }
+.filter-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; align-items: center; }
+.filter-bar select, .filter-bar input { width: auto; min-width: 130px; padding: 8px 12px; font-size: 12.5px; }
+.filter-bar input[type="text"] { min-width: 200px; flex: 1; }
+.source-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; font-size: 12px; background: var(--surface3); }
+.source-whatsapp { background: rgba(34,209,114,.15); } .source-instagram { background: linear-gradient(135deg, rgba(236,72,153,.2), rgba(157,120,250,.2)); } .source-facebook { background: rgba(61,142,245,.15); } .source-webform { background: rgba(245,166,35,.15); } .source-sheet { background: rgba(34,209,114,.1); } .source-web_chat { background: rgba(157,120,250,.15); }
+.lead-name-cell { display: flex; align-items: center; gap: 10px; }
+.lead-avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, var(--purple), var(--blue)); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; color: #fff; flex-shrink: 0; }
+/* Lead detail modal */
+.lead-detail-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.lead-detail-meta { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--text2); margin-top: 6px; }
+.channel-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; }
+.channel-tab { padding: 9px 14px; font-size: 12.5px; font-weight: 600; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+.channel-tab:hover { color: var(--text); } .channel-tab.active { color: var(--green); border-color: var(--green); }
+.channel-tab-panel { display: none; } .channel-tab-panel.active { display: block; }
+.timeline-item { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); } .timeline-item:last-child { border: none; }
+.timeline-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-top: 5px; flex-shrink: 0; }
+.timeline-text { font-size: 12.5px; } .timeline-time { font-size: 10.5px; color: var(--text3); margin-top: 2px; }
+.thread { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px 12px; }
+.msg-bubble { max-width: 75%; padding: 9px 12px; border-radius: 12px; font-size: 12.5px; line-height: 1.5; }
+.msg-in { align-self: flex-start; background: var(--surface2); border-bottom-left-radius: 2px; }
+.msg-out { align-self: flex-end; background: var(--green-dim); color: var(--green); border-bottom-right-radius: 2px; }
+.msg-time { font-size: 10px; color: var(--text3); margin-top: 3px; }
+.reply-box { display: flex; gap: 8px; margin-top: 10px; }
+.reply-box textarea { min-height: 42px; }
+.tag-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--surface3); color: var(--text2); border-radius: 20px; padding: 2px 10px; font-size: 11px; margin-right: 4px; }
+.integration-card { display: flex; align-items: center; gap: 14px; padding: 16px; background: var(--surface2); border-radius: 14px; margin-bottom: 10px; }
+.integration-icon { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+.integration-info { flex: 1; min-width: 160px; } .integration-name { font-weight: 700; font-size: 13.5px; } .integration-desc { font-size: 11.5px; color: var(--text3); margin-top: 2px; }
+.webhook-url-box { display: flex; gap: 6px; align-items: center; background: var(--bg2); border: 1px solid var(--border2); border-radius: 10px; padding: 8px 10px; font-family: 'DM Mono', monospace; font-size: 11px; color: var(--purple); overflow-x: auto; white-space: nowrap; margin-top: 8px; }
+.assistant-fab { position: fixed; bottom: 24px; right: 24px; width: 54px; height: 54px; border-radius: 50%; background: var(--green); display: flex; align-items: center; justify-content: center; font-size: 22px; cursor: pointer; box-shadow: 0 8px 24px rgba(34,209,114,.35); z-index: 500; }
+.assistant-panel { position: fixed; bottom: 92px; right: 24px; width: 340px; max-height: 460px; background: var(--surface); border: 1px solid var(--border2); border-radius: 20px; display: none; flex-direction: column; z-index: 500; box-shadow: 0 16px 48px rgba(0,0,0,.5); }
+.assistant-panel.open { display: flex; }
+.assistant-header { padding: 14px 16px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+.assistant-body { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.assistant-input-row { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--border); }
+.plan-card { border: 1px solid var(--border2); border-radius: 16px; padding: 20px; text-align: center; } .plan-card.current { border-color: var(--green); background: var(--green-dim); }
+.provider-row { display: flex; gap: 8px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+<div class="mobile-topbar">
+<button class="menu-btn" onclick="toggleSidebar()">☰</button>
+<div style="font-family:'Syne';font-weight:800;">CRM</div>
+<div style="width:24px"></div>
+</div>
+<div class="sidebar" id="sidebar">
+<div class="sidebar-logo">
+<div class="logo-icon">🎯</div>
+<div class="logo-name">Lead<span>CRM</span></div>
+</div>
+<div class="nav-section">
+<div class="nav-section-label">Pipeline</div>
+<div class="nav-item active" data-tab="leads"><span class="nav-icon">🎯</span> Leads <span class="nav-count" id="navLeadsCount">0</span></div>
+<div class="nav-item" data-tab="meetings"><span class="nav-icon">📅</span> Meetings</div>
+</div>
+<div class="nav-section">
+<div class="nav-section-label">Capture & Automate</div>
+<div class="nav-item" data-tab="sources"><span class="nav-icon">🔌</span> Sources</div>
+<div class="nav-item" data-tab="automations"><span class="nav-icon">⚡</span> Automations</div>
+<div class="nav-item" data-tab="chatbot"><span class="nav-icon">🤖</span> AI Chatbot</div>
+</div>
+<div class="nav-section">
+<div class="nav-section-label">Account</div>
+<div class="nav-item" data-tab="billing"><span class="nav-icon">💳</span> Billing</div>
+<div class="nav-item" onclick="window.location.href='/dashboard.html'"><span class="nav-icon">💬</span> Back to WaBlast</div>
+</div>
+<div class="sidebar-bottom">
+<div class="user-row">
+<div class="user-avatar" id="avatarLetter">U</div>
+<div class="user-info">
+<div class="user-name" id="userName">User</div>
+<div class="user-email" id="userEmailDisplay">user@wablast.com</div>
+</div>
+</div>
+<button class="logout-btn" onclick="doLogout()">Sign out</button>
+</div>
+</div>
+
+<div class="main" id="mainContent">
+
+<!-- ══ LEADS ══ -->
+<div class="tab-panel active" id="tab-leads">
+<div class="page-header">
+<div><div class="page-title">Leads</div><div class="page-sub">Every lead, every channel, one pipeline</div></div>
+<button class="btn btn-primary" onclick="openNewLeadModal()">+ Add Lead</button>
+</div>
+<div class="stats-row" id="leadStatsRow">
+<div class="stat-card blue" onclick="filterByStatus('')"><div class="stat-label">All</div><div class="stat-value" id="statAll">0</div></div>
+<div class="stat-card amber" onclick="filterByStatus('new')"><div class="stat-label">New</div><div class="stat-value" id="statNew">0</div></div>
+<div class="stat-card purple" onclick="filterByStatus('contacted')"><div class="stat-label">Contacted</div><div class="stat-value" id="statContacted">0</div></div>
+<div class="stat-card pink" onclick="filterByStatus('engaged')"><div class="stat-label">Engaged</div><div class="stat-value" id="statEngaged">0</div></div>
+<div class="stat-card blue" onclick="filterByStatus('booked')"><div class="stat-label">Booked</div><div class="stat-value" id="statBooked">0</div></div>
+<div class="stat-card green" onclick="filterByStatus('won')"><div class="stat-label">Won</div><div class="stat-value" id="statWon">0</div></div>
+<div class="stat-card red" onclick="filterByStatus('cold')"><div class="stat-label">Cold / Lost</div><div class="stat-value" id="statCold">0</div></div>
+</div>
+<div class="card">
+<div class="filter-bar">
+<input type="text" id="leadSearch" placeholder="🔍 Search name, phone, email…" oninput="debouncedLoadLeads()">
+<select id="filterSource" onchange="loadLeads()">
+<option value="">All sources</option>
+<option value="whatsapp">📱 WhatsApp</option>
+<option value="instagram">📷 Instagram</option>
+<option value="facebook">👥 Facebook</option>
+<option value="webform">📝 Web Form</option>
+<option value="sheet">📊 Sheet</option>
+<option value="web_chat">🤖 Web Chatbot</option>
+</select>
+<select id="filterStatusSel" onchange="loadLeads()">
+<option value="">All statuses</option>
+<option value="new">🆕 New</option>
+<option value="contacted">📞 Contacted</option>
+<option value="engaged">👁 Engaged</option>
+<option value="booked">✅ Booked</option>
+<option value="won">🏆 Won</option>
+<option value="follow_up">🔁 Follow Up</option>
+<option value="cold">❄️ Cold</option>
+</select>
+<button class="btn btn-ghost btn-sm" onclick="loadLeads()">↻ Refresh</button>
+</div>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Lead</th><th>Source</th><th>Status</th><th>Last Activity</th><th>Assigned</th><th></th></tr></thead>
+<tbody id="leadsTableBody">
+<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🎯</div><p>No leads yet. Connect a source or add one manually.</p></div></td></tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+
+<!-- ══ MEETINGS ══ -->
+<div class="tab-panel" id="tab-meetings">
+<div class="page-header"><div><div class="page-title">Meetings</div><div class="page-sub">Bookings synced from smbooking</div></div><button class="btn btn-secondary btn-sm" onclick="loadMeetings()">↻ Sync</button></div>
+<div class="card">
+<div class="table-wrap">
+<table>
+<thead><tr><th>Lead</th><th>Event</th><th>When</th><th>Status</th><th></th></tr></thead>
+<tbody id="meetingsTableBody"><tr><td colspan="5"><div class="empty-state"><div class="empty-icon">📅</div><p>No meetings synced yet.</p></div></td></tr></tbody>
+</table>
+</div>
+</div>
+</div>
+
+<!-- ══ SOURCES / INTEGRATIONS ══ -->
+<div class="tab-panel" id="tab-sources">
+<div class="page-header"><div><div class="page-title">Sources</div><div class="page-sub">Connect where leads come from</div></div></div>
+
+<div class="card">
+<div class="card-header"><div class="card-title">📊 Google Sheets</div><span class="badge badge-gray" id="badge-sheet">Not connected</span></div>
+<p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">New rows in a connected sheet become leads automatically.</p>
+<button class="btn btn-secondary btn-sm" onclick="openIntegrationModal('sheet')">Connect Sheet</button>
+</div>
+
+<div class="card">
+<div class="card-header"><div class="card-title">📝 Web Form</div><span class="badge badge-gray" id="badge-webform">Not connected</span></div>
+<p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Point any form builder's webhook at this URL — every submission becomes a lead.</p>
+<div class="webhook-url-box" id="webformUrlBox">Connect to generate a webhook URL…</div>
+<button class="btn btn-secondary btn-sm" style="margin-top:10px;" onclick="generateWebhook('webform')">Generate Webhook URL</button>
+</div>
+
+<div class="card">
+<div class="card-header"><div class="card-title">📷 Instagram</div><span class="badge badge-gray" id="badge-instagram">Not connected</span></div>
+<p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Capture DMs and comments as leads, and reply from the Leads tab.</p>
+<button class="btn btn-secondary btn-sm" onclick="openIntegrationModal('instagram')">Connect Instagram</button>
+</div>
+
+<div class="card">
+<div class="card-header"><div class="card-title">👥 Facebook Page</div><span class="badge badge-gray" id="badge-facebook">Not connected</span></div>
+<p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Capture Page messages and comments as leads.</p>
+<button class="btn btn-secondary btn-sm" onclick="openIntegrationModal('facebook')">Connect Facebook</button>
+</div>
+
+<div class="card">
+<div class="card-header"><div class="card-title">📅 smbooking</div><span class="badge badge-gray" id="badge-smbooking">Not connected</span></div>
+<p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Sync scheduled meetings onto the lead timeline.</p>
+<button class="btn btn-secondary btn-sm" onclick="openIntegrationModal('smbooking')">Connect smbooking</button>
+</div>
+</div>
+
+<!-- ══ AUTOMATIONS ══ -->
+<div class="tab-panel" id="tab-automations">
+<div class="page-header"><div><div class="page-title">Automations</div><div class="page-sub">Auto-send the first message the moment a lead arrives</div></div><button class="btn btn-primary" onclick="openAutomationModal()">+ New Rule</button></div>
+<div class="card">
+<div id="automationsList"><div class="empty-state"><div class="empty-icon">⚡</div><p>No automation rules yet.</p></div></div>
+</div>
+</div>
+
+<!-- ══ AI CHATBOT ══ -->
+<div class="tab-panel" id="tab-chatbot">
+<div class="page-header"><div><div class="page-title">AI Chatbot</div><div class="page-sub">Website widget + your in-dashboard assistant</div></div></div>
+<div class="grid-2">
+<div class="card">
+<div class="card-header"><div class="card-title">🌐 Website Widget</div><span class="badge badge-gray" id="badge-widget-status">Inactive</span></div>
+<div class="form-label">System Prompt</div>
+<textarea id="widgetSystemPrompt" placeholder="You are the sales assistant for…"></textarea>
+<div class="form-label">Knowledge Base URLs (up to 5)</div>
+<div id="widgetUrlsList"></div>
+<button class="btn btn-ghost btn-xs" style="margin-top:8px;" onclick="addWidgetUrlField()">➕ Add URL</button>
+<button class="btn btn-primary" style="margin-top:16px;" onclick="saveChatbotConfig('website_widget')">💾 Save & Activate</button>
+<hr>
+<div class="form-label">Embed Script</div>
+<div class="webhook-url-box" id="widgetEmbedBox">Save config to generate embed script…</div>
+</div>
+<div class="card">
+<div class="card-header"><div class="card-title">🧑‍💼 Dashboard Assistant</div><span class="badge badge-gray" id="badge-assistant-status">Inactive</span></div>
+<p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">An AI assistant that lives in your dashboard — ask it about leads, drafts replies, summarizes conversations. Opens via the floating button bottom-right.</p>
+<div class="form-label">System Prompt</div>
+<textarea id="assistantSystemPrompt" placeholder="You help the team triage and respond to leads…"></textarea>
+<button class="btn btn-primary" style="margin-top:16px;" onclick="saveChatbotConfig('dashboard_assistant')">💾 Save & Activate</button>
+</div>
+</div>
+</div>
+
+<!-- ══ BILLING ══ -->
+<div class="tab-panel" id="tab-billing">
+<div class="page-header"><div><div class="page-title">Billing</div><div class="page-sub">CRM module subscription</div></div></div>
+<div class="card">
+<div class="card-header"><div class="card-title">Current Plan</div><span class="badge badge-amber" id="currentPlanBadge">Loading…</span></div>
+<div id="planCardsRow" class="grid-2">
+<div class="plan-card">
+<div style="font-family:'Syne';font-weight:800;font-size:16px;">CRM Monthly</div>
+<div class="stat-value" style="margin:10px 0;color:var(--green);">₹999<span style="font-size:12px;color:var(--text3);font-weight:400;">/mo</span></div>
+<p style="font-size:12px;color:var(--text2);">Leads, all sources, automations, meetings, chatbot</p>
+<div class="provider-row">
+<button class="btn btn-secondary btn-sm" onclick="subscribe('razorpay')">Razorpay</button>
+<button class="btn btn-secondary btn-sm" onclick="subscribe('stripe')">Stripe</button>
+<button class="btn btn-secondary btn-sm" onclick="subscribe('paypal')">PayPal</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+</div>
+</div>
+
+<!-- ══ LEAD DETAIL MODAL ══ -->
+<div class="modal" id="leadModal">
+<div class="modal-box wide">
+<div class="modal-header">
+<div class="modal-title" id="leadModalTitle">Lead</div>
+<button class="modal-close" onclick="closeModal('leadModal')">✕</button>
+</div>
+<div class="lead-detail-header">
+<div>
+<div style="display:flex;gap:8px;align-items:center;">
+<span class="source-icon" id="leadDetailSourceIcon">🎯</span>
+<span id="leadDetailName" style="font-weight:700;font-size:16px;"></span>
+</div>
+<div class="lead-detail-meta" id="leadDetailMeta"></div>
+<div style="margin-top:8px;" id="leadDetailTags"></div>
+</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;">
+<select id="leadStatusSelect" onchange="updateLeadStatus()">
+<option value="new">🆕 New</option>
+<option value="contacted">📞 Contacted</option>
+<option value="engaged">👁 Engaged</option>
+<option value="booked">✅ Booked</option>
+<option value="won">🏆 Won</option>
+<option value="follow_up">🔁 Follow Up</option>
+<option value="cold">❄️ Cold</option>
+</select>
+<button class="btn btn-danger btn-sm" onclick="deleteLead()">🗑 Delete</button>
+</div>
+</div>
+<div class="channel-tabs" id="leadChannelTabs">
+<div class="channel-tab active" data-ctab="overview" onclick="switchChannelTab('overview')">Overview</div>
+<div class="channel-tab" data-ctab="whatsapp" onclick="switchChannelTab('whatsapp')">📱 WhatsApp</div>
+<div class="channel-tab" data-ctab="instagram" onclick="switchChannelTab('instagram')">📷 Instagram</div>
+<div class="channel-tab" data-ctab="facebook" onclick="switchChannelTab('facebook')">👥 Facebook</div>
+<div class="channel-tab" data-ctab="meetings" onclick="switchChannelTab('meetings')">📅 Meetings</div>
+<div class="channel-tab" data-ctab="notes" onclick="switchChannelTab('notes')">🗒 Notes</div>
+</div>
+
+<div class="channel-tab-panel active" id="ctab-overview">
+<div id="leadTimeline"><div class="empty-state"><p>No activity yet.</p></div></div>
+</div>
+
+<div class="channel-tab-panel" id="ctab-whatsapp">
+<div class="thread" id="thread-whatsapp"></div>
+<div class="reply-box"><textarea id="reply-whatsapp" placeholder="Reply on WhatsApp…"></textarea><button class="btn btn-primary" onclick="sendChannelMessage('whatsapp')">Send</button></div>
+</div>
+<div class="channel-tab-panel" id="ctab-instagram">
+<div class="thread" id="thread-instagram"></div>
+<div class="reply-box"><textarea id="reply-instagram" placeholder="Reply on Instagram…"></textarea><button class="btn btn-primary" onclick="sendChannelMessage('instagram')">Send</button></div>
+</div>
+<div class="channel-tab-panel" id="ctab-facebook">
+<div class="thread" id="thread-facebook"></div>
+<div class="reply-box"><textarea id="reply-facebook" placeholder="Reply on Facebook…"></textarea><button class="btn btn-primary" onclick="sendChannelMessage('facebook')">Send</button></div>
+</div>
+<div class="channel-tab-panel" id="ctab-meetings">
+<div id="leadMeetingsList"><div class="empty-state"><p>No meetings for this lead.</p></div></div>
+</div>
+<div class="channel-tab-panel" id="ctab-notes">
+<div id="leadNotesList"></div>
+<div class="reply-box"><textarea id="newNoteText" placeholder="Add an internal note…"></textarea><button class="btn btn-primary" onclick="addNote()">Add</button></div>
+</div>
+</div>
+</div>
+
+<!-- ══ NEW LEAD MODAL ══ -->
+<div class="modal" id="newLeadModal">
+<div class="modal-box">
+<div class="modal-header"><div class="modal-title">Add Lead</div><button class="modal-close" onclick="closeModal('newLeadModal')">✕</button></div>
+<div class="form-label">Name</div><input type="text" id="newLeadName">
+<div class="form-label">Phone</div><input type="tel" id="newLeadPhone">
+<div class="form-label">Email</div><input type="email" id="newLeadEmail">
+<div class="form-label">Source</div>
+<select id="newLeadSource"><option value="whatsapp">WhatsApp</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="webform">Web Form</option><option value="sheet">Sheet</option><option value="web_chat">Web Chatbot</option><option value="manual">Manual</option></select>
+<button class="btn btn-primary" style="margin-top:18px;width:100%;" onclick="createLead()">Add Lead</button>
+</div>
+</div>
+
+<!-- ══ INTEGRATION CONNECT MODAL ══ -->
+<div class="modal" id="integrationModal">
+<div class="modal-box">
+<div class="modal-header"><div class="modal-title" id="integrationModalTitle">Connect</div><button class="modal-close" onclick="closeModal('integrationModal')">✕</button></div>
+<div id="integrationModalBody"></div>
+<button class="btn btn-primary" style="margin-top:18px;width:100%;" onclick="saveIntegration()">Connect</button>
+</div>
+</div>
+
+<!-- ══ AUTOMATION MODAL ══ -->
+<div class="modal" id="automationModal">
+<div class="modal-box">
+<div class="modal-header"><div class="modal-title">New Automation Rule</div><button class="modal-close" onclick="closeModal('automationModal')">✕</button></div>
+<div class="form-label">When a new lead arrives from</div>
+<select id="autoTrigger"><option value="any">Any source</option><option value="whatsapp">WhatsApp</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="webform">Web Form</option><option value="sheet">Sheet</option></select>
+<div class="form-label">Send message via</div>
+<select id="autoChannel"><option value="whatsapp">📱 WhatsApp</option><option value="instagram">📷 Instagram</option><option value="facebook">👥 Facebook</option></select>
+<div class="form-label">Message</div>
+<textarea id="autoMessage" placeholder="Hi {name}, thanks for reaching out! …"></textarea>
+<div class="form-label">Delay (minutes, 0 = instant)</div>
+<input type="number" id="autoDelay" value="0" min="0">
+<button class="btn btn-primary" style="margin-top:18px;width:100%;" onclick="createAutomation()">Save Rule</button>
+</div>
+</div>
+
+<!-- ══ DASHBOARD AI ASSISTANT ══ -->
+<div class="assistant-fab" onclick="toggleAssistant()">🤖</div>
+<div class="assistant-panel" id="assistantPanel">
+<div class="assistant-header"><span>🤖 CRM Assistant</span><span style="cursor:pointer;color:var(--text2);" onclick="toggleAssistant()">✕</span></div>
+<div class="assistant-body" id="assistantBody"><div class="msg-bubble msg-in">Hey — ask me about your leads, drafts, or follow-ups.</div></div>
+<div class="assistant-input-row"><textarea id="assistantInput" placeholder="Ask something…" style="min-height:38px;"></textarea><button class="btn btn-primary btn-sm" onclick="sendAssistantMessage()">➤</button></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API_BASE_URL = window.location.origin;
+let authToken = null, currentUser = null;
+let leadsCache = [], currentLeadId = null, currentLeadData = null;
+let widgetUrls = [];
+
+async function apiCall(endpoint, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  const options = { method, headers };
+  if (body) options.body = JSON.stringify(body);
+  try {
+    const res = await fetch(`${API_BASE_URL}${endpoint}`, options);
+    const data = await res.json();
+    if (res.status === 401) { doLogout(); throw new Error('Session expired'); }
+    return data;
+  } catch (err) { console.error(`API Error [${endpoint}]:`, err); return { error: err.message }; }
+}
+
+function showToast(msg, isError = false) {
+  const t = document.getElementById('toast'); t.textContent = msg;
+  t.style.background = isError ? 'var(--red-dim)' : 'var(--green-dim)';
+  t.style.color = isError ? 'var(--red)' : 'var(--green)';
+  t.style.display = 'block'; clearTimeout(t._to);
+  t._to = setTimeout(() => t.style.display = 'none', 3500);
+}
+function escapeHtml(str) { if (!str) return ''; return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); }
+function doLogout() { authToken = null; currentUser = null; localStorage.removeItem('supabase_token'); window.location.href = '/login.html'; }
+function timeAgo(iso) { if (!iso) return '—'; const d = new Date(iso), s = (Date.now()-d)/1000;
+  if (s<60) return 'just now'; if (s<3600) return Math.floor(s/60)+'m ago'; if (s<86400) return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago'; }
+const SOURCE_ICON = { whatsapp:'📱', instagram:'📷', facebook:'👥', webform:'📝', sheet:'📊', web_chat:'🤖', manual:'✍️' };
+const STATUS_BADGE = { new:'amber', contacted:'purple', engaged:'pink', booked:'blue', won:'green', follow_up:'purple', cold:'red' };
+
+// ── NAV ──
+document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item[data-tab]').forEach(n => n.classList.remove('active'));
+    item.classList.add('active');
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-' + item.dataset.tab).classList.add('active');
+    document.getElementById('sidebar').classList.remove('open');
+    loadTabData(item.dataset.tab);
+  });
+});
+function loadTabData(tab) {
+  if (tab === 'leads') loadLeads();
+  if (tab === 'meetings') loadMeetings();
+  if (tab === 'sources') loadIntegrations();
+  if (tab === 'automations') loadAutomations();
+  if (tab === 'chatbot') loadChatbotConfig();
+  if (tab === 'billing') loadBilling();
+}
+
+// ── LEADS ──
+let leadSearchTimer = null;
+function debouncedLoadLeads() { clearTimeout(leadSearchTimer); leadSearchTimer = setTimeout(loadLeads, 350); }
+function filterByStatus(status) { document.getElementById('filterStatusSel').value = status; loadLeads(); }
+
+async function loadLeads() {
+  const q = document.getElementById('leadSearch').value.trim();
+  const source = document.getElementById('filterSource').value;
+  const status = document.getElementById('filterStatusSel').value;
+  const params = new URLSearchParams();
+  if (q) params.set('q', q); if (source) params.set('source', source); if (status) params.set('status', status);
+  const data = await apiCall('/api/leads?' + params.toString());
+  const tbody = document.getElementById('leadsTableBody');
+  if (data.error || !data.leads) { tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><p>Couldn't load leads yet — backend endpoint /api/leads not wired up.</p></div></td></tr>`; return; }
+  leadsCache = data.leads;
+  document.getElementById('navLeadsCount').textContent = data.leads.length;
+  renderLeadStats(data.leads);
+  if (!data.leads.length) { tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🎯</div><p>No leads match your filters.</p></div></td></tr>`; return; }
+  tbody.innerHTML = data.leads.map(l => `
+    <tr class="clickable" onclick="openLead('${l.id}')">
+      <td><div class="lead-name-cell"><div class="lead-avatar">${(l.name||'?').charAt(0).toUpperCase()}</div>
+        <div><div style="font-weight:600;">${escapeHtml(l.name||'Unnamed')}</div><div class="data-row-sub">${escapeHtml(l.phone||l.email||'')}</div></div></div></td>
+      <td><span class="source-icon source-${l.primary_source}">${SOURCE_ICON[l.primary_source]||'🎯'}</span></td>
+      <td><span class="badge badge-${STATUS_BADGE[l.status]||'gray'}">${(l.status||'new').replace('_',' ')}</span></td>
+      <td>${timeAgo(l.last_activity_at)}</td>
+      <td>${l.assigned_to ? escapeHtml(l.assigned_to_name||'Assigned') : '<span style="color:var(--text3)">Unassigned</span>'}</td>
+      <td><button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();openLead('${l.id}')">Open →</button></td>
+    </tr>`).join('');
+}
+function renderLeadStats(leads) {
+  const c = { all: leads.length, new:0, contacted:0, engaged:0, booked:0, won:0, cold:0 };
+  leads.forEach(l => { if (c[l.status] !== undefined) c[l.status]++; });
+  document.getElementById('statAll').textContent = c.all;
+  document.getElementById('statNew').textContent = c.new;
+  document.getElementById('statContacted').textContent = c.contacted;
+  document.getElementById('statEngaged').textContent = c.engaged;
+  document.getElementById('statBooked').textContent = c.booked;
+  document.getElementById('statWon').textContent = c.won;
+  document.getElementById('statCold').textContent = c.cold;
+}
+function openNewLeadModal() { openModal('newLeadModal'); }
+async function createLead() {
+  const body = { name: document.getElementById('newLeadName').value.trim(), phone: document.getElementById('newLeadPhone').value.trim(),
+    email: document.getElementById('newLeadEmail').value.trim(), primary_source: document.getElementById('newLeadSource').value };
+  const data = await apiCall('/api/leads', 'POST', body);
+  if (data.error) { showToast('Failed: ' + data.error, true); return; }
+  showToast('✅ Lead added'); closeModal('newLeadModal'); loadLeads();
+}
+
+// ── LEAD DETAIL ──
+async function openLead(id) {
+  currentLeadId = id;
+  const data = await apiCall(`/api/leads/${id}`);
+  if (data.error || !data.lead) { showToast('Could not load lead (backend not wired yet)', true); return; }
+  currentLeadData = data.lead;
+  document.getElementById('leadModalTitle').textContent = data.lead.name || 'Lead';
+  document.getElementById('leadDetailName').textContent = data.lead.name || 'Unnamed lead';
+  document.getElementById('leadDetailSourceIcon').textContent = SOURCE_ICON[data.lead.primary_source] || '🎯';
+  document.getElementById('leadDetailMeta').innerHTML = [data.lead.phone, data.lead.email, data.lead.ig_handle].filter(Boolean).map(escapeHtml).join(' · ');
+  document.getElementById('leadDetailTags').innerHTML = (data.lead.tags||[]).map(t => `<span class="tag-chip">${escapeHtml(t)}</span>`).join('');
+  document.getElementById('leadStatusSelect').value = data.lead.status || 'new';
+  switchChannelTab('overview');
+  loadLeadTimeline(id); loadLeadMessages(id, 'whatsapp'); loadLeadMessages(id, 'instagram'); loadLeadMessages(id, 'facebook'); loadLeadMeetings(id); loadLeadNotes(id);
+  openModal('leadModal');
+}
+function switchChannelTab(tab) {
+  document.querySelectorAll('.channel-tab').forEach(t => t.classList.toggle('active', t.dataset.ctab === tab));
+  document.querySelectorAll('.channel-tab-panel').forEach(p => p.classList.toggle('active', p.id === 'ctab-' + tab));
+}
+async function loadLeadTimeline(id) {
+  const data = await apiCall(`/api/leads/${id}/events`);
+  const el = document.getElementById('leadTimeline');
+  if (data.error || !data.events || !data.events.length) { el.innerHTML = '<div class="empty-state"><p>No activity yet.</p></div>'; return; }
+  el.innerHTML = data.events.map(e => `<div class="timeline-item"><div class="timeline-dot"></div><div><div class="timeline-text">${escapeHtml(e.summary||e.type)}</div><div class="timeline-time">${timeAgo(e.created_at)}</div></div></div>`).join('');
+}
+async function loadLeadMessages(id, channel) {
+  const data = await apiCall(`/api/leads/${id}/messages?channel=${channel}`);
+  const el = document.getElementById('thread-' + channel);
+  if (data.error || !data.messages || !data.messages.length) { el.innerHTML = '<div class="empty-state"><p>No ' + channel + ' conversation yet.</p></div>'; return; }
+  el.innerHTML = data.messages.map(m => `<div class="msg-bubble msg-${m.direction}">${escapeHtml(m.body)}<div class="msg-time">${timeAgo(m.created_at)}</div></div>`).join('');
+  el.scrollTop = el.scrollHeight;
+}
+async function sendChannelMessage(channel) {
+  const box = document.getElementById('reply-' + channel);
+  const body = box.value.trim(); if (!body) return;
+  const data = await apiCall(`/api/leads/${currentLeadId}/messages`, 'POST', { channel, body });
+  if (data.error) { showToast('Failed to send: ' + data.error, true); return; }
+  box.value = ''; loadLeadMessages(currentLeadId, channel); loadLeadTimeline(currentLeadId);
+}
+async function loadLeadMeetings(id) {
+  const data = await apiCall(`/api/leads/${id}/meetings`);
+  const el = document.getElementById('leadMeetingsList');
+  if (data.error || !data.meetings || !data.meetings.length) { el.innerHTML = '<div class="empty-state"><p>No meetings for this lead.</p></div>'; return; }
+  el.innerHTML = data.meetings.map(m => `<div class="data-row"><div><div class="data-row-title">${escapeHtml(m.event_name)}</div><div class="data-row-sub">${new Date(m.start_time).toLocaleString()}</div></div><span class="badge badge-blue">${m.status}</span></div>`).join('');
+}
+async function loadLeadNotes(id) {
+  const data = await apiCall(`/api/leads/${id}/notes`);
+  const el = document.getElementById('leadNotesList');
+  if (data.error || !data.notes || !data.notes.length) { el.innerHTML = '<div class="empty-state"><p>No notes yet.</p></div>'; return; }
+  el.innerHTML = data.notes.map(n => `<div class="data-row"><div><div class="data-row-title">${escapeHtml(n.body)}</div><div class="data-row-sub">${timeAgo(n.created_at)}</div></div></div>`).join('');
+}
+async function addNote() {
+  const body = document.getElementById('newNoteText').value.trim(); if (!body) return;
+  const data = await apiCall(`/api/leads/${currentLeadId}/notes`, 'POST', { body });
+  if (data.error) { showToast('Failed: ' + data.error, true); return; }
+  document.getElementById('newNoteText').value = ''; loadLeadNotes(currentLeadId); loadLeadTimeline(currentLeadId);
+}
+async function updateLeadStatus() {
+  const status = document.getElementById('leadStatusSelect').value;
+  const data = await apiCall(`/api/leads/${currentLeadId}`, 'PUT', { status });
+  if (data.error) { showToast('Failed: ' + data.error, true); return; }
+  showToast('✅ Status updated'); loadLeads(); loadLeadTimeline(currentLeadId);
+}
+async function deleteLead() {
+  if (!confirm('Delete this lead permanently?')) return;
+  const data = await apiCall(`/api/leads/${currentLeadId}`, 'DELETE');
+  if (data.error) { showToast('Failed: ' + data.error, true); return; }
+  showToast('Lead deleted'); closeModal('leadModal'); loadLeads();
+}
+
+// ── MEETINGS ──
+async function loadMeetings() {
+  const data = await apiCall('/api/meetings');
+  const tbody = document.getElementById('meetingsTableBody');
+  if (data.error || !data.meetings || !data.meetings.length) { tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">📅</div><p>No meetings synced yet.</p></div></td></tr>`; return; }
+  tbody.innerHTML = data.meetings.map(m => `<tr><td>${escapeHtml(m.lead_name||'—')}</td><td>${escapeHtml(m.event_name)}</td><td>${new Date(m.start_time).toLocaleString()}</td><td><span class="badge badge-blue">${m.status}</span></td><td><button class="btn btn-ghost btn-xs" onclick="openLead('${m.lead_id}')">View Lead</button></td></tr>`).join('');
+}
+
+// ── SOURCES / INTEGRATIONS ──
+async function loadIntegrations() {
+  const data = await apiCall('/api/integrations');
+  if (data.error || !data.integrations) return;
+  data.integrations.forEach(i => {
+    const badge = document.getElementById('badge-' + i.type);
+    if (badge) { badge.textContent = i.status === 'connected' ? 'Connected' : 'Not connected'; badge.className = 'badge ' + (i.status === 'connected' ? 'badge-green' : 'badge-gray'); }
+  });
+}
+let currentIntegrationType = null;
+const INTEGRATION_FIELDS = {
+  sheet: [{k:'sheet_id',l:'Google Sheet ID'},{k:'tab_name',l:'Tab Name'}],
+  instagram: [{k:'access_token',l:'Instagram Access Token'},{k:'page_id',l:'Connected Page ID'}],
+  facebook: [{k:'access_token',l:'Facebook Page Access Token'},{k:'page_id',l:'Page ID'}],
+  smbooking: [{k:'api_key',l:'smbooking API Key'},{k:'webhook_secret',l:'Webhook Secret'}],
+};
+function openIntegrationModal(type) {
+  currentIntegrationType = type;
+  document.getElementById('integrationModalTitle').textContent = 'Connect ' + type;
+  const fields = INTEGRATION_FIELDS[type] || [];
+  document.getElementById('integrationModalBody').innerHTML = fields.map(f => `<div class="form-label">${f.l}</div><input type="text" id="int-${f.k}">`).join('');
+  openModal('integrationModal');
+}
+async function saveIntegration() {
+  const fields = INTEGRATION_FIELDS[currentIntegrationType] || [];
+  const config = {}; fields.forEach(f => config[f.k] = document.getElementById('int-' + f.k).value.trim());
+  const data = await apiCall(`/api/integrations/${currentIntegrationType}/connect`, 'POST', { config });
+  if (data.error) { showToast('Failed: ' + data.error, true); return; }
+  showToast('✅ Connected'); closeModal('integrationModal'); loadIntegrations();
+}
+async function generateWebhook(channel) {
+  const data = await apiCall('/api/webhook-endpoints', 'POST', { channel });
+  if (data.error || !data.url) { showToast('Failed to generate (backend not wired yet)', true); return; }
+  document.getElementById('webformUrlBox').textContent = data.url;
+  document.getElementById('badge-webform').textContent = 'Connected'; document.getElementById('badge-webform').className = 'badge badge-green';
+}
+
+// ── AUTOMATIONS ──
+async function loadAutomations() {
+  const data = await apiCall('/api/automations');
+  const el = document.getElementById('automationsList');
+  if (data.error || !data.automations || !data.automations.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">⚡</div><p>No automation rules yet.</p></div>'; return; }
+  el.innerHTML = data.automations.map(a => `<div class="data-row"><div><div class="data-row-title">${a.trigger_source} → ${a.channel}</div><div class="data-row-sub">${escapeHtml((a.message_body||'').slice(0,60))} · delay ${a.delay_minutes}m</div></div>
+    <div class="data-row-actions"><span class="badge ${a.active?'badge-green':'badge-gray'}">${a.active?'Active':'Paused'}</span><button class="btn btn-ghost btn-xs" onclick="deleteAutomation('${a.id}')">🗑</button></div></div>`).join('');
+}
+function openAutomationModal() { openModal('automationModal'); }
+async function createAutomation() {
+  const body = { trigger_source: document.getElementById('autoTrigger').value, channel: document.getElementById('autoChannel').value,
+    message_body: document.getElementById('autoMessage').value.trim(), delay_minutes: parseInt(document.getElementById('autoDelay').value)||0 };
+  const data = await apiCall('/api/automations', 'POST', body);
+  if (data.error) { showToast('Failed: ' + data.error, true); return; }
+  showToast('✅ Automation created'); closeModal('automationModal'); loadAutomations();
+}
+async function deleteAutomation(id) {
+  if (!confirm('Delete this rule?')) return;
+  await apiCall(`/api/automations/${id}`, 'DELETE'); loadAutomations();
+}
+
+// ── CHATBOT ──
+function addWidgetUrlField(val) {
+  if (widgetUrls.length >= 5) { showToast('Max 5 URLs', true); return; }
+  widgetUrls.push(val || '');
+  renderWidgetUrls();
+}
+function renderWidgetUrls() {
+  document.getElementById('widgetUrlsList').innerHTML = widgetUrls.map((u,i) =>
+    `<div style="display:flex;gap:6px;margin-bottom:6px;"><input type="url" value="${escapeHtml(u)}" onchange="widgetUrls[${i}]=this.value" placeholder="https://…"><button class="btn btn-ghost btn-xs" onclick="widgetUrls.splice(${i},1);renderWidgetUrls()">✕</button></div>`).join('');
+}
+async function loadChatbotConfig() {
+  const widget = await apiCall('/api/chatbot-config?type=website_widget');
+  if (widget.config) {
+    document.getElementById('widgetSystemPrompt').value = widget.config.system_prompt || '';
+    widgetUrls = widget.config.knowledge_urls || []; renderWidgetUrls();
+    document.getElementById('badge-widget-status').textContent = widget.config.active ? 'Active' : 'Inactive';
+    document.getElementById('badge-widget-status').className = 'badge ' + (widget.config.active ? 'badge-green' : 'badge-gray');
+    if (widget.config.bot_token) document.getElementById('widgetEmbedBox').textContent = `<script src="${API_BASE_URL}/bot.js" data-token="${widget.config.bot_token}"><\/script>`;
+  }
+  const assistant = await apiCall('/api/chatbot-config?type=dashboard_assistant');
+  if (assistant.config) {
+    document.getElementById('assistantSystemPrompt').value = assistant.config.system_prompt || '';
+    document.getElementById('badge-assistant-status').textContent = assistant.config.active ? 'Active' : 'Inactive';
+    document.getElementById('badge-assistant-status').className = 'badge ' + (assistant.config.active ? 'badge-green' : 'badge-gray');
+  }
+}
+async function saveChatbotConfig(type) {
+  const body = type === 'website_widget'
+    ? { type, system_prompt: document.getElementById('widgetSystemPrompt').value.trim(), knowledge_urls: widgetUrls.filter(Boolean), active: true }
+    : { type, system_prompt: document.getElementById('assistantSystemPrompt').value.trim(), active: true };
+  const data = await apiCall('/api/chatbot-config', 'POST', body);
+  if (data.error) { showToast('Failed: ' + data.error, true); return; }
+  showToast('✅ Saved'); loadChatbotConfig();
+}
+
+// ── DASHBOARD ASSISTANT WIDGET ──
+function toggleAssistant() { document.getElementById('assistantPanel').classList.toggle('open'); }
+async function sendAssistantMessage() {
+  const input = document.getElementById('assistantInput'); const msg = input.value.trim(); if (!msg) return;
+  const body = document.getElementById('assistantBody');
+  body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-out">${escapeHtml(msg)}</div>`);
+  input.value = ''; body.scrollTop = body.scrollHeight;
+  const data = await apiCall('/api/chatbot/assistant-message', 'POST', { message: msg });
+  body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-in">${escapeHtml(data.reply || 'Assistant backend not wired up yet.')}</div>`);
+  body.scrollTop = body.scrollHeight;
+}
+
+// ── BILLING ──
+async function loadBilling() {
+  const data = await apiCall('/api/billing/subscription');
+  const badge = document.getElementById('currentPlanBadge');
+  if (data.subscription && data.subscription.status === 'active') { badge.textContent = data.subscription.plan + ' · Active'; badge.className = 'badge badge-green'; }
+  else { badge.textContent = 'No active subscription'; badge.className = 'badge badge-amber'; }
+}
+async function subscribe(provider) {
+  const data = await apiCall('/api/billing/subscribe', 'POST', { provider, plan: 'crm_monthly' });
+  if (data.error || !data.checkout_url) { showToast('Checkout not wired up yet for ' + provider, true); return; }
+  window.location.href = data.checkout_url;
+}
+
+// ── INIT ──
+async function initApp() {
+  const profile = await apiCall('/api/profile');
+  if (profile && profile.email) {
+    currentUser = profile;
+    document.getElementById('userName').textContent = profile.name || profile.email;
+    document.getElementById('userEmailDisplay').textContent = profile.email;
+    document.getElementById('avatarLetter').textContent = (profile.name || profile.email || 'U').charAt(0).toUpperCase();
+  }
+  document.getElementById('app').style.display = 'block';
+  loadLeads();
+}
+const savedToken = localStorage.getItem('supabase_token');
+if (savedToken) { authToken = savedToken; initApp(); } else { window.location.href = '/login.html'; }
+</script>
+</body>
+</html>
