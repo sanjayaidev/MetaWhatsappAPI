@@ -737,6 +737,14 @@ async function loadOAuthStatuses() {
     const googleData = await apiCall('/api/oauth/google/status');
     const connected = googleData && googleData.connected;
     const isSheetTab = document.getElementById('tab-sources').classList.contains('active');
+
+    // Keep the badge in sync with the actual OAuth status
+    const sheetBadge = document.getElementById('badge-sheet');
+    if (sheetBadge) {
+      sheetBadge.textContent = connected ? 'Connected' : 'Not connected';
+      sheetBadge.className = 'badge ' + (connected ? 'badge-green' : 'badge-gray');
+    }
+
     if (connected) {
       document.getElementById('sheetConnectBtn').style.display = 'none';
       document.getElementById('sheetDisconnectBtn').style.display = 'inline-flex';
@@ -777,8 +785,16 @@ async function loadOAuthStatuses() {
 
 async function loadGoogleSheets() {
   const data = await apiCall('/api/oauth/google/sheets');
-  if (data.error || !data.sheets) return;
   const select = document.getElementById('sheetSelect');
+  if (data.error || !data.sheets) {
+    select.innerHTML = '<option value="">Failed to load sheets — try disconnecting and reconnecting</option>';
+    console.error('[loadGoogleSheets]', data.error);
+    return;
+  }
+  if (!data.sheets.length) {
+    select.innerHTML = '<option value="">No spreadsheets found in this Google account</option>';
+    return;
+  }
   select.innerHTML = data.sheets.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
 }
 

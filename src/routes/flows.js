@@ -108,6 +108,7 @@ module.exports = function flowsRouter(deps) {
         client_id: clientId, redirect_uri: redirectUri, response_type: 'code',
         access_type: 'offline', prompt: 'consent',
         scope: ['https://www.googleapis.com/auth/spreadsheets.readonly', 
+                'https://www.googleapis.com/auth/drive.metadata.readonly',
                 'https://www.googleapis.com/auth/gmail.send',
                 'https://www.googleapis.com/auth/userinfo.email'].join(' '),
         state
@@ -219,7 +220,7 @@ module.exports = function flowsRouter(deps) {
     const accessToken = decryptToken(tokenData.access_token_enc);
     
     try {
-      const sheetsRes = await fetch('https://sheets.googleapis.com/drive/v3/files?mimeType=application/vnd.google-apps.spreadsheet&fields=files(id,name)', {
+      const sheetsRes = await fetch('https://www.googleapis.com/drive/v3/files?mimeType=application/vnd.google-apps.spreadsheet&fields=files(id,name)', {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
       const sheetsData = await sheetsRes.json();
