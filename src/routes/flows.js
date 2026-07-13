@@ -236,12 +236,15 @@ module.exports = function flowsRouter(deps) {
     const accessToken = decryptToken(tokenData.access_token_enc);
 
     try {
-      const sheetsRes = await fetch('https://www.googleapis.com/drive/v3/files?mimeType=application/vnd.google-apps.spreadsheet&fields=files(id,name)', {
+      // Use query parameter format instead of path parameter for better filtering
+      const sheetsRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.spreadsheet'&fields=files(id,name,mimeType)&spaces=drive`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
       const sheetsData = await sheetsRes.json();
       if (!sheetsRes.ok) throw new Error(sheetsData.error?.message || 'Failed to fetch sheets');
-      res.json({ sheets: sheetsData.files || [] });
+      // Filter to ensure only actual spreadsheets are returned
+      const sheets = (sheetsData.files || []).filter(f => f.mimeType === 'application/vnd.google-apps.spreadsheet');
+      res.json({ sheets });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

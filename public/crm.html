@@ -231,9 +231,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">New rows in a connected sheet become leads automatically.</p>
 <div id="sheetConnectedInfo" style="display:none;font-size:12.5px;color:var(--text2);margin-bottom:10px;">
   Connected to <strong id="sheetConnectedEmail" style="color:var(--text);"></strong>
-  <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+  <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
     <div style="flex:1;min-width:140px;"><label style="font-size:11px;color:var(--text3);">Select Sheet:</label>
     <select id="sheetSelect" style="width:100%;margin-top:4px;" onchange="onSheetSelected()"></select></div>
+    <div style="width:20px;text-align:center;padding-bottom:8px;"><span style="font-size:16px;color:var(--text2);">→</span></div>
     <div style="flex:1;min-width:140px;"><label style="font-size:11px;color:var(--text3);">Select Page:</label>
     <select id="worksheetSelect" style="width:100%;margin-top:4px;" onchange="saveSheetSelection()" disabled><option value="">Select sheet first</option></select></div>
   </div>
@@ -307,8 +308,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <p style="font-size:12px;color:var(--text2);margin-bottom:10px;">Select a column from your connected sheet → what it maps to.</p>
 <div class="table-wrap">
 <table>
-<thead><tr><th>Column Header</th><th>Maps To</th><th>Merge Tag</th><th></th></tr></thead>
-<tbody id="sheetMappingBody"><tr><td colspan="4"><div class="empty-state"><p>No columns mapped yet.</p></div></td></tr></tbody>
+<thead><tr><th>Column Header (from selected sheet)</th><th>Maps To</th><th>Merge Tag</th><th></th></tr></thead>
+<tbody id="sheetMappingBody"><tr><td colspan="4"><div class="empty-state"><p>Select a sheet and page above to load available columns.</p></div></td></tr></tbody>
 </table>
 </div>
 <button class="btn btn-primary btn-sm" style="margin-top:12px;" onclick="saveFieldMapping('sheet')">💾 Save Sheet Mapping</button>
@@ -869,13 +870,16 @@ async function loadSheetColumns(spreadsheetId, worksheet) {
     const data = await apiCall(`/api/oauth/google/columns/${encodeURIComponent(spreadsheetId)}/${encodeURIComponent(worksheet)}`);
     if (data.error || !data.columns) {
       sheetColumnsCache = [];
+      showToast('⚠️ Could not load columns from sheet', true);
     } else {
       sheetColumnsCache = data.columns;
+      showToast(`✅ Loaded ${sheetColumnsCache.length} columns from sheet`);
     }
     renderFieldMapping('sheet');
   } catch (err) {
     sheetColumnsCache = [];
     console.error('[loadSheetColumns]', err);
+    showToast('❌ Failed to load sheet columns', true);
   }
 }
 
