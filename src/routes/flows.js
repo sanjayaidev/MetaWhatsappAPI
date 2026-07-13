@@ -54,7 +54,7 @@ module.exports = function flowsRouter(deps) {
   router.post('/:id/run', verifyUser, async (req, res) => {
     const { data: flow } = await supabase.from('wb_flows').select('*').eq('id', req.params.id).eq('user_id', req.user.id).single();
     if (!flow) return res.status(404).json({ error: 'Flow not found' });
-    
+
     // Create execution record
     const { data: execution, error: execError } = await supabase.from('wb_flow_executions')
       .insert({ flow_id: flow.id, user_id: req.user.id, trigger_data: req.body.trigger_data || {} })
@@ -78,8 +78,8 @@ module.exports = function flowsRouter(deps) {
   });
 
   // ── OAuth Connection Endpoints ───────────────────────────────────────
-  
-  // GET /api/oauth/:service/url — get OAuth authorization URL
+
+  // GET /api/oauth/:service/oauth-url — get OAuth authorization URL
   router.get('/:service/oauth-url', verifyUser, async (req, res) => {
     const { service } = req.params;
     const validServices = ['google', 'facebook', 'instagram'];
@@ -89,12 +89,24 @@ module.exports = function flowsRouter(deps) {
 
     const state = crypto.randomBytes(16).toString('hex');
     console.log('[OAuth URL] Generating state:', state, 'for user:', req.user.id);
-    // Store pending state
-    const { data: upsertData, error: upsertError } = await supabase.from('wb_oauth_tokens').upsert({
-      user_id: req.user.id, service, token_type: 'oauth2',
-      access_token_enc: 'pending:' + state, metadata: { oauth_state: state }
+
+    // Store pending state in its own dedicated column (unique-constrained).
+    // NOTE: this upsert on (user_id, service) will overwrite any existing row for this
+    // service, including a previously-connected token, if the user restarts the flow
+    // before finishing it. Acceptable for now, but worth revisiting if that matters.
+    const { error: upsertError } = await supabase.from('wb_oauth_tokens').upsert({
+      user_id: req.user.id,
+      service,
+      token_type: 'oauth2',
+      state,
+      access_token_enc: null,
+      metadata: {}
     }, { onConflict: 'user_id,service' });
-    console.log('[OAuth URL] Upsert result:', upsertError || 'success');
+
+    if (upsertError) {
+      console.error('[OAuth URL] Upsert failed:', upsertError);
+      return res.status(500).json({ error: 'Failed to initiate OAuth' });
+    }
 
     let authUrl;
     if (service === 'google') {
@@ -139,9 +151,9 @@ module.exports = function flowsRouter(deps) {
     if (oauthError) return res.status(400).send(`OAuth failed: ${oauthError}`);
     if (!code || !state) return res.status(400).send('Missing code/state');
 
-    // Find pending connection
+    // Find pending connection — lookup on the dedicated, unique, indexed state column
     const { data: pending, error: lookupError } = await supabase.from('wb_oauth_tokens')
-      .select('*').eq('service', service).contains('metadata', { oauth_state: state }).single();
+      .select('*').eq('service', service).eq('state', state).single();
     console.log('[OAuth Lookup] found:', !!pending, 'error:', lookupError);
     if (!pending) return res.status(400).send('Could not match OAuth state');
 
@@ -177,13 +189,17 @@ module.exports = function flowsRouter(deps) {
         profileData = { pages: pagesData.data || [] };
       }
 
-      // Store tokens
+      // Store tokens. Rotate `state` to a fresh unused value rather than nulling it,
+      // since the column is NOT NULL and unique-constrained — this just invalidates
+      // the consumed state so it can't be reused.
       await supabase.from('wb_oauth_tokens').update({
         access_token_enc: encryptToken(tokenData.access_token),
         refresh_token_enc: tokenData.refresh_token ? encryptToken(tokenData.refresh_token) : null,
         expires_at: tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000).toISOString() : null,
         scopes: tokenData.scope?.split(',') || [],
-        metadata: { email: profileData.email, ...profileData }
+        metadata: { email: profileData.email, ...profileData },
+        state: crypto.randomBytes(16).toString('hex'),
+        updated_at: new Date().toISOString()
       }).eq('id', pending.id);
 
       res.redirect('/crm.html?tab=flows&oauth=connected');
@@ -198,11 +214,11 @@ module.exports = function flowsRouter(deps) {
     const { data, error } = await supabase.from('wb_oauth_tokens')
       .select('*').eq('user_id', req.user.id).eq('service', service).single();
     if (error || !data) return res.json({ connected: false });
-    
+
     // Decrypt and return masked token info
-    const isConnected = data.access_token_enc && !data.access_token_enc.startsWith('pending:');
-    res.json({ 
-      connected: isConnected, 
+    const isConnected = !!data.access_token_enc;
+    res.json({
+      connected: isConnected,
       email: data.metadata?.email,
       expires_at: data.expires_at,
       scopes: data.scopes,
@@ -218,7 +234,7 @@ module.exports = function flowsRouter(deps) {
       return res.status(401).json({ error: 'Google not connected' });
     }
     const accessToken = decryptToken(tokenData.access_token_enc);
-    
+
     try {
       const sheetsRes = await fetch('https://www.googleapis.com/drive/v3/files?mimeType=application/vnd.google-apps.spreadsheet&fields=files(id,name)', {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -244,18 +260,18 @@ module.exports = function flowsRouter(deps) {
   async function executeFlow(supabase, flow, executionId, triggerData) {
     const nodes = flow.nodes || [];
     const edges = flow.edges || [];
-    
+
     // Find trigger node
     const triggerNode = nodes.find(n => n.type === 'trigger');
     if (!triggerNode) {
-      await supabase.from('wb_flow_executions').update({ 
-        status: 'failed', error_message: 'No trigger node found', completed_at: new Date().toISOString() 
+      await supabase.from('wb_flow_executions').update({
+        status: 'failed', error_message: 'No trigger node found', completed_at: new Date().toISOString()
       }).eq('id', executionId);
       return;
     }
 
     // Build execution context
-    let context = { ...triggerData, $flow: flow, $trigger: triggerNode.config };
+    let context = { ...triggerData, $flow: flow, $trigger: triggerNode.config, $userId: flow.user_id };
     let currentNodeId = triggerNode.id;
     let visited = new Set();
 
@@ -287,13 +303,13 @@ module.exports = function flowsRouter(deps) {
         await supabase.from('wb_flow_node_results')
           .update({ status: 'failed', error_message: err.message, completed_at: new Date().toISOString() })
           .eq('execution_id', executionId).eq('node_id', node.id);
-        
+
         await supabase.from('wb_flow_executions').update({
           status: 'failed', error_message: err.message, completed_at: new Date().toISOString()
         }).eq('id', executionId);
-        
-        await supabase.from('wb_flows').update({ 
-          status: 'error', last_error: err.message, updated_at: new Date().toISOString() 
+
+        await supabase.from('wb_flows').update({
+          status: 'error', last_error: err.message, updated_at: new Date().toISOString()
         }).eq('id', flow.id);
         return;
       }
@@ -313,7 +329,7 @@ module.exports = function flowsRouter(deps) {
     switch (node.type) {
       case 'trigger':
         return { output: context };
-      
+
       case 'action':
         if (node.subtype === 'send_email') {
           // Send email via Gmail OAuth
@@ -323,14 +339,14 @@ module.exports = function flowsRouter(deps) {
             throw new Error('Gmail not connected');
           }
           const accessToken = decryptToken(tokenData.access_token_enc);
-          
+
           const to = renderTemplate(node.config.to, context);
           const subject = renderTemplate(node.config.subject, context);
           const body = renderTemplate(node.config.body, context);
-          
+
           const gmailRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
             method: 'POST',
-            headers: { 
+            headers: {
               'Authorization': `Bearer ${accessToken}`,
               'Content-Type': 'application/json'
             },
@@ -340,15 +356,15 @@ module.exports = function flowsRouter(deps) {
               ).toString('base64').replace(/\+/g, '-').replace(/\//g, '_')
             })
           });
-          
+
           if (!gmailRes.ok) {
             const err = await gmailRes.json();
             throw new Error(`Gmail API error: ${err.error?.message || 'Failed to send'}`);
           }
-          
+
           return { output: { sent: true, messageId: context.$lastMessageId } };
         }
-        
+
         if (node.subtype === 'add_sheet_row') {
           // Add row to Google Sheet
           const { data: tokenData } = await supabase.from('wb_oauth_tokens')
@@ -357,11 +373,11 @@ module.exports = function flowsRouter(deps) {
             throw new Error('Google Sheets not connected');
           }
           const accessToken = decryptToken(tokenData.access_token_enc);
-          
+
           const sheetId = node.config.sheetId;
           const range = node.config.range || 'Sheet1!A1';
           const values = node.config.values.map(v => [renderTemplate(v, context)]);
-          
+
           const sheetsRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}:append?valueInputOption=USER_ENTERED`, {
             method: 'POST',
             headers: {
@@ -370,25 +386,25 @@ module.exports = function flowsRouter(deps) {
             },
             body: JSON.stringify({ values })
           });
-          
+
           if (!sheetsRes.ok) {
             const err = await sheetsRes.json();
             throw new Error(`Sheets API error: ${err.error?.message || 'Failed to append row'}`);
           }
-          
+
           return { output: { added: true } };
         }
-        
+
         if (node.subtype === 'send_message') {
           // Send WhatsApp/IG/FB message
           const channel = node.config.channel || 'whatsapp';
           const body = renderTemplate(node.config.body, context);
-          
+
           // Use existing sendChannelMessage from CRM
           // This would need to be passed in as dependency
           return { output: { sent: true, channel } };
         }
-        
+
         if (node.subtype === 'http_request') {
           // Generic HTTP request node
           const { method = 'GET', url, headers = {}, body: rawBody } = node.config;
@@ -397,17 +413,17 @@ module.exports = function flowsRouter(deps) {
             Object.entries(headers).map(([k, v]) => [k, renderTemplate(v, context)])
           );
           const renderedBody = rawBody ? JSON.parse(renderTemplate(JSON.stringify(rawBody), context)) : undefined;
-          
+
           const httpRes = await fetch(renderedUrl, {
             method,
             headers: renderedHeaders,
             body: renderedBody ? JSON.stringify(renderedBody) : undefined
           });
-          
+
           const responseData = await httpRes.json().catch(() => ({}));
           return { output: { status: httpRes.status, data: responseData } };
         }
-        
+
         if (node.subtype === 'delay') {
           const minutes = parseInt(node.config.minutes) || 0;
           if (minutes > 0) {
@@ -415,23 +431,23 @@ module.exports = function flowsRouter(deps) {
           }
           return { output: { delayed: true } };
         }
-        
+
         return { output: {} };
-      
+
       case 'condition':
         // Simple if/else branching
         const { operator = 'equals', field, value } = node.config;
         const fieldValue = context[field];
-        
+
         let conditionMet = false;
         if (operator === 'equals') conditionMet = fieldValue == value;
         else if (operator === 'not_equals') conditionMet = fieldValue != value;
         else if (operator === 'contains') conditionMet = String(fieldValue).includes(String(value));
         else if (operator === 'greater_than') conditionMet = Number(fieldValue) > Number(value);
         else if (operator === 'less_than') conditionMet = Number(fieldValue) < Number(value);
-        
+
         return { output: { conditionMet, branch: conditionMet ? 'true' : 'false' } };
-      
+
       default:
         return { output: {} };
     }
