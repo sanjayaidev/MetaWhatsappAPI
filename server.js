@@ -28,6 +28,7 @@ const leadsRouter = require('./src/routes/leads');
 const integrationsRouter = require('./src/routes/integrations');
 const fieldMappingsRouter = require('./src/routes/field-mappings');
 const automationsRouter = require('./src/routes/automations');
+const flowsRouter = require('./src/routes/flows');
 const meetingsRouter = require('./src/routes/meetings');
 const chatbotRouter = require('./src/routes/chatbot');
 const billingRouter = require('./src/routes/billing');
@@ -2252,11 +2253,13 @@ const crmDeps = {
 app.use('/api/leads', verifyUser, leadsRouter(crmDeps));
 app.use('/api/field-mappings', verifyUser, fieldMappingsRouter(crmDeps));
 app.use('/api/automations', verifyUser, automationsRouter(crmDeps));
+app.use('/api/flows', verifyUser, flowsRouter(crmDeps));
 
 // These three mix authenticated dashboard routes with public callback/webhook
 // routes (Google OAuth redirect, smbooking webhook, website chatbot widget) —
 // each router applies verifyUser itself, per-route.
 app.use('/api/integrations', integrationsRouter(crmDeps));
+app.use('/api/oauth', flowsRouter(crmDeps)); // OAuth callbacks for flow builder
 app.use('/api/meetings', meetingsRouter(crmDeps));
 app.use('/api', chatbotRouter(crmDeps)); // exposes /api/chatbot-config, /api/chatbot/*
 app.use('/api/billing', billingRouter(crmDeps));
