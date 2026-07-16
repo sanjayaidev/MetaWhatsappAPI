@@ -68,6 +68,7 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
 input[type="text"], input[type="email"], input[type="password"], input[type="url"], input[type="tel"], input[type="number"], input[type="datetime-local"], select, textarea { width: 100%; background: var(--bg2); border: 1px solid var(--border2); border-radius: 12px; padding: 11px 13px; color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 13px; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--green); } select option { background: var(--surface2); } textarea { resize: vertical; min-height: 80px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; } @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; } @media (max-width: 900px) { .grid-3 { grid-template-columns: 1fr; } }
 .table-wrap { overflow-x: auto; } table { width: 100%; border-collapse: collapse; } th { text-align: left; padding: 8px 10px; font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--border); } td { padding: 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; vertical-align: middle; } tr:last-child td { border-bottom: none; } tr.clickable { cursor: pointer; } tr:hover td { background: var(--surface2); } hr { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 .modal { display: none; position: fixed; inset: 0; align-items: center; justify-content: center; z-index: 1000; background: rgba(0,0,0,.75); backdrop-filter: blur(6px); padding: 20px; } .modal.open { display: flex; }
 .modal-box { background: var(--surface); border: 1px solid var(--border2); border-radius: 24px; padding: 28px; width: 100%; max-width: 580px; max-height: 88vh; overflow-y: auto; } .modal-box.wide { max-width: 880px; }
@@ -558,10 +559,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div id="watcherFieldChips" style="margin-top:4px;"></div>
 </div>
 
-<div style="display:flex;gap:8px;">
-<div style="flex:1;"><div class="form-label">Check every</div><select id="watcherPollInterval"><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="360">6 hours</option><option value="1440">Once a day</option></select></div>
-<div style="flex:1;"><div class="form-label">Send time (for date reminders)</div><input type="time" id="watcherSendTime" value="09:00"></div>
-<div style="flex:1;display:flex;align-items:flex-end;padding-bottom:10px;"><label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="watcherActive" checked style="width:auto;"> Active</label></div>
+<div class="grid-3">
+<div><div class="form-label">Check every</div><select id="watcherPollInterval"><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="360">6 hours</option><option value="1440">Once a day</option></select></div>
+<div><div class="form-label">Send time (for date reminders)</div><input type="time" id="watcherSendTime" value="09:00"></div>
+<div><div class="form-label" style="visibility:hidden;">Active</div><label style="display:flex;align-items:center;gap:6px;font-size:13px;height:42px;"><input type="checkbox" id="watcherActive" checked style="width:auto;"> Active</label></div>
 </div>
 
 <button class="btn btn-primary" style="margin-top:18px;width:100%;" onclick="saveWatcher()">💾 Save Watcher</button>
