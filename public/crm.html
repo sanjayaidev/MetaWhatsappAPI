@@ -111,6 +111,11 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 .assistant-panel.open { display: flex; }
 .assistant-header { padding: 14px 16px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
 .assistant-body { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.assistant-json-body { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.assistant-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.assistant-tab { flex: 1; text-align: center; padding: 10px 8px; font-size: 12px; font-weight: 600; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; }
+.assistant-tab:hover { color: var(--text); background: var(--surface2); }
+.assistant-tab.active { color: var(--green); border-bottom-color: var(--green); background: var(--green-dim); }
 .assistant-input-row { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--border); }
 .plan-card { border: 1px solid var(--border2); border-radius: 16px; padding: 20px; text-align: center; } .plan-card.current { border-color: var(--green); background: var(--green-dim); }
 .provider-row { display: flex; gap: 8px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
@@ -564,7 +569,22 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 
 <div class="grid-3">
 <div><div class="form-label">Check every</div><select id="watcherPollInterval"><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="360">6 hours</option><option value="1440">Once a day</option></select></div>
-<div><div class="form-label">Send time (for date reminders)</div><input type="time" id="watcherSendTime" value="09:00"></div>
+<div style="position:relative;">
+  <div class="form-label">Send time (for date reminders)</div>
+  <div style="display:flex;gap:6px;align-items:center;">
+    <input type="text" id="watcherSendTimeDisplay" value="09:00 AM" readonly style="flex:1;cursor:pointer;" onclick="toggleWatcherTimePicker()">
+    <button class="btn btn-ghost btn-sm" onclick="toggleWatcherTimePicker()" style="padding:8px 10px;">🕐</button>
+  </div>
+  <input type="hidden" id="watcherSendTime" value="09:00">
+  <div id="watcherTimePicker" style="display:none;position:absolute;top:100%;left:0;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:12px;z-index:1000;box-shadow:0 8px 24px rgba(0,0,0,.4);margin-top:4px;">
+    <div style="display:flex;gap:8px;align-items:center;">
+      <select id="watcherTimeHour" onchange="updateWatcherTime()" style="width:70px;"></select>
+      <span>:</span>
+      <select id="watcherTimeMinute" onchange="updateWatcherTime()" style="width:70px;"></select>
+      <select id="watcherTimeAmPm" onchange="updateWatcherTime()" style="width:75px;"><option value="AM">AM</option><option value="PM">PM</option></select>
+    </div>
+  </div>
+</div>
 <div><div class="form-label" style="visibility:hidden;">Active</div><label style="display:flex;align-items:center;gap:6px;font-size:13px;height:42px;"><input type="checkbox" id="watcherActive" checked style="width:auto;"> Active</label></div>
 </div>
 
@@ -572,12 +592,27 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 </div>
 </div>
 
-<!-- ══ DASHBOARD AI ASSISTANT ══ -->
+<!-- ══ DASHBOARD AI ASSISTANT WITH TABS ══ -->
 <div class="assistant-fab" onclick="toggleAssistant()">🤖</div>
 <div class="assistant-panel" id="assistantPanel">
-<div class="assistant-header"><span>🤖 CRM Assistant</span><span style="cursor:pointer;color:var(--text2);" onclick="toggleAssistant()">✕</span></div>
+<div class="assistant-header">
+  <span>🤖 CRM Assistant</span>
+  <span style="cursor:pointer;color:var(--text2);" onclick="toggleAssistant()">✕</span>
+</div>
+<div class="assistant-tabs">
+  <div class="assistant-tab active" data-tab="general" onclick="switchAssistantTab('general')">💬 General Help</div>
+  <div class="assistant-tab" data-tab="json" onclick="switchAssistantTab('json')">📝 JSON Template</div>
+</div>
 <div class="assistant-body" id="assistantBody"><div class="msg-bubble msg-in">Hey — ask me about your leads, drafts, or follow-ups.</div></div>
-<div class="assistant-input-row"><textarea id="assistantInput" placeholder="Ask something…" style="min-height:38px;"></textarea><button class="btn btn-primary btn-sm" onclick="sendAssistantMessage()">➤</button></div>
+<div class="assistant-json-body" id="assistantJsonBody" style="display:none;"><div class="msg-bubble msg-in">I'll help you generate JSON message templates. Describe what you need.</div></div>
+<div class="assistant-input-row" id="assistantGeneralInput">
+  <textarea id="assistantInput" placeholder="Ask something…" style="min-height:38px;"></textarea>
+  <button class="btn btn-primary btn-sm" onclick="sendAssistantMessage()">➤</button>
+</div>
+<div class="assistant-input-row" id="assistantJsonInput" style="display:none;">
+  <textarea id="assistantJsonInputField" placeholder="Describe the message template you need…" style="min-height:38px;"></textarea>
+  <button class="btn btn-primary btn-sm" onclick="sendAssistantJsonMessage()">➤</button>
+</div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -1413,8 +1448,25 @@ async function saveChatbotConfig(type) {
   showToast('✅ Saved'); loadChatbotConfig();
 }
 
-// ── DASHBOARD ASSISTANT WIDGET ──
+// ── DASHBOARD ASSISTANT WIDGET WITH TABS ──
+let currentAssistantTab = 'general';
 function toggleAssistant() { document.getElementById('assistantPanel').classList.toggle('open'); }
+function switchAssistantTab(tab) {
+  currentAssistantTab = tab;
+  document.querySelectorAll('.assistant-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.assistant-tab[data-tab="${tab}"]`).classList.add('active');
+  if (tab === 'general') {
+    document.getElementById('assistantBody').style.display = 'flex';
+    document.getElementById('assistantJsonBody').style.display = 'none';
+    document.getElementById('assistantGeneralInput').style.display = 'flex';
+    document.getElementById('assistantJsonInput').style.display = 'none';
+  } else {
+    document.getElementById('assistantBody').style.display = 'none';
+    document.getElementById('assistantJsonBody').style.display = 'flex';
+    document.getElementById('assistantGeneralInput').style.display = 'none';
+    document.getElementById('assistantJsonInput').style.display = 'flex';
+  }
+}
 async function sendAssistantMessage() {
   const input = document.getElementById('assistantInput'); const msg = input.value.trim(); if (!msg) return;
   const body = document.getElementById('assistantBody');
@@ -1422,6 +1474,22 @@ async function sendAssistantMessage() {
   input.value = ''; body.scrollTop = body.scrollHeight;
   const data = await apiCall('/api/chatbot/assistant-message', 'POST', { message: msg });
   body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-in">${escapeHtml(data.reply || 'Assistant backend not wired up yet.')}</div>`);
+  body.scrollTop = body.scrollHeight;
+}
+async function sendAssistantJsonMessage() {
+  const input = document.getElementById('assistantJsonInputField'); const msg = input.value.trim(); if (!msg) return;
+  const body = document.getElementById('assistantJsonBody');
+  body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-out">${escapeHtml(msg)}</div>`);
+  input.value = ''; body.scrollTop = body.scrollHeight;
+  const systemPrompt = 'You are a JSON template generator. Return ONLY valid JSON. No explanations, no markdown, no extra text. Generate a message template based on the user request.';
+  const data = await apiCall('/api/chatbot/assistant-json-message', 'POST', { message: msg, system_prompt: systemPrompt });
+  let replyText = data.reply || 'Failed to generate JSON template.';
+  // Try to format as code block if it looks like JSON
+  try {
+    const parsed = JSON.parse(replyText);
+    replyText = '<pre style="background:var(--bg2);padding:8px;border-radius:8px;overflow-x:auto;font-size:11px;">' + escapeHtml(JSON.stringify(parsed, null, 2)) + '</pre>';
+  } catch(e) {}
+  body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-in">${replyText}</div>`);
   body.scrollTop = body.scrollHeight;
 }
 

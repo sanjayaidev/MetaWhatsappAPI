@@ -80,7 +80,7 @@ module.exports = function chatbotRouter(deps) {
 
     const { data: config } = await supabase.from('wb_chatbot_config').select('*').eq('user_id', req.user.id).eq('type', 'dashboard_assistant').single();
     
-    // Default system prompt with Mixtral 3 675B as the model context
+    // Default system prompt with Mistral Small 4 119B as the model context
     let systemPrompt = config?.system_prompt || 'You are a helpful CRM assistant. Help the user triage leads, draft replies, and summarize conversations.';
     
     // Add knowledge base context if available
@@ -95,15 +95,39 @@ module.exports = function chatbotRouter(deps) {
         systemPrompt += `\n\nUse the following knowledge base content to answer questions:\n${knowledgeContent}`;
       }
       
-      // Use Mixtral 3 675B as the default model for chatbot
+      // Use Mistral Small 4 119B as the default model for chatbot
       const reply = await aiGenerateReply({ 
-        model: 'mistralai/mistral-large-3-675b-instruct-2512',
+        model: 'mistralai/mistral-small-4-119b-2603',
         systemPrompt, 
         userText: message.trim() 
       });
       res.json({ reply });
     } catch (err) {
       console.error('Assistant message error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/chatbot/assistant-json-message — JSON template generation mode
+  router.post('/chatbot/assistant-json-message', verifyUser, async (req, res) => {
+    const { message, system_prompt } = req.body || {};
+    if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
+
+    const { data: config } = await supabase.from('wb_chatbot_config').select('*').eq('user_id', req.user.id).eq('type', 'dashboard_assistant').single();
+    
+    // Use provided system prompt or default to JSON-only mode
+    let systemPrompt = system_prompt || 'You are a JSON template generator. Return ONLY valid JSON. No explanations, no markdown, no extra text.';
+    
+    try {
+      // Use Mistral Small 4 119B as the default model for chatbot
+      const reply = await aiGenerateReply({ 
+        model: 'mistralai/mistral-small-4-119b-2603',
+        systemPrompt, 
+        userText: message.trim() 
+      });
+      res.json({ reply });
+    } catch (err) {
+      console.error('Assistant JSON message error:', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -131,7 +155,7 @@ module.exports = function chatbotRouter(deps) {
       }
       
       const reply = await aiGenerateReply({ 
-        model: 'mistralai/mistral-large-3-675b-instruct-2512',
+        model: 'mistralai/mistral-small-4-119b-2603',
         systemPrompt, 
         userText: message.trim() 
       });
