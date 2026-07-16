@@ -484,7 +484,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 
 <!-- ══ AUTOMATION MODAL ══ -->
 <div class="modal" id="automationModal">
-<div class="modal-box">
+<div class="modal-box wide">
 <div class="modal-header"><div class="modal-title">New Automation Rule</div><button class="modal-close" onclick="closeModal('automationModal')">✕</button></div>
 <div class="form-label">When a new lead arrives from</div>
 <select id="autoTrigger" onchange="renderAutomationFieldChips()">
@@ -497,17 +497,28 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <option value="email">📧 Email</option>
 </select>
 <div class="form-label">Respond to / send via</div>
-<select id="autoChannel">
+<select id="autoChannel" onchange="renderAutomationMessageFields()">
 <option value="all">🌐 All Channels</option>
 <option value="whatsapp">📱 WhatsApp</option>
 <option value="instagram">📷 Instagram</option>
 <option value="facebook">👥 Facebook</option>
 <option value="email">📧 Email</option>
 </select>
+
+<div id="autoTemplateFields">
+<div class="form-label">Approved Template (required for WhatsApp)</div>
+<select id="autoTemplateSelect" onchange="renderAutoPlaceholderMapping()"><option value="">Loading templates…</option></select>
+<div style="font-size:11px;color:var(--text3);margin:4px 0 10px;">Only <strong>Meta-approved</strong> templates are shown — WhatsApp requires an approved template for business-initiated messages. Manage templates under Campaigns → Templates.</div>
+<div id="autoPlaceholderMapping"></div>
+</div>
+
+<div id="autoPlainMessageField">
 <div class="form-label">Message</div>
 <textarea id="autoMessage" placeholder="Hi {name}, thanks for reaching out! …"></textarea>
 <div style="margin-top:6px;font-size:11px;color:var(--text3);">Insert field:</div>
 <div id="autoFieldChips" style="margin-top:4px;"></div>
+</div>
+
 <div class="form-label">Delay (minutes, 0 = instant)</div>
 <input type="number" id="autoDelay" value="0" min="0">
 <button class="btn btn-primary" style="margin-top:18px;width:100%;" onclick="createAutomation()">Save Rule</button>
@@ -1107,15 +1118,97 @@ async function loadAutomations() {
   const data = await apiCall('/api/automations');
   const el = document.getElementById('automationsList');
   if (data.error || !data.automations || !data.automations.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">⚡</div><p>No automation rules yet.</p></div>'; return; }
-  el.innerHTML = data.automations.map(a => `<div class="data-row"><div><div class="data-row-title">${a.trigger_source} → ${a.channel}</div><div class="data-row-sub">${escapeHtml((a.message_body||'').slice(0,60))} · delay ${a.delay_minutes}m</div></div>
-    <div class="data-row-actions"><span class="badge ${a.active?'badge-green':'badge-gray'}">${a.active?'Active':'Paused'}</span><button class="btn btn-ghost btn-xs" onclick="deleteAutomation('${a.id}')">🗑</button></div></div>`).join('');
+  el.innerHTML = data.automations.map(a => {
+    const desc = a.template_id ? `📱 Template: ${a.template_id}` : escapeHtml((a.message_body||'').slice(0,60));
+    return `<div class="data-row"><div><div class="data-row-title">${a.trigger_source} → ${a.channel}</div><div class="data-row-sub">${desc} · delay ${a.delay_minutes}m</div></div>
+    <div class="data-row-actions"><span class="badge ${a.active?'badge-green':'badge-gray'}">${a.active?'Active':'Paused'}</span><button class="btn btn-ghost btn-xs" onclick="deleteAutomation('${a.id}')">🗑</button></div></div>`;
+  }).join('');
 }
 async function openAutomationModal() {
   openModal('automationModal');
   if (!fieldMappings.webform.length) await loadFieldMappings('webform');
   if (!fieldMappings.sheet.length) await loadFieldMappings('sheet');
+  
+  // Load templates cache if not already loaded
+  if (!window.autoTemplatesCache) {
+    const templatesData = await apiCall('/api/templates');
+    window.autoTemplatesCache = (templatesData.templates || []).filter(t => t.status === 'APPROVED');
+  }
+  
+  renderAutomationMessageFields();
   renderAutomationFieldChips();
 }
+
+function renderAutomationMessageFields() {
+  const channel = document.getElementById('autoChannel').value;
+  const isWhatsApp = channel === 'whatsapp' || channel === 'all';
+  
+  document.getElementById('autoTemplateFields').style.display = isWhatsApp ? 'block' : 'none';
+  document.getElementById('autoPlainMessageField').style.display = isWhatsApp ? 'none' : 'block';
+  
+  if (isWhatsApp) {
+    const tplSelect = document.getElementById('autoTemplateSelect');
+    tplSelect.innerHTML = window.autoTemplatesCache && window.autoTemplatesCache.length
+      ? window.autoTemplatesCache.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')
+      : '<option value="">No approved templates yet — submit one under Campaigns</option>';
+    renderAutoPlaceholderMapping();
+  }
+}
+
+function renderAutoPlaceholderMapping(existingMapping) {
+  const tplId = document.getElementById('autoTemplateSelect').value;
+  const tpl = window.autoTemplatesCache.find(t => t.id === tplId);
+  const container = document.getElementById('autoPlaceholderMapping');
+  
+  if (!tpl) { 
+    container.innerHTML = ''; 
+    return; 
+  }
+  
+  // Extract placeholder keys from template body
+  const bodyText = tpl.body || '';
+  const matches = bodyText.match(/\{\{(\w+)\}\}/g) || [];
+  const rawKeys = [...new Set(matches.map(m => m.replace(/[{}]/g, '')))];
+  const isPositional = rawKeys.length > 0 && rawKeys.every(k => /^\d+$/.test(k));
+  const keys = isPositional ? rawKeys.map(k => parseInt(k, 10)).sort((a, b) => a - b) : rawKeys;
+  
+  if (!keys.length) { 
+    container.innerHTML = '<div style="font-size:11px;color:var(--text3);margin-bottom:10px;">This template has no variables to map.</div>'; 
+    return; 
+  }
+
+  const colOptions = ['name', 'phone', 'email']
+    .concat(fieldMappings.webform.filter(m=>m.maps_to==='custom'&&m.tag).map(m=>`tag:${m.tag}`))
+    .concat(fieldMappings.sheet.filter(m=>m.maps_to==='custom'&&m.tag).map(m=>`tag:${m.tag}`))
+    .map(c => `<option value="field:${escapeHtml(c)}">${c.startsWith('tag:') ? 'Merge Tag: ' : ''}${escapeHtml(c.replace('tag:', ''))}</option>`).join('');
+  
+  container.innerHTML = `<div class="form-label">Map "${escapeHtml(tpl.name)}" variables</div>` + keys.map(key => {
+    const saved = existingMapping?.[key];
+    const savedValue = saved ? (saved.type === 'field' ? `field:${saved.field}` : saved.type === 'custom' ? 'custom' : saved.type) : 'name';
+    return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+      <span class="tag-chip">{{${key}}}</span>
+      <select id="autoMap_${key}" style="flex:1;" onchange="toggleAutoCustomInput('${key}')">
+        <option value="name">Name</option>
+        <option value="phone">Phone</option>
+        <option value="email">Email</option>
+        ${colOptions}
+        <option value="custom">Fixed custom text</option>
+      </select>
+      <input type="text" id="autoMapCustom_${key}" placeholder="Custom value" style="flex:1;display:${savedValue === 'custom' ? 'block' : 'none'};" value="${saved?.type === 'custom' ? escapeHtml(saved.value || '') : ''}">
+    </div>`;
+  }).join('');
+  
+  keys.forEach(key => { 
+    const sel = document.getElementById(`autoMap_${key}`); 
+    if (sel) sel.value = existingMapping?.[key] ? (existingMapping[key].type === 'field' ? `field:${existingMapping[key].field}` : existingMapping[key].type) : 'name'; 
+  });
+}
+
+function toggleAutoCustomInput(key) {
+  const isCustom = document.getElementById(`autoMap_${key}`).value === 'custom';
+  document.getElementById(`autoMapCustom_${key}`).style.display = isCustom ? 'block' : 'none';
+}
+
 function renderAutomationFieldChips() {
   const source = document.getElementById('autoTrigger').value;
   const base = ['name','phone','email'];
@@ -1132,8 +1225,50 @@ function insertFieldTag(tag) {
   ta.focus();
 }
 async function createAutomation() {
-  const body = { trigger_source: document.getElementById('autoTrigger').value, channel: document.getElementById('autoChannel').value,
-    message_body: document.getElementById('autoMessage').value.trim(), delay_minutes: parseInt(document.getElementById('autoDelay').value)||0 };
+  const channel = document.getElementById('autoChannel').value;
+  const isWhatsApp = channel === 'whatsapp' || channel === 'all';
+  
+  const body = { 
+    trigger_source: document.getElementById('autoTrigger').value, 
+    channel,
+    delay_minutes: parseInt(document.getElementById('autoDelay').value)||0 
+  };
+  
+  if (isWhatsApp) {
+    const templateId = document.getElementById('autoTemplateSelect').value;
+    if (!templateId) { showToast('Pick an approved template', true); return; }
+    const tpl = window.autoTemplatesCache.find(t => t.id === templateId);
+    
+    // Extract placeholder keys
+    const bodyText = tpl.body || '';
+    const matches = bodyText.match(/\{\{(\w+)\}\}/g) || [];
+    const rawKeys = [...new Set(matches.map(m => m.replace(/[{}]/g, '')))];
+    const isPositional = rawKeys.length > 0 && rawKeys.every(k => /^\d+$/.test(k));
+    const keys = isPositional ? rawKeys.map(k => parseInt(k, 10)).sort((a, b) => a - b) : rawKeys;
+    
+    const placeholder_mapping = {};
+    for (const key of keys) {
+      const sel = document.getElementById(`autoMap_${key}`);
+      if (!sel) continue;
+      const val = sel.value;
+      if (val === 'custom') {
+        const custom = document.getElementById(`autoMapCustom_${key}`)?.value.trim() || '';
+        if (!custom) { showToast(`Custom value required for {{${key}}}`, true); return; }
+        placeholder_mapping[key] = { type: 'custom', value: custom };
+      } else if (val.startsWith('field:')) {
+        placeholder_mapping[key] = { type: 'field', field: val.slice(6) };
+      } else {
+        placeholder_mapping[key] = { type: val }; // 'name' | 'phone' | 'email'
+      }
+    }
+    
+    body.template_id = templateId;
+    body.placeholder_mapping = placeholder_mapping;
+  } else {
+    body.message_body = document.getElementById('autoMessage').value.trim();
+    if (!body.message_body) { showToast('Message is required', true); return; }
+  }
+  
   const data = await apiCall('/api/automations', 'POST', body);
   if (data.error) { showToast('Failed: ' + data.error, true); return; }
   showToast('✅ Automation created'); closeModal('automationModal'); loadAutomations();
