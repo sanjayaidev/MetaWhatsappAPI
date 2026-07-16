@@ -1150,6 +1150,7 @@ async function openWatcherModal(id) {
     apiCall('/api/templates')
   ]);
   watcherSheetsCache = sheetsData.sheets || [];
+  watcherColumnsCache = []; // Reset columns cache for new watcher
   const sheetSelect = document.getElementById('watcherSheetSelect');
   sheetSelect.innerHTML = watcherSheetsCache.length
     ? watcherSheetsCache.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')
@@ -1209,6 +1210,12 @@ async function onWatcherSheetSelected() {
   const data = await apiCall(`/api/oauth/google/worksheets/${sheetId}`);
   wsSelect.disabled = false;
   wsSelect.innerHTML = (data.worksheets || []).map(w => `<option value="${escapeHtml(w)}">${escapeHtml(w)}</option>`).join('') || '<option value="">No tabs found</option>';
+  
+  // Auto-select first worksheet and load its columns (same as Field Mapping tab)
+  if (data.worksheets && data.worksheets.length > 0) {
+    wsSelect.value = data.worksheets[0];
+    await onWatcherWorksheetSelected();
+  }
 }
 
 async function onWatcherWorksheetSelected() {
@@ -1221,7 +1228,14 @@ async function onWatcherWorksheetSelected() {
   ['watcherNameCol','watcherPhoneCol','watcherEmailCol','watcherDateCol'].forEach(elId => {
     const prev = document.getElementById(elId).value;
     document.getElementById(elId).innerHTML = options;
-    if (prev) document.getElementById(elId).value = prev;
+    // Auto-select matching column by name for common fields (same as Field Mapping tab)
+    if (!prev) {
+      const elLabel = elId.replace('watcher', '').replace('Col', '').toLowerCase(); // e.g. 'name', 'phone', 'email', 'date'
+      const matchingCol = watcherColumnsCache.find(c => c.toLowerCase().includes(elLabel));
+      if (matchingCol) document.getElementById(elId).value = matchingCol;
+    } else if (prev) {
+      document.getElementById(elId).value = prev;
+    }
   });
   renderWatcherPlaceholderMapping();
 }
