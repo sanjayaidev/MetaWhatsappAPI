@@ -1147,6 +1147,59 @@ async function deleteAutomation(id) {
 let watcherSheetsCache = [], watcherColumnsCache = [], watcherTemplatesCache = [], currentWatcherId = null;
 const WATCH_TYPE_LABEL = { new_row: '🆕 New Row', date_reminder: '🎂 Date Reminder' };
 
+// ── Sheet watcher time picker (HH:MM 24h stored in #watcherSendTime, 12h shown in #watcherSendTimeDisplay) ──
+let watcherTimeSelectsReady = false;
+function populateWatcherTimeSelects() {
+  if (watcherTimeSelectsReady) return;
+  const hourSel = document.getElementById('watcherTimeHour');
+  const minSel = document.getElementById('watcherTimeMinute');
+  hourSel.innerHTML = Array.from({length: 12}, (_, i) => i + 1)
+    .map(h => `<option value="${h}">${String(h).padStart(2, '0')}</option>`).join('');
+  minSel.innerHTML = Array.from({length: 60}, (_, i) => i)
+    .map(m => `<option value="${m}">${String(m).padStart(2, '0')}</option>`).join('');
+  watcherTimeSelectsReady = true;
+}
+function setWatcherSendTime(hhmm) {
+  hhmm = hhmm || '09:00';
+  const [h24, m] = hhmm.split(':').map(n => parseInt(n, 10));
+  const ampm = h24 >= 12 ? 'PM' : 'AM';
+  let h12 = h24 % 12; if (h12 === 0) h12 = 12;
+  document.getElementById('watcherSendTime').value = hhmm;
+  document.getElementById('watcherSendTimeDisplay').value = `${String(h12).padStart(2, '0')}:${String(m).padStart(2, '0')} ${ampm}`;
+  populateWatcherTimeSelects();
+  document.getElementById('watcherTimeHour').value = String(h12);
+  document.getElementById('watcherTimeMinute').value = String(m);
+  document.getElementById('watcherTimeAmPm').value = ampm;
+}
+function toggleWatcherTimePicker() {
+  populateWatcherTimeSelects();
+  const picker = document.getElementById('watcherTimePicker');
+  const opening = picker.style.display === 'none';
+  if (opening) {
+    // sync selects to the currently stored value before showing
+    setWatcherSendTime(document.getElementById('watcherSendTime').value || '09:00');
+    picker.style.display = 'block';
+  } else {
+    picker.style.display = 'none';
+  }
+}
+function updateWatcherTime() {
+  const h12 = parseInt(document.getElementById('watcherTimeHour').value, 10);
+  const m = parseInt(document.getElementById('watcherTimeMinute').value, 10);
+  const ampm = document.getElementById('watcherTimeAmPm').value;
+  let h24 = h12 % 12;
+  if (ampm === 'PM') h24 += 12;
+  const hhmm = `${String(h24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  document.getElementById('watcherSendTime').value = hhmm;
+  document.getElementById('watcherSendTimeDisplay').value = `${String(h12).padStart(2, '0')}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+document.addEventListener('click', (e) => {
+  const picker = document.getElementById('watcherTimePicker');
+  if (!picker || picker.style.display === 'none') return;
+  const wrapper = picker.parentElement;
+  if (wrapper && !wrapper.contains(e.target)) picker.style.display = 'none';
+});
+
 async function loadSheetWatchers() {
   const data = await apiCall('/api/sheet-watchers');
   const el = document.getElementById('watchersList');
@@ -1178,7 +1231,7 @@ async function openWatcherModal(id) {
   document.getElementById('watcherChannel').value = 'whatsapp';
   document.getElementById('watcherOffsetDays').value = 0;
   document.getElementById('watcherPollInterval').value = '15';
-  document.getElementById('watcherSendTime').value = '09:00';
+  setWatcherSendTime('09:00');
   document.getElementById('watcherActive').checked = true;
   document.getElementById('watcherMessageTemplate').value = '';
   document.getElementById('watcherWorksheetSelect').innerHTML = '<option value="">Select sheet first</option>';
@@ -1212,7 +1265,7 @@ async function openWatcherModal(id) {
     document.getElementById('watcherChannel').value = w.channel;
     document.getElementById('watcherOffsetDays').value = w.offset_days || 0;
     document.getElementById('watcherPollInterval').value = String(w.poll_interval_minutes || 15);
-    document.getElementById('watcherSendTime').value = w.send_time || '09:00';
+    setWatcherSendTime(w.send_time || '09:00');
     document.getElementById('watcherActive').checked = !!w.active;
     document.getElementById('watcherMessageTemplate').value = w.message_template || '';
     renderWatcherFields();
