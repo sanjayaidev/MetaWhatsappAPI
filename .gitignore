@@ -1,15 +1,42 @@
-```
-# Dependencies
+# Examples 1:
+# Project with only source/config files
+
+# Example 2:
+# Project with artifacts
+*.pyc
+__pycache__/
+*.o
+*.obj
+dist/
+build/
+.venv/
+venv/
 node_modules/
-
-# Logs and temp files
 *.log
-
-# Environment
+*.tmp
+*.swp
 .env
 .env.local
 .env.*
-
-# Package lock files
-package-lock.json
-```
+.vscode/
+.idea/
+coverage/
+.htmlcov/
+.coverage
+*.class
+*.exe
+*.dll
+*.so
+*.a
+*.out
+target/
+.gradle/
+.mypy_cache/
+.pytest_cache/
+*.swp
+*.swo
+*.tmp
+.DS_Store
+Thumbs.db
+julia-*/
+zig*/

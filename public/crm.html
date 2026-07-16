@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>CRM | WaBlast Pro</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&family=Syne:wght@700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
@@ -117,6 +118,14 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 .assistant-tab:hover { color: var(--text); background: var(--surface2); }
 .assistant-tab.active { color: var(--green); border-bottom-color: var(--green); background: var(--green-dim); }
 .assistant-input-row { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--border); }
+.msg-bubble.msg-in pre { background: var(--bg2); padding: 8px; border-radius: 8px; overflow-x: auto; font-size: 11px; margin: 4px 0; }
+.msg-bubble.msg-in code { background: var(--bg2); padding: 2px 5px; border-radius: 4px; font-family: 'DM Mono', monospace; font-size: 11px; }
+.msg-bubble.msg-in p { margin-bottom: 6px; }
+.msg-bubble.msg-in ul, .msg-bubble.msg-in ol { margin: 6px 0; padding-left: 18px; }
+.msg-bubble.msg-in li { margin-bottom: 3px; }
+.msg-bubble.msg-in blockquote { border-left: 3px solid var(--green); padding-left: 10px; margin: 6px 0; color: var(--text2); }
+.msg-bubble.msg-in h1, .msg-bubble.msg-in h2, .msg-bubble.msg-in h3 { margin: 8px 0 4px; font-weight: 700; }
+.msg-bubble.msg-in img { max-width: 100%; border-radius: 8px; margin: 6px 0; }
 .plan-card { border: 1px solid var(--border2); border-radius: 16px; padding: 20px; text-align: center; } .plan-card.current { border-color: var(--green); background: var(--green-dim); }
 .provider-row { display: flex; gap: 8px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
 </style>
@@ -1651,7 +1660,81 @@ async function saveChatbotConfig(type) {
 
 // ── DASHBOARD ASSISTANT WIDGET WITH TABS ──
 let currentAssistantTab = 'general';
-function toggleAssistant() { document.getElementById('assistantPanel').classList.toggle('open'); }
+// Session conversation history stored in chrome.storage.local (or localStorage fallback)
+let assistantConversationHistory = [];
+
+async function loadAssistantHistory() {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(['assistantHistory'], (result) => {
+          assistantConversationHistory = result.assistantHistory || [];
+          resolve(assistantConversationHistory);
+        });
+      });
+    } else {
+      const stored = localStorage.getItem('assistantHistory');
+      assistantConversationHistory = stored ? JSON.parse(stored) : [];
+      return assistantConversationHistory;
+    }
+  } catch (e) {
+    console.error('Failed to load assistant history:', e);
+    assistantConversationHistory = [];
+    return [];
+  }
+}
+
+async function saveAssistantHistory() {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      return new Promise((resolve) => {
+        chrome.storage.local.set({ assistantHistory: assistantConversationHistory }, resolve);
+      });
+    } else {
+      localStorage.setItem('assistantHistory', JSON.stringify(assistantConversationHistory));
+    }
+  } catch (e) {
+    console.error('Failed to save assistant history:', e);
+  }
+}
+
+function renderAssistantMessage(content, isUser, container) {
+  if (isUser) {
+    container.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-out">${escapeHtml(content)}</div>`);
+  } else {
+    // Parse markdown for AI responses
+    const htmlContent = marked.parse(content || '');
+    container.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-in">${htmlContent}</div>`);
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+function toggleAssistant() { 
+  const panel = document.getElementById('assistantPanel');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) {
+    loadAssistantHistory().then(() => renderAssistantConversation());
+  }
+}
+
+function renderAssistantConversation() {
+  const body = document.getElementById('assistantBody');
+  const jsonBody = document.getElementById('assistantJsonBody');
+  
+  // Render general tab
+  body.innerHTML = '';
+  if (assistantConversationHistory.length === 0) {
+    body.innerHTML = '<div class="msg-bubble msg-in">Hey — ask me about your leads, drafts, or follow-ups.</div>';
+  } else {
+    assistantConversationHistory.forEach(msg => {
+      renderAssistantMessage(msg.content, msg.role === 'user', body);
+    });
+  }
+  
+  // Render JSON tab (separate history could be added if needed)
+  jsonBody.innerHTML = '<div class="msg-bubble msg-in">I\'ll help you generate JSON message templates. Describe what you need.</div>';
+}
+
 function switchAssistantTab(tab) {
   currentAssistantTab = tab;
   document.querySelectorAll('.assistant-tab').forEach(t => t.classList.remove('active'));
@@ -1668,30 +1751,83 @@ function switchAssistantTab(tab) {
     document.getElementById('assistantJsonInput').style.display = 'flex';
   }
 }
+
 async function sendAssistantMessage() {
-  const input = document.getElementById('assistantInput'); const msg = input.value.trim(); if (!msg) return;
+  const input = document.getElementById('assistantInput'); 
+  const msg = input.value.trim(); 
+  if (!msg) return;
+  
   const body = document.getElementById('assistantBody');
-  body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-out">${escapeHtml(msg)}</div>`);
-  input.value = ''; body.scrollTop = body.scrollHeight;
-  const data = await apiCall('/api/chatbot/assistant-message', 'POST', { message: msg });
-  body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-in">${escapeHtml(data.reply || 'Assistant backend not wired up yet.')}</div>`);
-  body.scrollTop = body.scrollHeight;
-}
-async function sendAssistantJsonMessage() {
-  const input = document.getElementById('assistantJsonInputField'); const msg = input.value.trim(); if (!msg) return;
-  const body = document.getElementById('assistantJsonBody');
-  body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-out">${escapeHtml(msg)}</div>`);
-  input.value = ''; body.scrollTop = body.scrollHeight;
-  const systemPrompt = 'You are a JSON template generator. Return ONLY valid JSON. No explanations, no markdown, no extra text. Generate a message template based on the user request.';
-  const data = await apiCall('/api/chatbot/assistant-json-message', 'POST', { message: msg, system_prompt: systemPrompt });
-  let replyText = data.reply || 'Failed to generate JSON template.';
-  // Try to format as code block if it looks like JSON
+  
+  // Add user message to history and UI
+  assistantConversationHistory.push({ role: 'user', content: msg });
+  renderAssistantMessage(msg, true, body);
+  input.value = ''; 
+  
+  // Save history and send to API with full conversation
+  await saveAssistantHistory();
+  
   try {
-    const parsed = JSON.parse(replyText);
-    replyText = '<pre style="background:var(--bg2);padding:8px;border-radius:8px;overflow-x:auto;font-size:11px;">' + escapeHtml(JSON.stringify(parsed, null, 2)) + '</pre>';
-  } catch(e) {}
-  body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-in">${replyText}</div>`);
-  body.scrollTop = body.scrollHeight;
+    const data = await apiCall('/api/chatbot/assistant-message', 'POST', { 
+      message: msg,
+      conversation_history: assistantConversationHistory.filter(m => m.role !== 'system')
+    });
+    
+    // Add AI response to history and UI
+    const reply = data.reply || 'Assistant backend not wired up yet.';
+    assistantConversationHistory.push({ role: 'assistant', content: reply });
+    renderAssistantMessage(reply, false, body);
+    await saveAssistantHistory();
+  } catch (err) {
+    console.error('Assistant message error:', err);
+    const errorMsg = 'Failed to get response. Please try again.';
+    assistantConversationHistory.push({ role: 'assistant', content: errorMsg });
+    renderAssistantMessage(errorMsg, false, body);
+    await saveAssistantHistory();
+  }
+}
+
+async function sendAssistantJsonMessage() {
+  const input = document.getElementById('assistantJsonInputField'); 
+  const msg = input.value.trim(); 
+  if (!msg) return;
+  
+  const body = document.getElementById('assistantJsonBody');
+  
+  // Add user message to history
+  assistantConversationHistory.push({ role: 'user', content: msg });
+  renderAssistantMessage(msg, true, body);
+  input.value = '';
+  
+  // Save history
+  await saveAssistantHistory();
+  
+  const systemPrompt = 'You are a JSON template generator. Return ONLY valid JSON. No explanations, no markdown, no extra text. Generate a message template based on the user request.';
+  
+  try {
+    const data = await apiCall('/api/chatbot/assistant-json-message', 'POST', { 
+      message: msg, 
+      system_prompt: systemPrompt,
+      conversation_history: assistantConversationHistory.filter(m => m.role !== 'system')
+    });
+    
+    let replyText = data.reply || 'Failed to generate JSON template.';
+    try {
+      const parsed = JSON.parse(replyText);
+      replyText = '<pre style="background:var(--bg2);padding:8px;border-radius:8px;overflow-x:auto;font-size:11px;">' + escapeHtml(JSON.stringify(parsed, null, 2)) + '</pre>';
+    } catch(e) {}
+    
+    // Add AI response to history and UI
+    assistantConversationHistory.push({ role: 'assistant', content: replyText });
+    renderAssistantMessage(replyText, false, body);
+    await saveAssistantHistory();
+  } catch (err) {
+    console.error('Assistant JSON message error:', err);
+    const errorMsg = 'Failed to generate JSON template.';
+    assistantConversationHistory.push({ role: 'assistant', content: errorMsg });
+    renderAssistantMessage(errorMsg, false, body);
+    await saveAssistantHistory();
+  }
 }
 
 // ── BILLING ──
