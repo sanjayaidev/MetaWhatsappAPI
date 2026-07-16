@@ -42,10 +42,10 @@ function isAllowedModel(modelId) {
   return ALLOWED_MODELS.includes(modelId);
 }
 
-// Reusable helper: send a single-turn (system + user) chat request to NVIDIA
+// Reusable helper: send a chat request to NVIDIA with optional conversation history
 // and return the assistant's reply text. Used by the webhook auto-reply flow
-// as well as anything else that needs a one-off AI response.
-async function generateReply({ model, systemPrompt, userText, temperature = 0.7, max_tokens = 512 }) {
+// as well as anything else that needs an AI response.
+async function generateReply({ model, systemPrompt, userText, temperature = 0.7, max_tokens = 512, conversation_history = [] }) {
   const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) throw new Error('NVIDIA_API_KEY not configured');
 
@@ -53,6 +53,13 @@ async function generateReply({ model, systemPrompt, userText, temperature = 0.7,
 
   const messages = [];
   if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+  
+  // Add conversation history if provided
+  if (Array.isArray(conversation_history) && conversation_history.length > 0) {
+    messages.push(...conversation_history);
+  }
+  
+  // Add current user message
   messages.push({ role: 'user', content: userText });
 
   const response = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {

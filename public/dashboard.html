@@ -97,7 +97,13 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 .compliance-box-content { font-size: 12.5px; line-height: 1.6; color: var(--text2); }
 .compliance-box-content strong { color: var(--text); font-weight: 600; }
 .compliance-highlight { background: rgba(34,209,114,0.08); border-left: 3px solid var(--green); padding: 10px 14px; border-radius: 0 8px 8px 0; margin-top: 12px; font-size: 12px; color: var(--text2); }
-.msg-bubble { max-width: 75%; padding: 9px 12px; border-radius: 12px; font-size: 12.5px; line-height: 1.5; }
+.msg-bubble { max-width: 75%; padding: 9px 12px; border-radius: 12px; font-size: 12.5px; line-height: 1.5; word-wrap: break-word; }
+.msg-bubble img { max-width: 100%; border-radius: 8px; margin: 4px 0; }
+.msg-bubble pre { background: var(--bg2); padding: 8px; border-radius: 8px; overflow-x: auto; font-family: 'DM Mono', monospace; font-size: 11px; margin: 6px 0; }
+.msg-bubble code { background: var(--bg2); padding: 2px 5px; border-radius: 4px; font-family: 'DM Mono', monospace; font-size: 11px; }
+.msg-bubble p { margin: 4px 0; }
+.msg-bubble ul, .msg-bubble ol { margin: 4px 0; padding-left: 16px; }
+.msg-bubble blockquote { border-left: 3px solid var(--border2); padding-left: 10px; margin: 6px 0; color: var(--text2); }
 .msg-in { align-self: flex-start; background: var(--surface2); border-bottom-left-radius: 2px; }
 .msg-out { align-self: flex-end; background: var(--green-dim); color: var(--green); border-bottom-right-radius: 2px; }
 .assistant-fab { position: fixed; bottom: 24px; right: 24px; width: 54px; height: 54px; border-radius: 50%; background: var(--green); display: flex; align-items: center; justify-content: center; font-size: 22px; cursor: pointer; box-shadow: 0 8px 24px rgba(34,209,114,.35); z-index: 500; }
@@ -112,6 +118,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 .assistant-tab.active { color: var(--green); border-bottom-color: var(--green); background: var(--green-dim); }
 .assistant-input-row { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--border); }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body><div id="fb-root"></div>
 <script>
@@ -638,8 +645,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
   <div class="assistant-tab active" data-tab="general" onclick="switchAssistantTab('general')">💬 General Help</div>
   <div class="assistant-tab" data-tab="json" onclick="switchAssistantTab('json')">📝 JSON Template</div>
 </div>
-<div class="assistant-body" id="assistantBody"><div class="msg-bubble msg-in">Hey — ask me about templates, campaigns, or API usage.</div></div>
-<div class="assistant-json-body" id="assistantJsonBody" style="display:none;"><div class="msg-bubble msg-in">I'll help you generate JSON message templates. Describe what you need.</div></div>
+<div class="assistant-body" id="assistantBody"></div>
+<div class="assistant-json-body" id="assistantJsonBody" style="display:none;"></div>
 <div class="assistant-input-row" id="assistantGeneralInput">
   <textarea id="assistantInput" placeholder="Ask something…" style="min-height:38px;"></textarea>
   <button class="btn btn-primary btn-sm" onclick="sendAssistantMessage()">➤</button>
@@ -1721,7 +1728,75 @@ function waResetConnectModal() { document.getElementById('waConnectStep2').style
 
 // ── DASHBOARD ASSISTANT WIDGET WITH TABS ──
 let currentAssistantTab = 'general';
-function toggleAssistant() { document.getElementById('assistantPanel').classList.toggle('open'); }
+// Session conversation history stored in chrome.storage.local (or localStorage fallback)
+let assistantConversationHistory = [];
+
+async function loadAssistantHistory() {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(['assistantHistory'], (result) => {
+          assistantConversationHistory = result.assistantHistory || [];
+          resolve(assistantConversationHistory);
+        });
+      });
+    } else {
+      const stored = localStorage.getItem('assistantHistory');
+      assistantConversationHistory = stored ? JSON.parse(stored) : [];
+      return assistantConversationHistory;
+    }
+  } catch (e) {
+    console.error('Failed to load assistant history:', e);
+    assistantConversationHistory = [];
+    return [];
+  }
+}
+
+async function saveAssistantHistory() {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      return new Promise((resolve) => {
+        chrome.storage.local.set({ assistantHistory: assistantConversationHistory }, resolve);
+      });
+    } else {
+      localStorage.setItem('assistantHistory', JSON.stringify(assistantConversationHistory));
+    }
+  } catch (e) {
+    console.error('Failed to save assistant history:', e);
+  }
+}
+
+function renderAssistantMessage(content, isUser, container) {
+  if (isUser) {
+    container.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-out">${escapeHtml(content)}</div>`);
+  } else {
+    // Parse markdown for AI responses
+    const htmlContent = marked.parse(content || '');
+    container.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-in">${htmlContent}</div>`);
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+function toggleAssistant() { 
+  const panel = document.getElementById('assistantPanel');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) {
+    loadAssistantHistory().then(() => renderAssistantConversation());
+  }
+}
+
+function renderAssistantConversation() {
+  const body = document.getElementById('assistantBody');
+  body.innerHTML = '';
+  if (assistantConversationHistory.length === 0) {
+    body.innerHTML = '<div class="msg-bubble msg-in">Hey — ask me about templates, campaigns, or API usage.</div>';
+  } else {
+    assistantConversationHistory.forEach(msg => {
+      renderAssistantMessage(msg.content, msg.role === 'user', body);
+    });
+  }
+}
+
 function switchAssistantTab(tab) {
   currentAssistantTab = tab;
   document.querySelectorAll('.assistant-tab').forEach(t => t.classList.remove('active'));
@@ -1739,28 +1814,81 @@ function switchAssistantTab(tab) {
   }
 }
 async function sendAssistantMessage() {
-  const input = document.getElementById('assistantInput'); const msg = input.value.trim(); if (!msg) return;
+  const input = document.getElementById('assistantInput'); 
+  const msg = input.value.trim(); 
+  if (!msg) return;
+  
   const body = document.getElementById('assistantBody');
-  body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-out">${escapeHtml(msg)}</div>`);
-  input.value = ''; body.scrollTop = body.scrollHeight;
-  const data = await apiCall('/api/chatbot/assistant-message', 'POST', { message: msg });
-  body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-in">${escapeHtml(data.reply || 'Assistant backend not wired up yet.')}</div>`);
-  body.scrollTop = body.scrollHeight;
-}
-async function sendAssistantJsonMessage() {
-  const input = document.getElementById('assistantJsonInputField'); const msg = input.value.trim(); if (!msg) return;
-  const body = document.getElementById('assistantJsonBody');
-  body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-out">${escapeHtml(msg)}</div>`);
-  input.value = ''; body.scrollTop = body.scrollHeight;
-  const systemPrompt = 'You are a JSON template generator. Return ONLY valid JSON. No explanations, no markdown, no extra text. Generate a message template based on the user request.';
-  const data = await apiCall('/api/chatbot/assistant-json-message', 'POST', { message: msg, system_prompt: systemPrompt });
-  let replyText = data.reply || 'Failed to generate JSON template.';
+  
+  // Add user message to history and UI
+  assistantConversationHistory.push({ role: 'user', content: msg });
+  renderAssistantMessage(msg, true, body);
+  input.value = ''; 
+  
+  // Save history and send to API with full conversation
+  await saveAssistantHistory();
+  
   try {
-    const parsed = JSON.parse(replyText);
-    replyText = '<pre style="background:var(--bg2);padding:8px;border-radius:8px;overflow-x:auto;font-size:11px;">' + escapeHtml(JSON.stringify(parsed, null, 2)) + '</pre>';
-  } catch(e) {}
-  body.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-in">${replyText}</div>`);
-  body.scrollTop = body.scrollHeight;
+    const data = await apiCall('/api/chatbot/assistant-message', 'POST', { 
+      message: msg,
+      conversation_history: assistantConversationHistory.filter(m => m.role !== 'system')
+    });
+    
+    // Add AI response to history and UI
+    const reply = data.reply || 'Assistant backend not wired up yet.';
+    assistantConversationHistory.push({ role: 'assistant', content: reply });
+    renderAssistantMessage(reply, false, body);
+    await saveAssistantHistory();
+  } catch (err) {
+    console.error('Assistant message error:', err);
+    const errorMsg = 'Failed to get response. Please try again.';
+    assistantConversationHistory.push({ role: 'assistant', content: errorMsg });
+    renderAssistantMessage(errorMsg, false, body);
+    await saveAssistantHistory();
+  }
+}
+
+async function sendAssistantJsonMessage() {
+  const input = document.getElementById('assistantJsonInputField'); 
+  const msg = input.value.trim(); 
+  if (!msg) return;
+  
+  const body = document.getElementById('assistantJsonBody');
+  
+  // Add user message to history
+  assistantConversationHistory.push({ role: 'user', content: msg });
+  renderAssistantMessage(msg, true, body);
+  input.value = '';
+  
+  // Save history
+  await saveAssistantHistory();
+  
+  const systemPrompt = 'You are a JSON template generator. Return ONLY valid JSON. No explanations, no markdown, no extra text. Generate a message template based on the user request.';
+  
+  try {
+    const data = await apiCall('/api/chatbot/assistant-json-message', 'POST', { 
+      message: msg, 
+      system_prompt: systemPrompt,
+      conversation_history: assistantConversationHistory.filter(m => m.role !== 'system')
+    });
+    
+    let replyText = data.reply || 'Failed to generate JSON template.';
+    try {
+      const parsed = JSON.parse(replyText);
+      replyText = '<pre style="background:var(--bg2);padding:8px;border-radius:8px;overflow-x:auto;font-size:11px;">' + escapeHtml(JSON.stringify(parsed, null, 2)) + '</pre>';
+    } catch(e) {}
+    
+    // Add AI response to history and UI
+    assistantConversationHistory.push({ role: 'assistant', content: replyText });
+    renderAssistantMessage(replyText, false, body);
+    await saveAssistantHistory();
+  } catch (err) {
+    console.error('Assistant JSON message error:', err);
+    const errorMsg = 'Failed to generate JSON template.';
+    assistantConversationHistory.push({ role: 'assistant', content: errorMsg });
+    renderAssistantMessage(errorMsg, false, body);
+    await saveAssistantHistory();
+  }
 }
 
 async function switchTab(tabName) { document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); const panel = document.getElementById(`tab-${tabName}`); const nav = document.querySelector(`[data-tab="${tabName}"]`); if (panel) panel.classList.add('active'); if (nav) nav.classList.add('active'); if (window.innerWidth <= 860) document.getElementById('sidebar').classList.remove('open'); if (tabName === 'send') loadActiveCampaign(); if (tabName === 'templates') renderTemplates(); if (tabName === 'contacts') renderContacts(); if (tabName === 'campaigns') { loadCampaigns(); loadTemplatesForCampaignSelect(); } if (tabName === 'logs') loadCampaigns(); if (tabName === 'received') { loadReceivedMessages(); startReceivedPolling(); } else stopReceivedPolling(); if (tabName === 'settings') loadSettings(); if (tabName === 'account') loadWaAccounts(); if (tabName === 'billing') setBillingPeriod(billingPeriod); }
@@ -1779,7 +1907,7 @@ if (window.location.hash && window.location.hash.includes('access_token')) {
 const savedToken = localStorage.getItem('supabase_token');
 if (savedToken) { authToken = savedToken; loadDashboard(); } else { window.location.href = '/login.html'; }
 
-window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.toggleCampaignScheduleInput = toggleCampaignScheduleInput; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.setAutoReplyMode = setAutoReplyMode; window.setReplyMode = setReplyMode; window.onTemplateSelected = onTemplateSelected; window.customizeTemplateWithAI = customizeTemplateWithAI; window.saveJsonAsTemplate = saveJsonAsTemplate; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates; window.updateCampaignContactCount = updateCampaignContactCount; window.renderCampaignGroups = renderCampaignGroups; window.openReplyModal = openReplyModal; window.sendReply = sendReply; window.refreshWaQuality = refreshWaQuality; window.setBillingPeriod = setBillingPeriod; window.loadBillingAnalytics = loadBillingAnalytics; window.renderBillingAnalytics = renderBillingAnalytics; window.toggleAssistant = toggleAssistant; window.switchAssistantTab = switchAssistantTab; window.sendAssistantMessage = sendAssistantMessage; window.sendAssistantJsonMessage = sendAssistantJsonMessage;
+window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.toggleCampaignScheduleInput = toggleCampaignScheduleInput; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.setAutoReplyMode = setAutoReplyMode; window.setReplyMode = setReplyMode; window.onTemplateSelected = onTemplateSelected; window.customizeTemplateWithAI = customizeTemplateWithAI; window.saveJsonAsTemplate = saveJsonAsTemplate; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates; window.updateCampaignContactCount = updateCampaignContactCount; window.renderCampaignGroups = renderCampaignGroups; window.openReplyModal = openReplyModal; window.sendReply = sendReply; window.refreshWaQuality = refreshWaQuality; window.setBillingPeriod = setBillingPeriod; window.loadBillingAnalytics = loadBillingAnalytics; window.renderBillingAnalytics = renderBillingAnalytics; window.toggleAssistant = toggleAssistant; window.switchAssistantTab = switchAssistantTab; window.sendAssistantMessage = sendAssistantMessage; window.sendAssistantJsonMessage = sendAssistantJsonMessage; window.loadAssistantHistory = loadAssistantHistory; window.saveAssistantHistory = saveAssistantHistory; window.renderAssistantConversation = renderAssistantConversation;
 </script>
 </body>
 </html>
