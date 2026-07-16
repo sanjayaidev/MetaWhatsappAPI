@@ -21,7 +21,7 @@ const ALLOWED_MODELS = [
   'abacusai/dracarys-llama-3.1-70b-instruct',
 ];
 
-const DEFAULT_MODEL = 'moonshotai/kimi-k2.6';
+const DEFAULT_MODEL = 'mistralai/mistral-small-4-119b-2603';
 
 function isAllowedModel(modelId) {
   return ALLOWED_MODELS.includes(modelId);
