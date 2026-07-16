@@ -355,6 +355,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">An AI assistant that lives in your dashboard — ask it about leads, drafts replies, summarizes conversations. Opens via the floating button bottom-right.</p>
 <div class="form-label">System Prompt</div>
 <textarea id="assistantSystemPrompt" placeholder="You help the team triage and respond to leads…"></textarea>
+<div class="form-label">Knowledge Base URLs (up to 5)</div>
+<div id="assistantUrlsList"></div>
+<button class="btn btn-ghost btn-xs" style="margin-top:8px;" onclick="addAssistantUrlField()">➕ Add URL</button>
 <button class="btn btn-primary" style="margin-top:16px;" onclick="saveChatbotConfig('dashboard_assistant')">💾 Save & Activate</button>
 </div>
 </div>
@@ -584,6 +587,7 @@ const API_BASE_URL = window.location.origin;
 let authToken = null, currentUser = null;
 let leadsCache = [], currentLeadId = null, currentLeadData = null;
 let widgetUrls = [];
+let assistantUrls = [];
 
 async function apiCall(endpoint, method = 'GET', body = null) {
   const headers = { 'Content-Type': 'application/json' };
@@ -1374,6 +1378,15 @@ function addWidgetUrlField(val) {
 function renderWidgetUrls() {
   document.getElementById('widgetUrlsList').innerHTML = widgetUrls.map((u,i) =>
     `<div style="display:flex;gap:6px;margin-bottom:6px;"><input type="url" value="${escapeHtml(u)}" onchange="widgetUrls[${i}]=this.value" placeholder="https://…"><button class="btn btn-ghost btn-xs" onclick="widgetUrls.splice(${i},1);renderWidgetUrls()">✕</button></div>`).join('');
+}
+function addAssistantUrlField(val) {
+  if (assistantUrls.length >= 5) { showToast('Max 5 URLs', true); return; }
+  assistantUrls.push(val || '');
+  renderAssistantUrls();
+}
+function renderAssistantUrls() {
+  document.getElementById('assistantUrlsList').innerHTML = assistantUrls.map((u,i) =>
+    `<div style="display:flex;gap:6px;margin-bottom:6px;"><input type="url" value="${escapeHtml(u)}" onchange="assistantUrls[${i}]=this.value" placeholder="https://…"><button class="btn btn-ghost btn-xs" onclick="assistantUrls.splice(${i},1);renderAssistantUrls()">✕</button></div>`).join('');
 }
 async function loadChatbotConfig() {
   const widget = await apiCall('/api/chatbot-config?type=website_widget');
