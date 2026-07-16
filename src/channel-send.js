@@ -1,8 +1,79 @@
 // src/channel-send.js — single place that knows how to actually send a message
-// on a given channel (WhatsApp today; Instagram/Facebook/Email queued until
-// their integrations are wired up). Used by both src/routes/leads.js (manual
-// replies) and src/routes/automations.js (auto first-touch/follow-up).
-module.exports = function createChannelSender({ supabase, decryptToken, META_API_VERSION, fetch }) {
+// on a given channel (WhatsApp, Instagram, Facebook, Email). Used by both
+// src/routes/leads.js (manual replies) and src/routes/automations.js /
+// src/sheet-poller.js (automated sends).
+//
+// Instagram/Facebook/Email previously just set status='queued' with a TODO —
+// they now use the tokens stored in wb_oauth_tokens (see src/google-auth.js
+// and src/routes/flows.js's OAuth callback), the same table the "Sources"
+// tab's Google/Facebook connect flow already populates, so no separate
+// token plumbing is needed here.
+module.exports = function createChannelSender({ supabase, decryptToken, encryptToken, META_API_VERSION, fetch }) {
+  const { getValidGoogleAccessToken } = require('./google-auth')({ supabase, encryptToken, decryptToken, fetch });
+
+  // Facebook/Instagram messaging both go through a Page (or the Page's linked
+  // IG business account) access token, obtained via the Facebook OAuth flow
+  // in flows.js and stored in wb_oauth_tokens.metadata.pages. This repo's
+  // OAuth flow only captures one connected Facebook identity per user, so —
+  // same simplifying assumption the rest of this CRM makes for WhatsApp
+  // ("most recent active wa_accounts row") — we use the first page returned.
+  async function getPageAccessToken(userId) {
+    const { data: row } = await supabase.from('wb_oauth_tokens')
+      .select('metadata').eq('user_id', userId).eq('service', 'facebook').single();
+    const page = row?.metadata?.pages?.[0];
+    if (!page?.access_token) throw new Error('Facebook/Instagram not connected — connect a Page under Sources in the CRM.');
+    return page;
+  }
+
+  async function sendFacebookMessage(userId, psid, text) {
+    const page = await getPageAccessToken(userId);
+    const res = await fetch(`https://graph.facebook.com/${META_API_VERSION}/me/messages?access_token=${encodeURIComponent(page.access_token)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipient: { id: psid }, message: { text } })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.message_id) throw new Error(data.error?.message || `Facebook Graph API ${res.status}`);
+    return data.message_id;
+  }
+
+  // Instagram DMs use the same Graph "me/messages" call as Facebook Page
+  // messaging once a Page has a linked IG business account — the recipient
+  // id is the lead's Instagram-scoped id (IGSID), stored in wb_leads.ig_handle
+  // once a lead has been matched via the IG webhook.
+  async function sendInstagramMessage(userId, igsid, text) {
+    const page = await getPageAccessToken(userId);
+    const res = await fetch(`https://graph.facebook.com/${META_API_VERSION}/me/messages?access_token=${encodeURIComponent(page.access_token)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipient: { id: igsid }, message: { text } })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.message_id) throw new Error(data.error?.message || `Instagram Graph API ${res.status}`);
+    return data.message_id;
+  }
+
+  // Sends via the Gmail API using the same Google OAuth token (with
+  // gmail.send scope) that the "Sources" Google connection already
+  // requests — refreshed on demand by getValidGoogleAccessToken, so this
+  // doesn't go stale after ~1hr the way the old wb_integrations-based
+  // Gmail token did.
+  async function sendEmail(userId, toEmail, subject, text) {
+    const accessToken = await getValidGoogleAccessToken(userId);
+    const raw = Buffer.from(
+      `To: ${toEmail}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n${text}`
+    ).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ raw })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.id) throw new Error(data.error?.message || `Gmail API ${res.status}`);
+    return data.id;
+  }
+
   // `template`, when provided for the whatsapp channel, sends a Meta message
   // template ({ name, language, components }) instead of a free-text message.
   // WhatsApp requires this for any business-initiated send (reminders, wishes,
@@ -39,12 +110,27 @@ module.exports = function createChannelSender({ supabase, decryptToken, META_API
           externalId = responseData.messages[0].id;
         } catch (err) { sendError = err.message; }
       }
-    } else if (channel === 'instagram' || channel === 'facebook') {
-      // TODO: wire up once the Instagram/Facebook Meta app (Graph API messaging) is ready.
-      status = 'queued';
+    } else if (channel === 'facebook') {
+      if (!lead.fb_psid) {
+        sendError = 'Lead has no Facebook PSID on file (only inbound Messenger contacts can be replied to)';
+      } else {
+        try { externalId = await sendFacebookMessage(lead.user_id, lead.fb_psid, body); }
+        catch (err) { sendError = err.message; }
+      }
+    } else if (channel === 'instagram') {
+      if (!lead.ig_handle) {
+        sendError = 'Lead has no Instagram-scoped id on file (only inbound IG contacts can be replied to)';
+      } else {
+        try { externalId = await sendInstagramMessage(lead.user_id, lead.ig_handle, body); }
+        catch (err) { sendError = err.message; }
+      }
     } else if (channel === 'email') {
-      // TODO: wire up once Gmail send integration (wb_integrations type=gmail) is connected.
-      status = 'queued';
+      if (!lead.email) {
+        sendError = 'Lead has no email address on file';
+      } else {
+        try { externalId = await sendEmail(lead.user_id, lead.email, 'A message from your CRM', body); }
+        catch (err) { sendError = err.message; }
+      }
     } else {
       sendError = `Unsupported channel: ${channel}`;
     }

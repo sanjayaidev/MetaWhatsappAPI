@@ -1,5 +1,131 @@
+diff --git a/migrations/002_oauth_flows_sheet_watchers.sql b/migrations/002_oauth_flows_sheet_watchers.sql
+new file mode 100644
+index 0000000..4a9c94f
+--- /dev/null
++++ b/migrations/002_oauth_flows_sheet_watchers.sql
+@@ -0,0 +1,120 @@
++-- ═══════════════════════════════════════════════════════════════
++-- WaBlast Pro CRM — Migration 002
++-- Adds tables referenced by src/routes/flows.js, src/routes/sheet-watchers.js,
++-- src/sheet-poller.js, and src/google-auth.js that were never created in
++-- 001_complete_crm_schema.sql. Run this AFTER 001.
++-- ═══════════════════════════════════════════════════════════════
++
++-- ── OAuth tokens (Google Sheets/Drive/Gmail, Facebook, Instagram) ─────
++-- Used by src/google-auth.js (getValidGoogleAccessToken) and
++-- src/routes/flows.js (oauth-url / callback / status / disconnect).
++CREATE TABLE IF NOT EXISTS wb_oauth_tokens (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
++  service TEXT NOT NULL CHECK (service IN ('google', 'facebook', 'instagram')),
++  token_type TEXT DEFAULT 'oauth2',
++  state TEXT UNIQUE,                 -- transient CSRF/lookup value while the OAuth dance is in flight
++  access_token_enc TEXT,
++  refresh_token_enc TEXT,
++  expires_at TIMESTAMPTZ,
++  scopes JSONB DEFAULT '[]',
++  metadata JSONB DEFAULT '{}',       -- e.g. { email, pages: [...] }
++  created_at TIMESTAMPTZ DEFAULT NOW(),
++  updated_at TIMESTAMPTZ DEFAULT NOW(),
++  UNIQUE(user_id, service)
++);
++CREATE INDEX IF NOT EXISTS idx_wb_oauth_tokens_user ON wb_oauth_tokens(user_id, service);
++
++DROP TRIGGER IF EXISTS trg_wb_oauth_tokens_updated_at ON wb_oauth_tokens;
++CREATE TRIGGER trg_wb_oauth_tokens_updated_at BEFORE UPDATE ON wb_oauth_tokens
++  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
++
++-- ── Sheet watchers (polling-based sheet automation) ───────────────────
++-- Used by src/routes/sheet-watchers.js (CRUD) and src/sheet-poller.js (the tick).
++CREATE TABLE IF NOT EXISTS wb_sheet_watchers (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
++  spreadsheet_id TEXT NOT NULL,
++  spreadsheet_name TEXT,
++  worksheet TEXT NOT NULL,
++  watch_type TEXT NOT NULL CHECK (watch_type IN ('new_row', 'date_reminder')),
++  name_column TEXT,
++  phone_column TEXT,
++  email_column TEXT,
++  date_column TEXT,
++  offset_days INT DEFAULT 0,
++  message_template TEXT,
++  channel TEXT NOT NULL DEFAULT 'whatsapp' CHECK (channel IN ('whatsapp', 'email', 'instagram', 'facebook')),
++  template_id UUID REFERENCES wb_interactive_templates(id) ON DELETE SET NULL,
++  placeholder_mapping JSONB DEFAULT '{}',
++  poll_interval_minutes INT NOT NULL DEFAULT 15,
++  active BOOLEAN DEFAULT true,
++  last_row_count INT DEFAULT 0,
++  last_polled_at TIMESTAMPTZ,
++  last_error TEXT,
++  fired_log JSONB DEFAULT '{}',      -- date_reminder dedupe: { "<rowIndex>": "YYYY-M-D" }
++  created_at TIMESTAMPTZ DEFAULT NOW(),
++  updated_at TIMESTAMPTZ DEFAULT NOW()
++);
++CREATE INDEX IF NOT EXISTS idx_wb_sheet_watchers_user ON wb_sheet_watchers(user_id);
++CREATE INDEX IF NOT EXISTS idx_wb_sheet_watchers_active ON wb_sheet_watchers(active) WHERE active = true;
++
++DROP TRIGGER IF EXISTS trg_wb_sheet_watchers_updated_at ON wb_sheet_watchers;
++CREATE TRIGGER trg_wb_sheet_watchers_updated_at BEFORE UPDATE ON wb_sheet_watchers
++  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
++
++-- ── Visual flow builder ────────────────────────────────────────────────
++-- Used by src/routes/flows.js.
++CREATE TABLE IF NOT EXISTS wb_flows (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
++  name TEXT NOT NULL DEFAULT 'Untitled Flow',
++  description TEXT DEFAULT '',
++  status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'paused')),
++  trigger_config JSONB DEFAULT '{}',
++  nodes JSONB DEFAULT '[]',
++  edges JSONB DEFAULT '[]',
++  variables JSONB DEFAULT '{}',
++  last_run_at TIMESTAMPTZ,
++  created_at TIMESTAMPTZ DEFAULT NOW(),
++  updated_at TIMESTAMPTZ DEFAULT NOW()
++);
++CREATE INDEX IF NOT EXISTS idx_wb_flows_user ON wb_flows(user_id);
++
++DROP TRIGGER IF EXISTS trg_wb_flows_updated_at ON wb_flows;
++CREATE TRIGGER trg_wb_flows_updated_at BEFORE UPDATE ON wb_flows
++  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
++
++CREATE TABLE IF NOT EXISTS wb_flow_executions (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  flow_id UUID NOT NULL REFERENCES wb_flows(id) ON DELETE CASCADE,
++  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
++  status TEXT DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed')),
++  trigger_data JSONB DEFAULT '{}',
++  result JSONB DEFAULT '{}',
++  error TEXT,
++  started_at TIMESTAMPTZ DEFAULT NOW(),
++  completed_at TIMESTAMPTZ
++);
++CREATE INDEX IF NOT EXISTS idx_wb_flow_executions_flow ON wb_flow_executions(flow_id, started_at DESC);
++
++-- ── RLS ─────────────────────────────────────────────────────────────
++-- (server.js talks to Supabase via the service_role key, which bypasses
++-- RLS — these policies matter only if these tables are ever queried with
++-- an anon/user-scoped key, e.g. directly from the browser.)
++ALTER TABLE wb_oauth_tokens ENABLE ROW LEVEL SECURITY;
++ALTER TABLE wb_sheet_watchers ENABLE ROW LEVEL SECURITY;
++ALTER TABLE wb_flows ENABLE ROW LEVEL SECURITY;
++ALTER TABLE wb_flow_executions ENABLE ROW LEVEL SECURITY;
++
++DROP POLICY IF EXISTS "Users can manage own oauth tokens" ON wb_oauth_tokens;
++CREATE POLICY "Users can manage own oauth tokens" ON wb_oauth_tokens FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
++
++DROP POLICY IF EXISTS "Users can manage own sheet watchers" ON wb_sheet_watchers;
++CREATE POLICY "Users can manage own sheet watchers" ON wb_sheet_watchers FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
++
++DROP POLICY IF EXISTS "Users can manage own flows" ON wb_flows;
++CREATE POLICY "Users can manage own flows" ON wb_flows FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
++
++DROP POLICY IF EXISTS "Users can manage own flow executions" ON wb_flow_executions;
++CREATE POLICY "Users can manage own flow executions" ON wb_flow_executions FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 diff --git a/public/crm.html b/public/crm.html
-index 42240b3..d40afee 100644
+index 0fc3173..ec4fdf6 100644
 --- a/public/crm.html
 +++ b/public/crm.html
 @@ -137,6 +137,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
@@ -372,3 +498,177 @@ index 42240b3..d40afee 100644
    }
    document.getElementById('app').style.display = 'block';
    loadLeads();
+diff --git a/public/dashboard.html b/public/dashboard.html
+index 7c3eb2c..8df5469 100644
+--- a/public/dashboard.html
++++ b/public/dashboard.html
+@@ -131,6 +131,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
+ <div class="nav-item" data-tab="send"><span class="nav-icon">📤</span> Send</div>
+ <div class="nav-item" data-tab="logs"><span class="nav-icon">📝</span> Campaign Logs</div>
+ <div class="nav-item" data-tab="received"><span class="nav-icon">📥</span> Received <span id="receivedUnreadBadge" style="display:none;background:var(--red);color:#fff;border-radius:10px;font-size:10px;font-weight:700;padding:1px 6px;margin-left:6px;">0</span></div>
++<div class="nav-item" onclick="window.location.href='/crm.html'"><span class="nav-icon">🧩</span> CRM</div>
+ </div>
+ <div class="nav-section">
+ <div class="nav-section-label">Account</div>
+diff --git a/server.js b/server.js
+index 0295cf6..6abe679 100644
+--- a/server.js
++++ b/server.js
+@@ -33,6 +33,9 @@ const meetingsRouter = require('./src/routes/meetings');
+ const chatbotRouter = require('./src/routes/chatbot');
+ const billingRouter = require('./src/routes/billing');
+ const webhooksInboundRouter = require('./src/routes/webhooks-inbound');
++const sheetWatchersRouter = require('./src/routes/sheet-watchers');
++const { startSheetPoller } = require('./src/sheet-poller');
++const createChannelSender = require('./src/channel-send');
+ 
+ const app = express();
+ const PORT = process.env.PORT || 3000;
+@@ -2264,11 +2267,26 @@ app.use('/api/meetings', meetingsRouter(crmDeps));
+ app.use('/api', chatbotRouter(crmDeps)); // exposes /api/chatbot-config, /api/chatbot/*
+ app.use('/api/billing', billingRouter(crmDeps));
+ 
++// /api/sheet-watchers — CRUD for polling-based sheet automations (Sheet
++// Reminders tab in the CRM). The actual polling loop is started separately
++// below via startSheetPoller; this was previously coded but never mounted,
++// so every request to it 404'd and the frontend tab always showed empty.
++app.use('/api/sheet-watchers', verifyUser, sheetWatchersRouter(crmDeps));
++
+ // Public lead-capture endpoints (Google Sheet Apps Script, generic form tools)
+ // and the authenticated "generate my webhook URL" endpoint that feeds them.
+ app.use('/api/hooks', webhooksInboundRouter(crmDeps));
+ app.use('/api/webhook-endpoints', webhooksInboundRouter.endpointsRouter(crmDeps));
+ 
++// Background poller for wb_sheet_watchers (new-row auto-sends + recurring
++// date reminders). Was previously written but never started — see
++// src/sheet-poller.js for the tick logic.
++startSheetPoller({
++  supabase,
++  fetch,
++  sendChannelMessage: createChannelSender(crmDeps)
++});
++
+ // ================================================================
+ // 16. API KEY MANAGEMENT ROUTES
+ // (apiKeys module imported at top of file)
+diff --git a/src/channel-send.js b/src/channel-send.js
+index 07c59f7..a8d6686 100644
+--- a/src/channel-send.js
++++ b/src/channel-send.js
+@@ -1,8 +1,79 @@
+ // src/channel-send.js — single place that knows how to actually send a message
+-// on a given channel (WhatsApp today; Instagram/Facebook/Email queued until
+-// their integrations are wired up). Used by both src/routes/leads.js (manual
+-// replies) and src/routes/automations.js (auto first-touch/follow-up).
+-module.exports = function createChannelSender({ supabase, decryptToken, META_API_VERSION, fetch }) {
++// on a given channel (WhatsApp, Instagram, Facebook, Email). Used by both
++// src/routes/leads.js (manual replies) and src/routes/automations.js /
++// src/sheet-poller.js (automated sends).
++//
++// Instagram/Facebook/Email previously just set status='queued' with a TODO —
++// they now use the tokens stored in wb_oauth_tokens (see src/google-auth.js
++// and src/routes/flows.js's OAuth callback), the same table the "Sources"
++// tab's Google/Facebook connect flow already populates, so no separate
++// token plumbing is needed here.
++module.exports = function createChannelSender({ supabase, decryptToken, encryptToken, META_API_VERSION, fetch }) {
++  const { getValidGoogleAccessToken } = require('./google-auth')({ supabase, encryptToken, decryptToken, fetch });
++
++  // Facebook/Instagram messaging both go through a Page (or the Page's linked
++  // IG business account) access token, obtained via the Facebook OAuth flow
++  // in flows.js and stored in wb_oauth_tokens.metadata.pages. This repo's
++  // OAuth flow only captures one connected Facebook identity per user, so —
++  // same simplifying assumption the rest of this CRM makes for WhatsApp
++  // ("most recent active wa_accounts row") — we use the first page returned.
++  async function getPageAccessToken(userId) {
++    const { data: row } = await supabase.from('wb_oauth_tokens')
++      .select('metadata').eq('user_id', userId).eq('service', 'facebook').single();
++    const page = row?.metadata?.pages?.[0];
++    if (!page?.access_token) throw new Error('Facebook/Instagram not connected — connect a Page under Sources in the CRM.');
++    return page;
++  }
++
++  async function sendFacebookMessage(userId, psid, text) {
++    const page = await getPageAccessToken(userId);
++    const res = await fetch(`https://graph.facebook.com/${META_API_VERSION}/me/messages?access_token=${encodeURIComponent(page.access_token)}`, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ recipient: { id: psid }, message: { text } })
++    });
++    const data = await res.json();
++    if (!res.ok || !data.message_id) throw new Error(data.error?.message || `Facebook Graph API ${res.status}`);
++    return data.message_id;
++  }
++
++  // Instagram DMs use the same Graph "me/messages" call as Facebook Page
++  // messaging once a Page has a linked IG business account — the recipient
++  // id is the lead's Instagram-scoped id (IGSID), stored in wb_leads.ig_handle
++  // once a lead has been matched via the IG webhook.
++  async function sendInstagramMessage(userId, igsid, text) {
++    const page = await getPageAccessToken(userId);
++    const res = await fetch(`https://graph.facebook.com/${META_API_VERSION}/me/messages?access_token=${encodeURIComponent(page.access_token)}`, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ recipient: { id: igsid }, message: { text } })
++    });
++    const data = await res.json();
++    if (!res.ok || !data.message_id) throw new Error(data.error?.message || `Instagram Graph API ${res.status}`);
++    return data.message_id;
++  }
++
++  // Sends via the Gmail API using the same Google OAuth token (with
++  // gmail.send scope) that the "Sources" Google connection already
++  // requests — refreshed on demand by getValidGoogleAccessToken, so this
++  // doesn't go stale after ~1hr the way the old wb_integrations-based
++  // Gmail token did.
++  async function sendEmail(userId, toEmail, subject, text) {
++    const accessToken = await getValidGoogleAccessToken(userId);
++    const raw = Buffer.from(
++      `To: ${toEmail}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n${text}`
++    ).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
++
++    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
++      body: JSON.stringify({ raw })
++    });
++    const data = await res.json();
++    if (!res.ok || !data.id) throw new Error(data.error?.message || `Gmail API ${res.status}`);
++    return data.id;
++  }
++
+   // `template`, when provided for the whatsapp channel, sends a Meta message
+   // template ({ name, language, components }) instead of a free-text message.
+   // WhatsApp requires this for any business-initiated send (reminders, wishes,
+@@ -39,12 +110,27 @@ module.exports = function createChannelSender({ supabase, decryptToken, META_API
+           externalId = responseData.messages[0].id;
+         } catch (err) { sendError = err.message; }
+       }
+-    } else if (channel === 'instagram' || channel === 'facebook') {
+-      // TODO: wire up once the Instagram/Facebook Meta app (Graph API messaging) is ready.
+-      status = 'queued';
++    } else if (channel === 'facebook') {
++      if (!lead.fb_psid) {
++        sendError = 'Lead has no Facebook PSID on file (only inbound Messenger contacts can be replied to)';
++      } else {
++        try { externalId = await sendFacebookMessage(lead.user_id, lead.fb_psid, body); }
++        catch (err) { sendError = err.message; }
++      }
++    } else if (channel === 'instagram') {
++      if (!lead.ig_handle) {
++        sendError = 'Lead has no Instagram-scoped id on file (only inbound IG contacts can be replied to)';
++      } else {
++        try { externalId = await sendInstagramMessage(lead.user_id, lead.ig_handle, body); }
++        catch (err) { sendError = err.message; }
++      }
+     } else if (channel === 'email') {
+-      // TODO: wire up once Gmail send integration (wb_integrations type=gmail) is connected.
+-      status = 'queued';
++      if (!lead.email) {
++        sendError = 'Lead has no email address on file';
++      } else {
++        try { externalId = await sendEmail(lead.user_id, lead.email, 'A message from your CRM', body); }
++        catch (err) { sendError = err.message; }
++      }
+     } else {
+       sendError = `Unsupported channel: ${channel}`;
+     }

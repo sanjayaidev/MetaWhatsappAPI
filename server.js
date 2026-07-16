@@ -33,6 +33,9 @@ const meetingsRouter = require('./src/routes/meetings');
 const chatbotRouter = require('./src/routes/chatbot');
 const billingRouter = require('./src/routes/billing');
 const webhooksInboundRouter = require('./src/routes/webhooks-inbound');
+const sheetWatchersRouter = require('./src/routes/sheet-watchers');
+const { startSheetPoller } = require('./src/sheet-poller');
+const createChannelSender = require('./src/channel-send');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -2264,10 +2267,25 @@ app.use('/api/meetings', meetingsRouter(crmDeps));
 app.use('/api', chatbotRouter(crmDeps)); // exposes /api/chatbot-config, /api/chatbot/*
 app.use('/api/billing', billingRouter(crmDeps));
 
+// /api/sheet-watchers — CRUD for polling-based sheet automations (Sheet
+// Reminders tab in the CRM). The actual polling loop is started separately
+// below via startSheetPoller; this was previously coded but never mounted,
+// so every request to it 404'd and the frontend tab always showed empty.
+app.use('/api/sheet-watchers', verifyUser, sheetWatchersRouter(crmDeps));
+
 // Public lead-capture endpoints (Google Sheet Apps Script, generic form tools)
 // and the authenticated "generate my webhook URL" endpoint that feeds them.
 app.use('/api/hooks', webhooksInboundRouter(crmDeps));
 app.use('/api/webhook-endpoints', webhooksInboundRouter.endpointsRouter(crmDeps));
+
+// Background poller for wb_sheet_watchers (new-row auto-sends + recurring
+// date reminders). Was previously written but never started — see
+// src/sheet-poller.js for the tick logic.
+startSheetPoller({
+  supabase,
+  fetch,
+  sendChannelMessage: createChannelSender(crmDeps)
+});
 
 // ================================================================
 // 16. API KEY MANAGEMENT ROUTES
