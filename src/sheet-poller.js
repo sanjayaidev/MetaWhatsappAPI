@@ -92,6 +92,19 @@ function startSheetPoller(deps) {
     const firedLog = { ...(watcher.fired_log || {}) };
     let changed = false;
 
+    // Check if current time has passed the scheduled send_time for this watcher
+    if (watcher.send_time) {
+      const [hours, minutes] = watcher.send_time.split(':').map(Number);
+      const scheduledTime = new Date(today);
+      scheduledTime.setHours(hours, minutes, 0, 0);
+      if (today < scheduledTime) {
+        // Not yet time to send today - skip until scheduled time arrives
+        const patch = { last_polled_at: new Date().toISOString(), last_error: null };
+        await supabase.from('wb_sheet_watchers').update(patch).eq('id', watcher.id);
+        return;
+      }
+    }
+
     for (let i = 0; i < dataRows.length; i++) {
       const row = dataRows[i];
       const rawDate = row[dateIdx];

@@ -22,7 +22,7 @@ module.exports = function sheetWatchersRouter(deps) {
       name_column, phone_column, email_column, date_column,
       offset_days = 0, message_template, channel = 'whatsapp',
       template_id, placeholder_mapping = {},
-      poll_interval_minutes = 15, active = true
+      poll_interval_minutes = 15, active = true, send_time
     } = req.body || {};
 
     if (!spreadsheet_id || !worksheet) return res.status(400).json({ error: 'spreadsheet_id and worksheet are required' });
@@ -30,6 +30,7 @@ module.exports = function sheetWatchersRouter(deps) {
     if (!VALID_CHANNELS.includes(channel)) return res.status(400).json({ error: `channel must be one of: ${VALID_CHANNELS.join(', ')}` });
     if (watch_type === 'date_reminder' && !date_column) return res.status(400).json({ error: 'date_column is required for date_reminder watchers' });
     if (poll_interval_minutes < 5) return res.status(400).json({ error: 'poll_interval_minutes must be at least 5' });
+    if (send_time && !/^\d{2}:\d{2}$/.test(send_time)) return res.status(400).json({ error: 'send_time must be in HH:MM format' });
 
     // WhatsApp only allows business-initiated sends (which is exactly what a
     // sheet-triggered reminder/wish is) via a Meta-APPROVED template — free
@@ -49,7 +50,7 @@ module.exports = function sheetWatchersRouter(deps) {
       offset_days, message_template: message_template?.trim() || null, channel,
       template_id: channel === 'whatsapp' ? template_id : null,
       placeholder_mapping: channel === 'whatsapp' ? placeholder_mapping : {},
-      poll_interval_minutes, active
+      poll_interval_minutes, active, send_time: send_time || null
     }, { onConflict: 'user_id,spreadsheet_id,worksheet,watch_type' }).select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json({ watcher: data });
@@ -59,9 +60,13 @@ module.exports = function sheetWatchersRouter(deps) {
     const patch = {};
     ['spreadsheet_name', 'name_column', 'phone_column', 'email_column', 'date_column',
       'offset_days', 'message_template', 'channel', 'template_id', 'placeholder_mapping',
-      'poll_interval_minutes', 'active'].forEach(k => {
+      'poll_interval_minutes', 'active', 'send_time'].forEach(k => {
       if (req.body[k] !== undefined) patch[k] = req.body[k];
     });
+
+    if (patch.send_time && !/^\d{2}:\d{2}$/.test(patch.send_time)) {
+      return res.status(400).json({ error: 'send_time must be in HH:MM format' });
+    }
 
     if (patch.channel === 'whatsapp' || (patch.template_id && !('channel' in patch))) {
       const templateId = patch.template_id;
