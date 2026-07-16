@@ -3,10 +3,51 @@
 // generateReply() from src/routes/ai-chat.js rather than a second AI client).
 const express = require('express');
 const crypto = require('crypto');
+const { generateReply: aiGenerateReply, DEFAULT_MODEL } = require('./ai-chat');
 
 module.exports = function chatbotRouter(deps) {
   const { supabase, generateReply, verifyUser } = deps;
   const router = express.Router();
+  
+  // Cache for fetched knowledge base content (per user)
+  const knowledgeCache = new Map();
+  const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+  // Helper to fetch content from a URL
+  async function fetchUrlContent(url) {
+    try {
+      const response = await fetch(url, { timeout: 10000 });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      // Strip HTML tags if it's an HTML page
+      const cleaned = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      return cleaned.slice(0, 8000); // Limit content length
+    } catch (err) {
+      console.error(`Failed to fetch ${url}:`, err.message);
+      return null;
+    }
+  }
+
+  // Get or refresh cached knowledge for a user
+  async function getKnowledgeContent(user_id, urls) {
+    const cacheKey = user_id;
+    const cached = knowledgeCache.get(cacheKey);
+    const now = Date.now();
+    
+    if (cached && (now - cached.timestamp) < CACHE_TTL_MS) {
+      return cached.content;
+    }
+    
+    let allContent = [];
+    for (const url of urls) {
+      const content = await fetchUrlContent(url);
+      if (content) allContent.push(`Content from ${url}:\n${content}`);
+    }
+    
+    const combined = allContent.join('\n\n---\n\n');
+    knowledgeCache.set(cacheKey, { content: combined, timestamp: now });
+    return combined;
+  }
 
   // GET /api/chatbot-config?type=website_widget|dashboard_assistant
   router.get('/chatbot-config', verifyUser, async (req, res) => {
@@ -38,12 +79,31 @@ module.exports = function chatbotRouter(deps) {
     if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
 
     const { data: config } = await supabase.from('wb_chatbot_config').select('*').eq('user_id', req.user.id).eq('type', 'dashboard_assistant').single();
-    const systemPrompt = config?.system_prompt || 'You are a helpful CRM assistant. Help the user triage leads, draft replies, and summarize conversations.';
-
+    
+    // Default system prompt with Mixtral 3 675B as the model context
+    let systemPrompt = config?.system_prompt || 'You are a helpful CRM assistant. Help the user triage leads, draft replies, and summarize conversations.';
+    
+    // Add knowledge base context if available
+    const knowledgeUrls = config?.knowledge_urls || [
+      'https://sanjaymeher.online/marketing/wablast',
+      'https://sanjaymeher.online/sanjaydev/wablast'
+    ];
+    
     try {
-      const reply = await generateReply({ systemPrompt, userText: message.trim() });
+      const knowledgeContent = await getKnowledgeContent(req.user.id, knowledgeUrls);
+      if (knowledgeContent) {
+        systemPrompt += `\n\nUse the following knowledge base content to answer questions:\n${knowledgeContent}`;
+      }
+      
+      // Use Mixtral 3 675B as the default model for chatbot
+      const reply = await aiGenerateReply({ 
+        model: 'mistralai/mistral-large-3-675b-instruct-2512',
+        systemPrompt, 
+        userText: message.trim() 
+      });
       res.json({ reply });
     } catch (err) {
+      console.error('Assistant message error:', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -57,7 +117,24 @@ module.exports = function chatbotRouter(deps) {
     if (!config) return res.status(404).json({ error: 'Invalid or inactive widget token' });
 
     try {
-      const reply = await generateReply({ systemPrompt: config.system_prompt || 'You are a helpful sales assistant for this website.', userText: message.trim() });
+      let systemPrompt = config.system_prompt || 'You are a helpful sales assistant for this website.';
+      
+      // Add knowledge base context for widget too
+      const knowledgeUrls = config.knowledge_urls || [
+        'https://sanjaymeher.online/marketing/wablast',
+        'https://sanjaymeher.online/sanjaydev/wablast'
+      ];
+      
+      const knowledgeContent = await getKnowledgeContent(config.user_id, knowledgeUrls);
+      if (knowledgeContent) {
+        systemPrompt += `\n\nUse the following knowledge base content to answer questions:\n${knowledgeContent}`;
+      }
+      
+      const reply = await aiGenerateReply({ 
+        model: 'mistralai/mistral-large-3-675b-instruct-2512',
+        systemPrompt, 
+        userText: message.trim() 
+      });
 
       // First message from a visitor becomes a web_chat lead.
       if (visitor?.name || visitor?.email || visitor?.phone) {
@@ -72,6 +149,7 @@ module.exports = function chatbotRouter(deps) {
 
       res.json({ reply });
     } catch (err) {
+      console.error('Widget message error:', err);
       res.status(500).json({ error: err.message });
     }
   });
