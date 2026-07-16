@@ -129,7 +129,9 @@ function startSheetPoller(deps) {
 
   // Renders message_template against a sheet row (using column headers as merge
   // tags), finds-or-creates a wb_leads row so it's visible in the CRM, and sends
-  // through the same channel pipeline manual replies / automations use.
+  // through the same channel pipeline manual replies / automations use. For
+  // WhatsApp this always goes out as the watcher's approved template — Meta
+  // rejects free-text business-initiated messages outside a live chat window.
   async function sendForRow(watcher, headers, row, colIndex) {
     const mergeFields = {};
     headers.forEach((h, idx) => { if (h) mergeFields[h] = row[idx] ?? ''; });
@@ -144,8 +146,54 @@ function startSheetPoller(deps) {
     if (!phone && !email) return; // nothing to send to
 
     const lead = await findOrCreateLead(watcher.user_id, { name, phone, email });
+
+    if (watcher.channel === 'whatsapp') {
+      const { template, previewBody } = await buildWhatsAppTemplatePayload(watcher, mergeFields);
+      await sendChannelMessage({ lead, channel: 'whatsapp', body: previewBody, isAutomation: true, template });
+      return;
+    }
+
     const body = String(watcher.message_template || '').replace(/\{(\w+)\}/g, (_, key) => mergeFields[key] ?? `{${key}}`);
     await sendChannelMessage({ lead, channel: watcher.channel, body, isAutomation: true });
+  }
+
+  // Resolves the watcher's placeholder_mapping (same shape used by campaigns:
+  // { "1": {type:'name'}, "2": {type:'field', field:'Amount'}, ... }) against
+  // this row's merge fields, and returns a Meta template payload + a
+  // human-readable preview string for the CRM message log.
+  async function buildWhatsAppTemplatePayload(watcher, mergeFields) {
+    const { data: tpl, error } = await supabase.from('wb_templates').select('*').eq('id', watcher.template_id).single();
+    if (error || !tpl) throw new Error('Linked template not found — pick a template again on this watcher');
+
+    const resolveValue = (map) => {
+      if (map.type === 'name') return mergeFields.name || '';
+      if (map.type === 'phone') return mergeFields.phone || '';
+      if (map.type === 'email') return mergeFields.email || '';
+      if (map.type === 'field') return mergeFields[map.field] ?? '';
+      if (map.type === 'custom') return map.value || '';
+      return '';
+    };
+
+    const entries = Object.entries(watcher.placeholder_mapping || {});
+    const isPositional = entries.length > 0 && entries.every(([key]) => /^\d+$/.test(key));
+
+    let params = [];
+    let previewBody = tpl.body || '';
+    if (isPositional) {
+      params = entries
+        .map(([key, map]) => ({ position: parseInt(key, 10), text: String(resolveValue(map)) }))
+        .sort((a, b) => a.position - b.position)
+        .map(({ text }) => ({ type: 'text', text }));
+      entries.forEach(([key, map]) => { previewBody = previewBody.replace(`{{${key}}}`, String(resolveValue(map))); });
+    } else {
+      params = entries.map(([key, map]) => ({ type: 'text', parameter_name: key, text: String(resolveValue(map)) }));
+      entries.forEach(([key, map]) => { previewBody = previewBody.replace(`{{${key}}}`, String(resolveValue(map))); });
+    }
+
+    const template = { name: tpl.name, language: { code: tpl.language || 'en_US' } };
+    if (params.length) template.components = [{ type: 'BODY', parameters: params }];
+
+    return { template, previewBody };
   }
 
   async function findOrCreateLead(userId, { name, phone, email }) {

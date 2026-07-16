@@ -3,7 +3,13 @@
 // their integrations are wired up). Used by both src/routes/leads.js (manual
 // replies) and src/routes/automations.js (auto first-touch/follow-up).
 module.exports = function createChannelSender({ supabase, decryptToken, META_API_VERSION, fetch }) {
-  return async function sendChannelMessage({ lead, channel, body, isAutomation = false }) {
+  // `template`, when provided for the whatsapp channel, sends a Meta message
+  // template ({ name, language, components }) instead of a free-text message.
+  // WhatsApp requires this for any business-initiated send (reminders, wishes,
+  // anything outside the 24h customer-service window) — free text will be
+  // rejected by Meta outside that window. `body` is still passed for logging/
+  // CRM display (a human-readable rendered preview of what was sent).
+  return async function sendChannelMessage({ lead, channel, body, isAutomation = false, template = null }) {
     let status = 'sent';
     let externalId = null;
     let sendError = null;
@@ -18,10 +24,15 @@ module.exports = function createChannelSender({ supabase, decryptToken, META_API
           if (!waAccounts?.length) throw new Error('No active WhatsApp account connected');
           const waAccount = waAccounts[0];
           const plainToken = decryptToken(waAccount.access_token);
+
+          const payload = template
+            ? { messaging_product: 'whatsapp', to: lead.phone, type: 'template', template }
+            : { messaging_product: 'whatsapp', to: lead.phone, type: 'text', text: { body } };
+
           const result = await fetch(`https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${plainToken}` },
-            body: JSON.stringify({ messaging_product: 'whatsapp', to: lead.phone, type: 'text', text: { body } })
+            body: JSON.stringify(payload)
           });
           const responseData = await result.json();
           if (!result.ok || !responseData.messages?.[0]?.id) throw new Error(responseData.error?.message || `Meta API ${result.status}`);
