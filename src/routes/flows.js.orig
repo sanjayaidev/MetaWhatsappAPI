@@ -4,7 +4,6 @@ const crypto = require('crypto');
 
 module.exports = function flowsRouter(deps) {
   const { supabase, encryptToken, decryptToken, verifyUser, fetch } = deps;
-  const { getValidGoogleAccessToken } = require('../google-auth')(deps);
   const router = express.Router();
 
   // GET /api/flows — list all flows for user
@@ -229,12 +228,12 @@ module.exports = function flowsRouter(deps) {
 
   // GET /api/oauth/google/sheets — list Google Sheets accessible to user
   router.get('/google/sheets', verifyUser, async (req, res) => {
-    let accessToken;
-    try {
-      accessToken = await getValidGoogleAccessToken(req.user.id);
-    } catch (err) {
-      return res.status(401).json({ error: err.message });
+    const { data: tokenData } = await supabase.from('wb_oauth_tokens')
+      .select('*').eq('user_id', req.user.id).eq('service', 'google').single();
+    if (!tokenData || !tokenData.access_token_enc) {
+      return res.status(401).json({ error: 'Google not connected' });
     }
+    const accessToken = decryptToken(tokenData.access_token_enc);
 
     try {
       // Use query parameter format instead of path parameter for better filtering
@@ -253,12 +252,12 @@ module.exports = function flowsRouter(deps) {
 
   // GET /api/oauth/google/worksheets/:spreadsheetId — list worksheets in a spreadsheet
   router.get('/google/worksheets/:spreadsheetId', verifyUser, async (req, res) => {
-    let accessToken;
-    try {
-      accessToken = await getValidGoogleAccessToken(req.user.id);
-    } catch (err) {
-      return res.status(401).json({ error: err.message });
+    const { data: tokenData } = await supabase.from('wb_oauth_tokens')
+      .select('*').eq('user_id', req.user.id).eq('service', 'google').single();
+    if (!tokenData || !tokenData.access_token_enc) {
+      return res.status(401).json({ error: 'Google not connected' });
     }
+    const accessToken = decryptToken(tokenData.access_token_enc);
     const spreadsheetId = req.params.spreadsheetId;
 
     try {
@@ -276,18 +275,16 @@ module.exports = function flowsRouter(deps) {
 
   // GET /api/oauth/google/columns/:spreadsheetId/:worksheet — list column headers from a worksheet
   router.get('/google/columns/:spreadsheetId/:worksheet', verifyUser, async (req, res) => {
-    let accessToken;
-    try {
-      accessToken = await getValidGoogleAccessToken(req.user.id);
-    } catch (err) {
-      return res.status(401).json({ error: err.message });
+    const { data: tokenData } = await supabase.from('wb_oauth_tokens')
+      .select('*').eq('user_id', req.user.id).eq('service', 'google').single();
+    if (!tokenData || !tokenData.access_token_enc) {
+      return res.status(401).json({ error: 'Google not connected' });
     }
+    const accessToken = decryptToken(tokenData.access_token_enc);
     const { spreadsheetId, worksheet } = req.params;
 
     try {
-      // ZZ (not Z) so sheets with >26 columns still get their headers read;
-      // encodeURIComponent so tab names with spaces/#/&/? don't break the URL.
-      const range = encodeURIComponent(`${worksheet}!A1:ZZ1`);
+      const range = `${worksheet}!A1:Z1`;
       const valuesRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
@@ -386,12 +383,12 @@ module.exports = function flowsRouter(deps) {
       case 'action':
         if (node.subtype === 'send_email') {
           // Send email via Gmail OAuth
-          let accessToken;
-          try {
-            accessToken = await getValidGoogleAccessToken(context.$userId);
-          } catch (err) {
-            throw new Error(`Gmail not connected: ${err.message}`);
+          const { data: tokenData } = await supabase.from('wb_oauth_tokens')
+            .select('*').eq('user_id', context.$userId).eq('service', 'google').single();
+          if (!tokenData || !tokenData.access_token_enc) {
+            throw new Error('Gmail not connected');
           }
+          const accessToken = decryptToken(tokenData.access_token_enc);
 
           const to = renderTemplate(node.config.to, context);
           const subject = renderTemplate(node.config.subject, context);
@@ -420,12 +417,12 @@ module.exports = function flowsRouter(deps) {
 
         if (node.subtype === 'add_sheet_row') {
           // Add row to Google Sheet
-          let accessToken;
-          try {
-            accessToken = await getValidGoogleAccessToken(context.$userId);
-          } catch (err) {
-            throw new Error(`Google Sheets not connected: ${err.message}`);
+          const { data: tokenData } = await supabase.from('wb_oauth_tokens')
+            .select('*').eq('user_id', context.$userId).eq('service', 'google').single();
+          if (!tokenData || !tokenData.access_token_enc) {
+            throw new Error('Google Sheets not connected');
           }
+          const accessToken = decryptToken(tokenData.access_token_enc);
 
           const sheetId = node.config.sheetId;
           const range = node.config.range || 'Sheet1!A1';
