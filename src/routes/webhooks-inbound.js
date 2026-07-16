@@ -28,7 +28,7 @@ module.exports = function webhooksInboundRouter(deps) {
   }
 
   async function captureLead({ userId, channel, rawRow, res }) {
-    const { data: mappingRow } = await supabase.from('wb_field_mappings').select('mappings').eq('user_id', userId).eq('channel', channel).single();
+    const { data: mappingRow } = await supabase.from('wb_field_mappings').select('mappings, template_id, placeholder_mapping').eq('user_id', userId).eq('channel', channel).single();
     const mapped = applyMapping(rawRow, mappingRow?.mappings || []);
 
     if (!mapped.name && !mapped.phone && !mapped.email) {
@@ -45,7 +45,13 @@ module.exports = function webhooksInboundRouter(deps) {
     await supabase.from('wb_lead_sources').insert({ lead_id: lead.id, channel, external_id: mapped.phone || mapped.email || lead.id, raw_payload: rawRow }).catch(() => {});
     await supabase.from('wb_lead_events').insert({ lead_id: lead.id, type: 'status_change', payload: { to: 'new', note: `Captured via ${channel}` } });
 
-    runAutomationsForLead({ supabase, sendChannelMessage, lead, source: channel }).catch(err => console.error('[automation] error:', err.message));
+    // Send auto-reply using template if configured for this channel
+    if (mappingRow?.template_id) {
+      sendAutoReplyTemplate({ supabase, sendChannelMessage, lead, channel, templateId: mappingRow.template_id, placeholderMapping: mappingRow.placeholder_mapping || {}, mappedFields: mapped }).catch(err => console.error('[auto-reply] error:', err.message));
+    } else {
+      // Fall back to automations if no template configured
+      runAutomationsForLead({ supabase, sendChannelMessage, lead, source: channel }).catch(err => console.error('[automation] error:', err.message));
+    }
 
     res.json({ success: true, lead_id: lead.id });
   }
@@ -66,6 +72,52 @@ module.exports = function webhooksInboundRouter(deps) {
 
   return router;
 };
+
+// ── Auto-reply template sender for new leads from webhooks ──
+async function sendAutoReplyTemplate({ supabase, sendChannelMessage, lead, channel, templateId, placeholderMapping, mappedFields }) {
+  const { data: tpl, error } = await supabase.from('wb_templates').select('*').eq('id', templateId).single();
+  if (error || !tpl) {
+    console.error('[auto-reply] template not found:', templateId);
+    return;
+  }
+  if (tpl.status !== 'APPROVED') {
+    console.error('[auto-reply] template not approved:', tpl.status);
+    return;
+  }
+
+  const mergeFields = { name: lead.name || '', phone: lead.phone || '', email: lead.email || '', ...(mappedFields.custom_fields || {}) };
+
+  const resolveValue = (map) => {
+    if (map.type === 'name') return mergeFields.name || '';
+    if (map.type === 'phone') return mergeFields.phone || '';
+    if (map.type === 'email') return mergeFields.email || '';
+    if (map.type === 'field') return mergeFields[map.field] ?? '';
+    if (map.type === 'custom') return map.value || '';
+    return '';
+  };
+
+  const entries = Object.entries(placeholderMapping || {});
+  const isPositional = entries.length > 0 && entries.every(([key]) => /^\d+$/.test(key));
+
+  let params = [];
+  let previewBody = tpl.body || '';
+  if (isPositional) {
+    params = entries
+      .map(([key, map]) => ({ position: parseInt(key, 10), text: String(resolveValue(map)) }))
+      .sort((a, b) => a.position - b.position)
+      .map(({ text }) => ({ type: 'text', text }));
+    entries.forEach(([key, map]) => { previewBody = previewBody.replace(`{{${key}}}`, String(resolveValue(map))); });
+  } else {
+    params = entries.map(([key, map]) => ({ type: 'text', parameter_name: key, text: String(resolveValue(map)) }));
+    entries.forEach(([key, map]) => { previewBody = previewBody.replace(`{{${key}}}`, String(resolveValue(map))); });
+  }
+
+  const template = { name: tpl.name, language: { code: tpl.language || 'en_US' } };
+  if (params.length) template.components = [{ type: 'BODY', parameters: params }];
+
+  // Send via WhatsApp using the template
+  await sendChannelMessage({ lead, channel: 'whatsapp', body: previewBody, isAutomation: true, template });
+}
 
 // ── Webhook URL management (mounted separately, behind verifyUser) ──────
 module.exports.endpointsRouter = function endpointsRouter(deps) {

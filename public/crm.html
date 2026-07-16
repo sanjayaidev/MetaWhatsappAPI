@@ -552,7 +552,12 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div id="watcherDateFields" style="display:none;">
 <div style="display:flex;gap:8px;">
 <div style="flex:1;"><div class="form-label">Date column (birthday, due date, anniversary…)</div><select id="watcherDateCol"><option value="">— select column —</option></select></div>
+<div style="flex:1;"><div class="form-label">Recurrence</div><select id="watcherRecurrenceType"><option value="yearly">Yearly (same date each year)</option><option value="monthly">Monthly (same day each month)</option></select><div style="font-size:11px;color:var(--text3);margin-top:2px;">Yearly for birthdays/anniversaries, Monthly for fee due dates</div></div>
+</div>
+<div style="display:flex;gap:8px;margin-top:8px;">
 <div style="flex:1;"><div class="form-label">Send how many days before?</div><input type="number" id="watcherOffsetDays" value="0" min="0"><div style="font-size:11px;color:var(--text3);margin-top:2px;">0 = on the day itself, 1 = one day before, etc.</div></div>
+<div style="flex:1;"><div class="form-label">Status column (optional)</div><select id="watcherStatusCol"><option value="">— none —</option></select><div style="font-size:11px;color:var(--text3);margin-top:2px;">Server checks this to decide whether to send (e.g., "Send Reminder")</div></div>
+<div style="flex:1;"><div class="form-label">Mark sent in column (optional)</div><select id="watcherSentStatusCol"><option value="">— none —</option></select><div style="font-size:11px;color:var(--text3);margin-top:2px;">Server updates this after sending (e.g., "Reminder Sent")</div></div>
 </div>
 </div>
 
@@ -1344,7 +1349,7 @@ async function loadSheetWatchers() {
   }
   el.innerHTML = data.watchers.map(w => {
     const schedule = w.watch_type === 'date_reminder'
-      ? `${w.offset_days > 0 ? w.offset_days + 'd before' : 'on the day'} at ${w.send_time || '09:00'} · every ${w.poll_interval_minutes}m`
+      ? `${w.recurrence_type || 'yearly'} · ${w.offset_days > 0 ? w.offset_days + 'd before' : 'on the day'} at ${w.send_time || '09:00'} · every ${w.poll_interval_minutes}m`
       : `every ${w.poll_interval_minutes}m`;
     const status = w.last_error ? `<span class="badge badge-red" title="${escapeHtml(w.last_error)}">Error</span>`
       : w.active ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Paused</span>';
@@ -1366,12 +1371,13 @@ async function openWatcherModal(id) {
   document.getElementById('watcherChannel').value = 'whatsapp';
   document.getElementById('watcherOffsetDays').value = 0;
   document.getElementById('watcherPollInterval').value = '15';
+  document.getElementById('watcherRecurrenceType').value = 'yearly';
   setWatcherSendTime('09:00');
   document.getElementById('watcherActive').checked = true;
   document.getElementById('watcherMessageTemplate').value = '';
   document.getElementById('watcherWorksheetSelect').innerHTML = '<option value="">Select sheet first</option>';
   document.getElementById('watcherWorksheetSelect').disabled = true;
-  ['watcherNameCol','watcherPhoneCol','watcherEmailCol','watcherDateCol'].forEach(elId => document.getElementById(elId).innerHTML = '<option value="">— none —</option>');
+  ['watcherNameCol','watcherPhoneCol','watcherEmailCol','watcherDateCol','watcherStatusCol','watcherSentStatusCol'].forEach(elId => document.getElementById(elId).innerHTML = '<option value="">— none —</option>');
   renderWatcherFields();
   openModal('watcherModal');
 
@@ -1403,6 +1409,7 @@ async function openWatcherModal(id) {
     setWatcherSendTime(w.send_time || '09:00');
     document.getElementById('watcherActive').checked = !!w.active;
     document.getElementById('watcherMessageTemplate').value = w.message_template || '';
+    document.getElementById('watcherRecurrenceType').value = w.recurrence_type || 'yearly';
     renderWatcherFields();
     if (watcherSheetsCache.some(s => s.id === w.spreadsheet_id)) {
       sheetSelect.value = w.spreadsheet_id;
@@ -1417,6 +1424,9 @@ async function openWatcherModal(id) {
       const col = [w.name_column, w.phone_column, w.email_column, w.date_column][i];
       if (col) document.getElementById(elId).value = col;
     });
+    // Set status and sent status columns
+    if (w.status_column) document.getElementById('watcherStatusCol').value = w.status_column;
+    if (w.sent_status_column) document.getElementById('watcherSentStatusCol').value = w.sent_status_column;
     if (w.template_id) {
       tplSelect.value = w.template_id;
       renderWatcherPlaceholderMapping(w.placeholder_mapping || {});
@@ -1456,12 +1466,12 @@ async function onWatcherWorksheetSelected() {
   const data = await apiCall(`/api/oauth/google/columns/${sheetId}/${encodeURIComponent(worksheet)}`);
   watcherColumnsCache = data.columns || [];
   const options = '<option value="">— none —</option>' + watcherColumnsCache.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
-  ['watcherNameCol','watcherPhoneCol','watcherEmailCol','watcherDateCol'].forEach(elId => {
+  ['watcherNameCol','watcherPhoneCol','watcherEmailCol','watcherDateCol','watcherStatusCol','watcherSentStatusCol'].forEach(elId => {
     const prev = document.getElementById(elId).value;
     document.getElementById(elId).innerHTML = options;
     // Auto-select matching column by name for common fields (same as Field Mapping tab)
     if (!prev) {
-      const elLabel = elId.replace('watcher', '').replace('Col', '').toLowerCase(); // e.g. 'name', 'phone', 'email', 'date'
+      const elLabel = elId.replace('watcher', '').replace('Col', '').toLowerCase(); // e.g. 'name', 'phone', 'email', 'date', 'status', 'sentstatus'
       const matchingCol = watcherColumnsCache.find(c => c.toLowerCase().includes(elLabel));
       if (matchingCol) document.getElementById(elId).value = matchingCol;
     } else if (prev) {
@@ -1542,7 +1552,10 @@ async function saveWatcher() {
     channel,
     send_time: document.getElementById('watcherSendTime').value || '09:00',
     poll_interval_minutes: parseInt(document.getElementById('watcherPollInterval').value) || 15,
-    active: document.getElementById('watcherActive').checked
+    active: document.getElementById('watcherActive').checked,
+    recurrence_type: document.getElementById('watcherRecurrenceType').value || 'yearly',
+    status_column: document.getElementById('watcherStatusCol').value || null,
+    sent_status_column: document.getElementById('watcherSentStatusCol').value || null
   };
 
   if (watch_type === 'date_reminder' && !body.date_column) { showToast('Pick a date column for date reminders', true); return; }

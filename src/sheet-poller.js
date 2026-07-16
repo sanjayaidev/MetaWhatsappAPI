@@ -87,6 +87,10 @@ function startSheetPoller(deps) {
       return;
     }
 
+    // Get status column index if configured
+    const statusIdx = watcher.status_column ? colIndex(watcher.status_column) : -1;
+    const sentStatusIdx = watcher.sent_status_column ? colIndex(watcher.sent_status_column) : -1;
+
     const today = new Date();
     const todayKey = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
     const firedLog = { ...(watcher.fired_log || {}) };
@@ -111,13 +115,35 @@ function startSheetPoller(deps) {
       const parsed = parseFlexibleDate(rawDate);
       if (!parsed) continue;
 
-      // Recurring annually: check both "this year" and "next year" occurrence of
-      // month/day, each shifted back by offset_days, against today.
-      const isReminderDay = [today.getFullYear(), today.getFullYear() + 1].some(year => {
-        const occurrence = new Date(year, parsed.getMonth(), parsed.getDate());
-        occurrence.setDate(occurrence.getDate() - (watcher.offset_days || 0));
-        return occurrence.getFullYear() === today.getFullYear() && occurrence.getMonth() === today.getMonth() && occurrence.getDate() === today.getDate();
-      });
+      // Check status column if configured - skip if marked as false/not to send
+      if (statusIdx !== -1) {
+        const statusValue = String(row[statusIdx] || '').trim().toLowerCase();
+        // Skip if status is explicitly false, 'no', 'false', '0', etc.
+        if (['false', 'no', '0', 'f', 'n'].includes(statusValue)) {
+          continue;
+        }
+      }
+
+      // Determine if this is a reminder day based on recurrence_type
+      let isReminderDay = false;
+      if (watcher.recurrence_type === 'monthly') {
+        // Monthly: check if today's day of month matches the date column's day
+        const targetDay = parsed.getDate();
+        isReminderDay = today.getDate() === targetDay;
+        // Apply offset_days for monthly reminders
+        if (watcher.offset_days > 0) {
+          const adjustedDay = targetDay - watcher.offset_days;
+          isReminderDay = today.getDate() === adjustedDay;
+        }
+      } else {
+        // Yearly (default): check both "this year" and "next year" occurrence of month/day
+        isReminderDay = [today.getFullYear(), today.getFullYear() + 1].some(year => {
+          const occurrence = new Date(year, parsed.getMonth(), parsed.getDate());
+          occurrence.setDate(occurrence.getDate() - (watcher.offset_days || 0));
+          return occurrence.getFullYear() === today.getFullYear() && occurrence.getMonth() === today.getMonth() && occurrence.getDate() === today.getDate();
+        });
+      }
+
       if (!isReminderDay) continue;
 
       const rowKey = String(i);
@@ -127,9 +153,14 @@ function startSheetPoller(deps) {
       if (lastFiredYear === String(today.getFullYear())) continue;
 
       try {
-        await sendForRow(watcher, headers, row, colIndex);
+        await sendForRow(watcher, headers, row, colIndex, sentStatusIdx);
         firedLog[rowKey] = todayKey;
         changed = true;
+        
+        // Update sent status column in Google Sheets if configured
+        if (sentStatusIdx !== -1 && watcher.sent_status_column) {
+          await updateSheetSentStatus(watcher, accessToken, i + 2, sentStatusIdx, true); // +2 because rows are 1-indexed and we have header row
+        }
       } catch (err) {
         console.error(`[sheet-poller] date_reminder send failed for watcher ${watcher.id} row ${i}:`, err.message);
       }
@@ -145,7 +176,7 @@ function startSheetPoller(deps) {
   // through the same channel pipeline manual replies / automations use. For
   // WhatsApp this always goes out as the watcher's approved template — Meta
   // rejects free-text business-initiated messages outside a live chat window.
-  async function sendForRow(watcher, headers, row, colIndex) {
+  async function sendForRow(watcher, headers, row, colIndex, sentStatusIdx) {
     const mergeFields = {};
     headers.forEach((h, idx) => { if (h) mergeFields[h] = row[idx] ?? ''; });
 
@@ -168,6 +199,38 @@ function startSheetPoller(deps) {
 
     const body = String(watcher.message_template || '').replace(/\{(\w+)\}/g, (_, key) => mergeFields[key] ?? `{${key}}`);
     await sendChannelMessage({ lead, channel: watcher.channel, body, isAutomation: true });
+  }
+
+  // Updates the sent status column in Google Sheets after successfully sending a reminder
+  async function updateSheetSentStatus(watcher, accessToken, rowIndex, sentStatusIdx, sent) {
+    try {
+      const range = `${watcher.worksheet}!${getColumnName(sentStatusIdx)}${rowIndex}`;
+      const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${watcher.spreadsheet_id}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
+        method: 'PUT',
+        headers: { 
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ values: [[sent ? 'TRUE' : 'FALSE']] })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        console.error(`[sheet-poller] failed to update sent status for watcher ${watcher.id}:`, data.error?.message || `Sheets API error ${res.status}`);
+      }
+    } catch (err) {
+      console.error(`[sheet-poller] exception updating sent status for watcher ${watcher.id}:`, err.message);
+    }
+  }
+
+  // Converts a column index (0-based) to Excel-style column name (A, B, C, ..., AA, AB, ...)
+  function getColumnName(colIndex) {
+    let name = '';
+    let n = colIndex;
+    while (n >= 0) {
+      name = String.fromCharCode(65 + (n % 26)) + name;
+      n = Math.floor(n / 26) - 1;
+    }
+    return name;
   }
 
   // Resolves the watcher's placeholder_mapping (same shape used by campaigns:
