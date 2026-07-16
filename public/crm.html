@@ -560,6 +560,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 
 <div style="display:flex;gap:8px;">
 <div style="flex:1;"><div class="form-label">Check every</div><select id="watcherPollInterval"><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="360">6 hours</option><option value="1440">Once a day</option></select></div>
+<div style="flex:1;"><div class="form-label">Send time (for date reminders)</div><input type="time" id="watcherSendTime" value="09:00"></div>
 <div style="flex:1;display:flex;align-items:flex-end;padding-bottom:10px;"><label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" id="watcherActive" checked style="width:auto;"> Active</label></div>
 </div>
 
@@ -1115,7 +1116,7 @@ async function loadSheetWatchers() {
   }
   el.innerHTML = data.watchers.map(w => {
     const schedule = w.watch_type === 'date_reminder'
-      ? `${w.offset_days > 0 ? w.offset_days + 'd before' : 'on the day'} · every ${w.poll_interval_minutes}m`
+      ? `${w.offset_days > 0 ? w.offset_days + 'd before' : 'on the day'} at ${w.send_time || '09:00'} · every ${w.poll_interval_minutes}m`
       : `every ${w.poll_interval_minutes}m`;
     const status = w.last_error ? `<span class="badge badge-red" title="${escapeHtml(w.last_error)}">Error</span>`
       : w.active ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Paused</span>';
@@ -1137,6 +1138,7 @@ async function openWatcherModal(id) {
   document.getElementById('watcherChannel').value = 'whatsapp';
   document.getElementById('watcherOffsetDays').value = 0;
   document.getElementById('watcherPollInterval').value = '15';
+  document.getElementById('watcherSendTime').value = '09:00';
   document.getElementById('watcherActive').checked = true;
   document.getElementById('watcherMessageTemplate').value = '';
   document.getElementById('watcherWorksheetSelect').innerHTML = '<option value="">Select sheet first</option>';
@@ -1170,6 +1172,7 @@ async function openWatcherModal(id) {
     document.getElementById('watcherChannel').value = w.channel;
     document.getElementById('watcherOffsetDays').value = w.offset_days || 0;
     document.getElementById('watcherPollInterval').value = String(w.poll_interval_minutes || 15);
+    document.getElementById('watcherSendTime').value = w.send_time || '09:00';
     document.getElementById('watcherActive').checked = !!w.active;
     document.getElementById('watcherMessageTemplate').value = w.message_template || '';
     renderWatcherFields();
@@ -1309,6 +1312,7 @@ async function saveWatcher() {
     date_column: document.getElementById('watcherDateCol').value || null,
     offset_days: parseInt(document.getElementById('watcherOffsetDays').value) || 0,
     channel,
+    send_time: document.getElementById('watcherSendTime').value || '09:00',
     poll_interval_minutes: parseInt(document.getElementById('watcherPollInterval').value) || 15,
     active: document.getElementById('watcherActive').checked
   };
