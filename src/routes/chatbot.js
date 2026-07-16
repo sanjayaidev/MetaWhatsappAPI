@@ -75,7 +75,7 @@ module.exports = function chatbotRouter(deps) {
 
   // POST /api/chatbot/assistant-message — the dashboard's floating AI assistant
   router.post('/chatbot/assistant-message', verifyUser, async (req, res) => {
-    const { message } = req.body || {};
+    const { message, conversation_history = [] } = req.body || {};
     if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
 
     const { data: config } = await supabase.from('wb_chatbot_config').select('*').eq('user_id', req.user.id).eq('type', 'dashboard_assistant').single();
@@ -99,7 +99,8 @@ module.exports = function chatbotRouter(deps) {
       const reply = await aiGenerateReply({ 
         model: 'mistralai/mistral-small-4-119b-2603',
         systemPrompt, 
-        userText: message.trim() 
+        userText: message.trim(),
+        conversation_history 
       });
       res.json({ reply });
     } catch (err) {
