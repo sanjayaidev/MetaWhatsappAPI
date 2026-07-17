@@ -1292,7 +1292,7 @@ const API = {
     if (res.success && res.models) {
       return { success: true, models: res.models };
     }
-    return { success: true, models: ['moonshotai/kimi-k2.6'] };
+    return { success: true, models: ['mistralai/mistral-small-4-119b-2603'] };
   },
 
   // --- Profile ---
@@ -1622,9 +1622,9 @@ function renderBilling() {
 
   container.innerHTML = `
     <div class="billing-period">
-      <button class="period-btn active" data-period="day" onclick="setBillingPeriod('day')">Day</button>
-      <button class="period-btn" data-period="week" onclick="setBillingPeriod('week')">Week</button>
-      <button class="period-btn" data-period="month" onclick="setBillingPeriod('month')">Month</button>
+      <button class="period-btn ${billingPeriod === 'day' ? 'active' : ''}" data-period="day" onclick="setBillingPeriod('day')">Day</button>
+      <button class="period-btn ${billingPeriod === 'week' ? 'active' : ''}" data-period="week" onclick="setBillingPeriod('week')">Week</button>
+      <button class="period-btn ${billingPeriod === 'month' ? 'active' : ''}" data-period="month" onclick="setBillingPeriod('month')">Month</button>
     </div>
     <div class="billing-cards">
       <div class="billing-card">
@@ -2122,7 +2122,7 @@ async function disconnectNumber(id) {
 //  BILLING ACTIONS
 // ====================================================================
 
-let billingPeriod = 'day';
+let billingPeriod = 'month';
 
 async function setBillingPeriod(period) {
   billingPeriod = period;
