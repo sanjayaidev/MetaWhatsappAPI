@@ -1183,7 +1183,16 @@ const API = {
     const res = await apiCall('/api/messages/received?limit=50');
     if (res.success) {
       const conversations = {};
-      (res.messages || []).forEach(msg => {
+      // The server returns rows newest-first (order('created_at', {ascending:false})).
+      // Process oldest -> newest per contact so that (a) each conversation's
+      // `messages` array is built in true chronological order, matching real
+      // WhatsApp thread display, and (b) unconditionally overwriting
+      // lastBody/lastAt as we go naturally lands on that contact's MOST
+      // RECENT inbound message (not their first-ever one), which is also
+      // what the 22h reply-window check needs to key off of — same message
+      // dashboard.html's per-row window check already uses correctly.
+      const chronological = [...(res.messages || [])].reverse();
+      chronological.forEach(msg => {
         const phone = msg.phone;
         if (!conversations[phone]) {
           conversations[phone] = {
@@ -1205,7 +1214,11 @@ const API = {
           at: msg.created_at
         });
       });
-      return { success: true, messages: Object.values(conversations), unread: res.unread || 0 };
+      // Chat list should show the most recently active contact first (like
+      // real WhatsApp). Processing above is chronological (oldest -> newest)
+      // to get lastAt/lastBody/messages right, so sort separately here.
+      const sorted = Object.values(conversations).sort((a, b) => new Date(b.lastAt) - new Date(a.lastAt));
+      return { success: true, messages: sorted, unread: res.unread || 0 };
     }
     return { success: false, messages: [], unread: 0 };
   },
