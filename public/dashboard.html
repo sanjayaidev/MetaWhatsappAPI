@@ -1511,16 +1511,35 @@ function openReplyModal(phone, originalMessage) {
   document.getElementById('replyModal').classList.add('open');
 }
 
-// Pulls JSON text out of the assistant's rendered <pre> and drops it into the
-// reply modal's JSON tab (opening the modal in JSON mode if it's already open
-// for a lead), so a generated button/list/cta_url message can be sent as-is.
-function useGeneratedJsonInReply(preId) {
+// Copies the JSON text out of the assistant's rendered <pre> to the clipboard.
+// navigator.clipboard requires a secure context (https/localhost); falls back
+// to the old execCommand('copy') trick via a hidden textarea otherwise.
+function copyJsonFromPre(preId) {
   const pre = document.getElementById(preId);
   if (!pre) return;
-  if (!replyTargetPhone) { showToast('Open a reply to a contact first, then use this JSON', true); return; }
-  document.getElementById('replyJsonInput').value = pre.textContent;
-  setReplyMode('json');
-  showToast('Loaded into the reply box — review, then hit Send');
+  const text = pre.textContent;
+
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text)
+      .then(() => showToast('✓ Copied JSON to clipboard'))
+      .catch(() => showToast('Copy failed — select and copy manually', true));
+    return;
+  }
+
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showToast('✓ Copied JSON to clipboard');
+  } catch (e) {
+    showToast('Copy failed — select and copy manually', true);
+  }
+  document.body.removeChild(ta);
 }
 
 async function sendReply() {
@@ -1907,7 +1926,7 @@ async function sendAssistantJsonMessage() {
       const jsonStr = JSON.stringify(data.interactive, null, 2);
       const id = 'json_' + Date.now();
       replyText = '<pre id="' + id + '" style="background:var(--bg2);padding:8px;border-radius:8px;overflow-x:auto;font-size:11px;">' + escapeHtml(jsonStr) + '</pre>'
-        + '<button class="btn btn-ghost btn-xs" onclick="useGeneratedJsonInReply(\'' + id + '\')">Use in reply →</button>';
+        + '<button class="btn btn-ghost btn-xs" onclick="copyJsonFromPre(\'' + id + '\')">Copy</button>';
     }
     
     // Add AI response to history and UI
@@ -1939,7 +1958,7 @@ if (window.location.hash && window.location.hash.includes('access_token')) {
 const savedToken = localStorage.getItem('supabase_token');
 if (savedToken) { authToken = savedToken; loadDashboard(); } else { window.location.href = '/login.html'; }
 
-window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.toggleCampaignScheduleInput = toggleCampaignScheduleInput; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.setAutoReplyMode = setAutoReplyMode; window.setReplyMode = setReplyMode; window.onTemplateSelected = onTemplateSelected; window.customizeTemplateWithAI = customizeTemplateWithAI; window.saveJsonAsTemplate = saveJsonAsTemplate; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates; window.updateCampaignContactCount = updateCampaignContactCount; window.renderCampaignGroups = renderCampaignGroups; window.openReplyModal = openReplyModal; window.sendReply = sendReply; window.refreshWaQuality = refreshWaQuality; window.setBillingPeriod = setBillingPeriod; window.loadBillingAnalytics = loadBillingAnalytics; window.renderBillingAnalytics = renderBillingAnalytics; window.toggleAssistant = toggleAssistant; window.switchAssistantTab = switchAssistantTab; window.sendAssistantMessage = sendAssistantMessage; window.sendAssistantJsonMessage = sendAssistantJsonMessage; window.loadAssistantHistory = loadAssistantHistory; window.saveAssistantHistory = saveAssistantHistory; window.renderAssistantConversation = renderAssistantConversation;
+window.toggleSidebar = toggleSidebar; window.doLogout = doLogout; window.closeModal = closeModal; window.openTemplateBuilder = openTemplateBuilder; window.setHeaderType = setHeaderType; window.sanitizeTemplateName = sanitizeTemplateName; window.onBodyInput = onBodyInput; window.updatePreview = updatePreview; window.addButton = addButton; window.removeButton = removeButton; window.submitTemplate = submitTemplate; window.previewTemplate = previewTemplate; window.deleteTemplate = deleteTemplate; window.removeContact = removeContact; window.parsePaste = parsePaste; window.saveContactsToDb = saveContactsToDb; window.clearContacts = clearContacts; window.importFile = importFile; window.loadTemplatePlaceholders = loadTemplatePlaceholders; window.toggleCampaignScheduleInput = toggleCampaignScheduleInput; window.createCampaign = createCampaign; window.loadCampaigns = loadCampaigns; window.loadCampaignLogs = loadCampaignLogs; window.saveLimitSettings = saveLimitSettings; window.saveAutoReplySettings = saveAutoReplySettings; window.setAutoReplyMode = setAutoReplyMode; window.setReplyMode = setReplyMode; window.onTemplateSelected = onTemplateSelected; window.customizeTemplateWithAI = customizeTemplateWithAI; window.saveJsonAsTemplate = saveJsonAsTemplate; window.updateProfile = updateProfile; window.openWaConnectModal = openWaConnectModal; window.closeWaConnectModal = closeWaConnectModal; window.waVerifyNumbers = waVerifyNumbers; window.waSelectConnNumber = waSelectConnNumber; window.waSaveNumber = waSaveNumber; window.waResetConnectModal = waResetConnectModal; window.deleteCampaignFromList = deleteCampaignFromList; window.loadActiveCampaign = loadActiveCampaign; window.disconnectNumber = disconnectNumber; window.loadDashboardStats = loadDashboardStats; window.sendStart = sendStart; window.sendPause = sendPause; window.sendStop = sendStop; window.sendDelete = sendDelete; window.sendStartCampaign = sendStartCampaign; window.sendPauseCampaign = sendPauseCampaign; window.fetchApprovedTemplates = fetchApprovedTemplates; window.updateCampaignContactCount = updateCampaignContactCount; window.renderCampaignGroups = renderCampaignGroups; window.openReplyModal = openReplyModal; window.sendReply = sendReply; window.refreshWaQuality = refreshWaQuality; window.setBillingPeriod = setBillingPeriod; window.loadBillingAnalytics = loadBillingAnalytics; window.renderBillingAnalytics = renderBillingAnalytics; window.toggleAssistant = toggleAssistant; window.switchAssistantTab = switchAssistantTab; window.sendAssistantMessage = sendAssistantMessage; window.sendAssistantJsonMessage = sendAssistantJsonMessage; window.loadAssistantHistory = loadAssistantHistory; window.saveAssistantHistory = saveAssistantHistory; window.renderAssistantConversation = renderAssistantConversation; window.copyJsonFromPre = copyJsonFromPre;
 </script>
 </body>
 </html>
