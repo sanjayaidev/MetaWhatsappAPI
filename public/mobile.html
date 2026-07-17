@@ -2185,12 +2185,16 @@ async function switchTab(tab) {
 async function loadChats() {
   const res = await API.getMessages();
   if (res.success) {
+    const wasInThread = state.currentPhone;
     state.conversations = res.messages.map(c => ({
       ...c,
       messages: c.messages || [],
       unread: c.unread || 0,
     }));
     renderChatList();
+    // If a thread is currently open, re-render it to reflect new messages
+    // and re-evaluate the 22h reply window
+    if (wasInThread) renderThread();
   }
 }
 
