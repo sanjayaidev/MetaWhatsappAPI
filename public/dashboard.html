@@ -1531,6 +1531,23 @@ async function sendReply() {
   if (replyMode === 'text') {
     const message = document.getElementById('replyMessageInput').value.trim();
     if (!message) { showToast('Type a message first', true); return; }
+    // GUARD: catches pasting interactive JSON (buttons/list/cta_url) into the
+    // Plain Text tab by mistake — previously this was sent verbatim as
+    // `text.body`, so the recipient saw raw JSON instead of buttons.
+    if (message.startsWith('{') && message.endsWith('}')) {
+      let looksInteractive = false;
+      try {
+        const parsed = JSON.parse(message);
+        looksInteractive = !!(parsed && (parsed.type === 'button' || parsed.type === 'list' || parsed.type === 'cta_url' || parsed.action));
+      } catch (e) {
+        // Not valid JSON at all — still likely a paste mistake, not a real message.
+        looksInteractive = true;
+      }
+      if (looksInteractive) {
+        showToast('That looks like interactive JSON, not a text message — switch to the "Manual JSON" tab to send it as buttons/list', true);
+        return;
+      }
+    }
     btn.disabled = true; btn.textContent = 'Sending…';
     res = await apiCall('/api/messages/reply', 'POST', { phone: replyTargetPhone, message });
 
@@ -1732,7 +1749,7 @@ async function disconnectNumber(id) { if (!confirm('Disconnect this number?')) r
 
 function openWaConnectModal() { document.getElementById('waConnWabaId').value = ''; document.getElementById('waConnToken').value = ''; document.getElementById('waConnError1').textContent = ''; document.getElementById('waConnError2').textContent = ''; waResetConnectModal(); openModal('waConnectModal'); }
 function closeWaConnectModal() { closeModal('waConnectModal'); }
-async function waVerifyNumbers() { const wabaId = document.getElementById('waConnWabaId').value.trim(); const token = document.getElementById('waConnToken').value.trim(); const errEl = document.getElementById('waConnError1'); const btn = document.getElementById('waConnVerifyBtn'); errEl.textContent = ''; if (!wabaId || !token) { errEl.textContent = 'Both fields required.'; return; } btn.disabled = true; btn.textContent = 'Checking…'; try { const res = await fetch(`${API_BASE_URL}/api/wa/manual/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ waba_id: wabaId, access_token: token }) }); const data = await res.json(); if (!data.success) { errEl.textContent = data.error || 'Verification failed.'; btn.disabled = false; btn.textContent = 'Find My Numbers →'; return; } waConnNumbersCache = data.numbers; renderWaConnNumbers(); document.getElementById('waConnectStep1').style.display = 'none'; document.getElementById('waConnectStep2').style.display = 'block'; } catch (err) { errEl.textContent = 'Network error: ' + err.message; } finally { btn.disabled = false; btn.textContent = 'Find My Numbers →'; } }
+async function waVerifyNumbers() { const wabaId = document.getElementById('waConnWabaId').value.trim(); const token = document.getElementById('waConnToken').value.trim(); const errEl = document.getElementById('waConnError1'); const btn = document.getElementById('waConnVerifyBtn'); errEl.textContent = ''; if (!wabaId || !token) { errEl.textContent = 'Both fields required.'; return; } btn.disabled = true; btn.textContent = 'Checking…'; try { const res = await fetch(`${API_BASE_URL}/api/wa/manual/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` }, body: JSON.stringify({ waba_id: wabaId, access_token: token }) }); const data = await res.json(); if (!data.success) { errEl.textContent = data.error || 'Verification failed.'; btn.disabled = false; btn.textContent = 'Find My Numbers →'; return; } waConnNumbersCache = data.numbers; renderWaConnNumbers(); document.getElementById('waConnectStep1').style.display = 'none'; document.getElementById('waConnectStep2').style.display = 'block'; } catch (err) { errEl.textContent = 'Network error: ' + err.message; } finally { btn.disabled = false; btn.textContent = 'Find My Numbers →'; } }
 function renderWaConnNumbers() { const list = document.getElementById('waConnNumberList'); list.innerHTML = waConnNumbersCache.map((n, i) => `<div class="data-row" id="waConnNum${i}" style="cursor:pointer;border:2px solid var(--border2);" onclick="waSelectConnNumber(${i})"><div><div class="data-row-title">${escapeHtml(n.display_name)}</div><div class="data-row-sub" style="font-family:'DM Mono',monospace;">${n.phone_number} · ${n.quality_rating}</div></div></div>`).join(''); if (waConnNumbersCache.length === 1) waSelectConnNumber(0); }
 function waSelectConnNumber(i) { document.querySelectorAll('#waConnNumberList .data-row').forEach(el => el.style.borderColor = 'var(--border2)'); document.getElementById('waConnNum' + i).style.borderColor = 'var(--green)'; waConnSelectedNumber = waConnNumbersCache[i]; }
 async function waSaveNumber() { const errEl = document.getElementById('waConnError2'); const btn = document.getElementById('waConnSaveBtn'); errEl.textContent = ''; if (!waConnSelectedNumber) { errEl.textContent = 'Select a number first.'; return; } btn.disabled = true; btn.textContent = 'Connecting…'; try { const res = await fetch(`${API_BASE_URL}/api/wa/manual/save`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` }, body: JSON.stringify({ waba_id: document.getElementById('waConnWabaId').value.trim(), phone_number_id: waConnSelectedNumber.phone_number_id, access_token: document.getElementById('waConnToken').value.trim() }) }); const data = await res.json(); if (!data.success) { errEl.textContent = data.error || 'Failed to save.'; btn.disabled = false; btn.textContent = 'Connect This Number'; return; } showToast(`✅ ${data.phone_number} connected!`); closeWaConnectModal(); await loadWaAccounts(); } catch (err) { errEl.textContent = 'Network error: ' + err.message; } finally { btn.disabled = false; btn.textContent = 'Connect This Number'; } }

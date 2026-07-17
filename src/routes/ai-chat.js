@@ -45,7 +45,7 @@ function isAllowedModel(modelId) {
 // Reusable helper: send a chat request to NVIDIA with optional conversation history
 // and return the assistant's reply text. Used by the webhook auto-reply flow
 // as well as anything else that needs an AI response.
-async function generateReply({ model, systemPrompt, userText, temperature = 0.7, max_tokens = 512, conversation_history = [] }) {
+async function generateReply({ model, systemPrompt, userText, temperature = 0.7, max_tokens = 512, conversation_history = [], response_format = null }) {
   const apiKey = process.env.NVIDIA_API_KEY;
   if (!apiKey) throw new Error('NVIDIA_API_KEY not configured');
 
@@ -62,20 +62,27 @@ async function generateReply({ model, systemPrompt, userText, temperature = 0.7,
   // Add current user message
   messages.push({ role: 'user', content: userText });
 
+  const payload = {
+    model: chosenModel,
+    messages,
+    temperature,
+    max_tokens,
+    top_p: 1,
+    stream: false,
+  };
+  // Optional OpenAI-style response_format (e.g. { type: 'json_object' }) —
+  // NVIDIA's endpoint is OpenAI-compatible and most instruct models honor
+  // this, constraining sampling so the output is syntactically valid JSON
+  // instead of just being asked nicely in the prompt.
+  if (response_format) payload.response_format = response_format;
+
   const response = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: chosenModel,
-      messages,
-      temperature,
-      max_tokens,
-      top_p: 1,
-      stream: false,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {

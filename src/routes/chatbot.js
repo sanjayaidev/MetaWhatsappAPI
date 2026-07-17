@@ -27,6 +27,10 @@ const DEFAULT_JSON_SYSTEM_PROMPT = [
   '',
   'Any of the three may optionally include "header": { "type": "text", "text": "..." } and/or "footer": { "text": "..." }.',
   'Do not invent other message types, and do not wrap the object in an extra "interactive" or "messaging_product" key — return the interactive object itself.',
+  '',
+  'Worked example for type "button" with 3 options — copy this bracket structure exactly, including the closing "}" on each object inside the array before the next one starts:',
+  '{"type":"button","body":{"text":"Which time works best?"},"action":{"buttons":[{"type":"reply","reply":{"id":"opt_1","title":"9 AM"}},{"type":"reply","reply":{"id":"opt_2","title":"7 PM"}},{"type":"reply","reply":{"id":"opt_3","title":"8 PM"}}]}}',
+  'Before returning, mentally check that every "{" has a matching "}" and every "[" has a matching "]" — a single missing brace makes the whole message unsendable.',
 ].join('\n');
 
 module.exports = function chatbotRouter(deps) {
@@ -143,35 +147,69 @@ module.exports = function chatbotRouter(deps) {
 
     // Use provided system prompt or default to Meta-valid interactive JSON mode
     let systemPrompt = system_prompt || DEFAULT_JSON_SYSTEM_PROMPT;
+    const model = 'mistralai/mistral-small-4-119b-2603';
 
-    try {
-      // Use Mistral Small 4 119B as the default model for chatbot
-      const raw = await aiGenerateReply({ 
-        model: 'mistralai/mistral-small-4-119b-2603',
-        systemPrompt, 
-        userText: message.trim() 
-      });
-
-      // Strip accidental markdown fences (models sometimes add them despite instructions).
+    // Try to parse+validate a generation; returns { interactive, cleaned } or
+    // throws with a descriptive message (JSON syntax error or Meta-shape error).
+    function parseAndValidate(raw) {
       const cleaned = raw.trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '');
-
       let interactive;
       try {
         interactive = JSON.parse(cleaned);
       } catch (e) {
-        return res.status(502).json({ error: 'AI did not return valid JSON. Try rephrasing your request.', reply: raw });
+        const err = new Error(`not valid JSON (${e.message})`);
+        err.cleaned = cleaned;
+        throw err;
       }
-
-      // Never hand back "ready to send" JSON without checking it against Meta's
-      // real limits first — same guard interactive-templates.js uses for its
-      // AI customize-template flow.
       try {
         validateInteractiveObject(interactive);
-      } catch (err) {
-        return res.status(502).json({ error: `AI JSON does not match WhatsApp's format: ${err.message}`, reply: cleaned });
+      } catch (e) {
+        const err = new Error(`doesn't match WhatsApp's format: ${e.message}`);
+        err.cleaned = cleaned;
+        throw err;
+      }
+      return { interactive, cleaned };
+    }
+
+    try {
+      // Attempt 1: ask for strict JSON-object output. response_format isn't
+      // supported by every model on this provider, so if the API rejects the
+      // param outright, fall back to a plain call and rely on the prompt.
+      let raw;
+      try {
+        raw = await aiGenerateReply({ model, systemPrompt, userText: message.trim(), response_format: { type: 'json_object' } });
+      } catch (e) {
+        raw = await aiGenerateReply({ model, systemPrompt, userText: message.trim() });
       }
 
-      res.json({ reply: JSON.stringify(interactive, null, 2), interactive });
+      let result;
+      try {
+        result = parseAndValidate(raw);
+      } catch (firstErr) {
+        // Attempt 2 (self-repair): show the model exactly what it produced and
+        // exactly why it was rejected, and ask for a corrected object only.
+        // This catches the model's own common mistake (e.g. a missing "}"
+        // before the next array element) far more often than a cold retry.
+        const repairPrompt = [
+          'Your previous response was not valid, sendable WhatsApp interactive JSON.',
+          `Error: ${firstErr.message}`,
+          'Here is what you returned:',
+          firstErr.cleaned || raw,
+          '',
+          'Return ONLY the corrected, complete JSON object — no markdown fences, no explanation. Double-check every "{" has a matching "}" before you answer.',
+        ].join('\n');
+        const repaired = await aiGenerateReply({ model, systemPrompt, userText: repairPrompt });
+        try {
+          result = parseAndValidate(repaired);
+        } catch (secondErr) {
+          return res.status(502).json({
+            error: `AI could not produce valid WhatsApp JSON after a retry: ${secondErr.message}. Try rephrasing your request.`,
+            reply: secondErr.cleaned || repaired,
+          });
+        }
+      }
+
+      res.json({ reply: JSON.stringify(result.interactive, null, 2), interactive: result.interactive });
     } catch (err) {
       console.error('Assistant JSON message error:', err);
       res.status(500).json({ error: err.message });

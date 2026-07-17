@@ -1470,7 +1470,12 @@ app.post('/api/wa/accounts/refresh-quality', verifyUser, async (req, res) => {
   });
 });
 
-app.post('/api/wa/manual/verify', async (req, res) => {
+// SECURITY FIX: this route proxies an arbitrary access_token straight to
+// Meta's Graph API and echoes the result back. Without verifyUser it was an
+// unauthenticated, unrate-limited oracle anyone on the internet could use to
+// test whether a WhatsApp Business token/WABA pair is valid — a classic
+// credential-checking abuse pattern that gets sites flagged by Safe Browsing.
+app.post('/api/wa/manual/verify', verifyUser, async (req, res) => {
   const { waba_id, access_token } = req.body;
   if (!waba_id || !access_token) return res.status(400).json({ error: 'waba_id and access_token required' });
   try {
