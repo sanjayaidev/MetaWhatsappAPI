@@ -1483,7 +1483,9 @@ function renderThread() {
   const area = document.getElementById('msgArea');
   let lastDay = null;
   let html = '';
-  for (const m of c.messages) {
+  // Reverse messages so oldest appears first (like WhatsApp)
+  const sortedMessages = [...c.messages].sort((a, b) => new Date(a.at) - new Date(b.at));
+  for (const m of sortedMessages) {
     const d = new Date(m.at);
     const dayKey = d.toDateString();
     if (dayKey !== lastDay) {
