@@ -1594,6 +1594,10 @@ function renderProfile() {
         </div>
       `).join('')}
     </div>
+
+    <div style="margin-top:24px;">
+      <button class="logout-btn" onclick="doLogout()" style="width:100%;padding:12px;background:var(--red-dim);color:var(--red);border:1px solid var(--red);border-radius:12px;font-weight:600;cursor:pointer;">Sign out</button>
+    </div>
   `;
 }
 
@@ -2203,7 +2207,7 @@ async function loadWANumbers() {
 }
 
 // ====================================================================
-//  INIT
+//  INIT FUNCTION DEFINITION
 // ====================================================================
 
 async function init() {
@@ -2229,7 +2233,27 @@ async function init() {
   console.log('✅ WaBlast Inbox ready');
 }
 
-init();
+// ====================================================================
+//  AUTH CHECK & INITIALIZATION
+// ====================================================================
+
+// Catch OAuth hash if redirected from Google/FB (e.g. #access_token=...)
+if (window.location.hash && window.location.hash.includes('access_token')) {
+  const params = new URLSearchParams(window.location.hash.substring(1));
+  const hashToken = params.get('access_token');
+  if (hashToken) {
+    localStorage.setItem('supabase_token', hashToken);
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+}
+
+const savedToken = localStorage.getItem('supabase_token');
+if (savedToken) { 
+  authToken = savedToken; 
+  init(); 
+} else { 
+  window.location.href = '/login.html'; 
+}
 
 // ====================================================================
 //  EXPOSE TO GLOBAL (for inline onclick)
@@ -2258,6 +2282,7 @@ window.refreshBilling = refreshBilling;
 window.autoResize = autoResize;
 window.showToast = showToast;
 window.toggleTheme = toggleTheme;
+window.doLogout = doLogout;
 </script>
 </body>
 </html>
