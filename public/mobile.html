@@ -1175,30 +1175,39 @@ function doLogout() {
 const API = {
   // --- Messages / Chats ---
   getMessages: async () => {
+    // Matches dashboard's /api/messages/received response shape: each row has
+    // phone, contact_name, message_body, message_type, created_at, is_read.
+    // This endpoint only returns inbound (received) messages, so every row
+    // here is an incoming message — outbound replies are appended locally
+    // to the thread when sent (see sendMessage / sendTemplateMessage).
     const res = await apiCall('/api/messages/received?limit=50');
-    if (res.success && res.messages) {
+    if (res.success) {
       const conversations = {};
-      res.messages.forEach(msg => {
-        const phone = msg.phone || msg.from;
+      (res.messages || []).forEach(msg => {
+        const phone = msg.phone;
         if (!conversations[phone]) {
           conversations[phone] = {
             phone: phone,
             name: msg.contact_name || phone,
-            lastBody: msg.body || '',
-            lastAt: msg.timestamp || msg.created_at,
-            unread: msg.read ? 0 : 1,
+            lastBody: msg.message_body || '',
+            lastAt: msg.created_at,
+            unread: 0,
             messages: []
           };
         }
+        if (!msg.is_read) conversations[phone].unread += 1;
+        conversations[phone].lastBody = msg.message_body || '';
+        conversations[phone].lastAt = msg.created_at;
         conversations[phone].messages.push({
-          dir: msg.direction === 'inbound' ? 'in' : 'out',
-          body: msg.body || '',
-          at: msg.timestamp || msg.created_at
+          dir: 'in',
+          body: msg.message_body || '',
+          type: msg.message_type || 'text',
+          at: msg.created_at
         });
       });
-      return { success: true, messages: Object.values(conversations) };
+      return { success: true, messages: Object.values(conversations), unread: res.unread || 0 };
     }
-    return { success: false, messages: [] };
+    return { success: false, messages: [], unread: 0 };
   },
 
   sendReply: async (phone, message) => {
@@ -1247,7 +1256,7 @@ const API = {
           autoReply: !!s.auto_reply,
           autoReplyMode: s.auto_reply_mode || 'ai',
           systemPrompt: s.auto_reply_prompt || '',
-          model: s.auto_reply_model || 'moonshotai/kimi-k2.6',
+          model: s.auto_reply_model || 'mistralai/mistral-small-4-119b-2603',
           templateId: s.auto_reply_template_id || '',
           hour_limit: s.hour_limit || 0,
           day_limit: s.day_limit || 0,
@@ -1276,11 +1285,14 @@ const API = {
   },
 
   getAIModels: async () => {
+    // Mirrors dashboard's loadAutoReplyModels(): fetch the real list from the
+    // server, and if that fails fall back to the same single default model
+    // the dashboard uses (no invented models that don't exist server-side).
     const res = await apiCall('/api/ai/models');
     if (res.success && res.models) {
       return { success: true, models: res.models };
     }
-    return { success: true, models: ['moonshotai/kimi-k2.6', 'gpt-4', 'claude-3', 'gemini-pro'] };
+    return { success: true, models: ['moonshotai/kimi-k2.6'] };
   },
 
   // --- Profile ---
@@ -1334,17 +1346,20 @@ const API = {
 
   // --- Billing ---
   getBilling: async (period) => {
+    // The endpoint returns { rows: [{ pricing_category, pricing_type, cost,
+    // volume }, ...] } — same shape dashboard's loadBillingAnalytics() +
+    // renderBillingAnalytics() consume. Aggregate it the same way dashboard
+    // does: REGULAR = paid (business-initiated/billed), anything else = free.
     const res = await apiCall(`/api/billing/analytics?period=${period}`);
     if (res.success) {
-      return {
-        success: true,
-        totalCost: res.total_cost || 0,
-        freeMsgs: res.free_messages || 0,
-        paidMsgs: res.paid_messages || 0,
-        totalMsgs: res.total_messages || 0
-      };
+      const rows = res.rows || [];
+      const totalCost = rows.reduce((s, r) => s + (r.cost || 0), 0);
+      const totalMsgs = rows.reduce((s, r) => s + (r.volume || 0), 0);
+      const freeMsgs = rows.filter(r => r.pricing_type !== 'REGULAR').reduce((s, r) => s + (r.volume || 0), 0);
+      const paidMsgs = rows.filter(r => r.pricing_type === 'REGULAR').reduce((s, r) => s + (r.volume || 0), 0);
+      return { success: true, totalCost, freeMsgs, paidMsgs, totalMsgs, rows };
     }
-    return { success: false, totalCost: 0, freeMsgs: 0, paidMsgs: 0, totalMsgs: 0 };
+    return { success: false, totalCost: 0, freeMsgs: 0, paidMsgs: 0, totalMsgs: 0, rows: [] };
   }
 };
 </script>
@@ -1715,10 +1730,16 @@ function openThread(phone) {
   state.currentPhone = phone;
   const c = state.conversations.find(x => x.phone === phone);
   if (c) {
+    const hadUnread = c.unread > 0;
     c.unread = 0;
     renderThread();
     document.getElementById('threadOverlay').classList.add('open');
     renderChatList();
+    // The backend only exposes a mark-ALL-read route (same one dashboard's
+    // "Mark all read" button calls) — there's no per-conversation endpoint —
+    // so calling it here keeps the server's unread state in sync whenever
+    // the person actually reads a conversation.
+    if (hadUnread) apiCall('/api/messages/received/mark-read', 'POST');
   }
 }
 
