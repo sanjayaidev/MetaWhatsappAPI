@@ -77,6 +77,52 @@ function validateRawConfig(cfg) {
   }
 }
 
+// Validates an already Meta-shaped `interactive` object directly (the actual
+// wire format, e.g. { type: "button", action: { buttons: [{ type: "reply",
+// reply: { id, title } }] } } — as opposed to the flatter builder `cfg` shapes
+// validateButtonConfig/validateListConfig/validateCtaUrlConfig above expect).
+// Used to check AI-generated or hand-pasted interactive JSON before it's
+// treated as "ready to send". Throws WhatsAppValidationError.
+function validateInteractiveObject(obj) {
+  if (!obj || typeof obj !== 'object') throw new WhatsAppValidationError('Interactive message must be a JSON object.');
+  if (!obj.body || !obj.body.text || !obj.body.text.trim()) throw new WhatsAppValidationError('Interactive message needs a body.text.');
+
+  if (obj.type === 'button') {
+    const buttons = obj.action?.buttons || [];
+    if (buttons.length === 0) throw new WhatsAppValidationError('Button message needs at least 1 button.');
+    if (buttons.length > 3) throw new WhatsAppValidationError(`Button message supports max 3 buttons, got ${buttons.length}.`);
+    const seenIds = new Set();
+    for (const btn of buttons) {
+      const id = btn.reply?.id, title = btn.reply?.title;
+      if (!id || !title) throw new WhatsAppValidationError('Each button needs action.buttons[].reply.id and .title.');
+      if (title.length > 20) throw new WhatsAppValidationError(`Button title "${title}" exceeds 20 characters.`);
+      if (EMOJI_REGEX.test(title)) throw new WhatsAppValidationError(`Button title "${title}" contains an emoji (not supported).`);
+      if (seenIds.has(id)) throw new WhatsAppValidationError(`Duplicate button id "${id}".`);
+      seenIds.add(id);
+    }
+  } else if (obj.type === 'list') {
+    const sections = obj.action?.sections || [];
+    const totalRows = sections.reduce((sum, s) => sum + (s.rows || []).length, 0);
+    if (totalRows === 0) throw new WhatsAppValidationError('List message needs at least 1 row.');
+    if (totalRows > 10) throw new WhatsAppValidationError(`List message supports max 10 rows total, got ${totalRows}.`);
+    if (!obj.action?.button || obj.action.button.length > 20) throw new WhatsAppValidationError('List action.button label is required and must be <= 20 characters.');
+    for (const section of sections) {
+      if (!section.title || section.title.length > 24) throw new WhatsAppValidationError(`Section title "${section.title}" is required and must be <= 24 characters.`);
+      for (const row of section.rows || []) {
+        if (!row.id || !row.title) throw new WhatsAppValidationError('Each row needs an id and a title.');
+        if (row.title.length > 24) throw new WhatsAppValidationError(`Row title "${row.title}" exceeds 24 characters.`);
+        if (row.description && row.description.length > 72) throw new WhatsAppValidationError(`Row description for "${row.title}" exceeds 72 characters.`);
+      }
+    }
+  } else if (obj.type === 'cta_url') {
+    const params = obj.action?.parameters || {};
+    if (!params.display_text || params.display_text.length > 20) throw new WhatsAppValidationError('cta_url action.parameters.display_text is required and must be <= 20 characters.');
+    if (!params.url || !params.url.trim()) throw new WhatsAppValidationError('cta_url action.parameters.url is required.');
+  } else {
+    throw new WhatsAppValidationError(`Unsupported interactive type "${obj.type}". Must be "button", "list", or "cta_url".`);
+  }
+}
+
 /** Validates a template config object against Meta's limits for its `kind`. Throws WhatsAppValidationError. */
 function validateTemplateConfig(kind, cfg) {
   if (kind === 'text') {
@@ -185,5 +231,6 @@ module.exports = {
   renderTemplate,
   validateRecipient,
   validateTemplateConfig,
+  validateInteractiveObject,
   buildMessagePayload,
 };

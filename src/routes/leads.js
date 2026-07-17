@@ -6,6 +6,7 @@
 const express = require('express');
 
 const createChannelSender = require('../channel-send');
+const { validateInteractiveObject, WhatsAppValidationError } = require('../whatsapp-interactive');
 
 module.exports = function leadsRouter(deps) {
   const { supabase } = deps;
@@ -131,16 +132,54 @@ module.exports = function leadsRouter(deps) {
   });
 
   // POST /api/leads/:id/messages — send an outbound message on a given channel
+  //
+  // `body` is normally free text. But it also doubles as the paste target for
+  // WhatsApp interactive JSON (buttons/list/cta_url) copied out of the AI
+  // assistant's "Generate JSON" tab or Meta's docs — previously that JSON got
+  // sent to Meta as literal `type: "text"` body, so the contact saw the raw
+  // JSON string instead of tappable buttons/a list. Now: if `body` parses as
+  // JSON shaped like a WhatsApp interactive object (or `{ interactive: {...} }`),
+  // or an explicit `interactive` field is passed, it's validated against
+  // Meta's real limits and sent as a proper `type: "interactive"` message.
   router.post('/:id/messages', async (req, res) => {
-    const { channel, body } = req.body || {};
-    if (!channel || !body?.trim()) return res.status(400).json({ error: 'channel and body are required' });
+    const { channel, body, interactive: explicitInteractive } = req.body || {};
+    if (!channel || (!body?.trim() && !explicitInteractive)) {
+      return res.status(400).json({ error: 'channel and body (or interactive) are required' });
+    }
 
     const { data: lead } = await supabase.from('wb_leads').select('*').eq('id', req.params.id).eq('user_id', req.user.id).single();
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
     lead.user_id = req.user.id; // sender needs this to look up the right wa_accounts row
 
+    const trimmedBody = body ? body.trim() : '';
+    let interactive = explicitInteractive || null;
+
+    if (!interactive && channel === 'whatsapp' && trimmedBody.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmedBody);
+        const candidate = parsed && typeof parsed.interactive === 'object' ? parsed.interactive : parsed;
+        if (candidate && typeof candidate === 'object' && ['button', 'list', 'cta_url'].includes(candidate.type)) {
+          interactive = candidate;
+        }
+      } catch (_) {
+        // Not JSON (or not interactive-shaped) — falls through and sends as plain text, as before.
+      }
+    }
+
+    if (interactive) {
+      try {
+        validateInteractiveObject(interactive);
+      } catch (err) {
+        const status = err instanceof WhatsAppValidationError ? 400 : 500;
+        return res.status(status).json({ error: `Interactive JSON failed WhatsApp validation: ${err.message}` });
+      }
+    }
+
+    // Store a human-readable preview in the CRM thread rather than the raw JSON blob.
+    const storedBody = interactive ? (interactive.body?.text || `[Interactive ${interactive.type} message]`) : trimmedBody;
+
     try {
-      const msg = await sendChannelMessage({ lead, channel, body: body.trim(), isAutomation: false });
+      const msg = await sendChannelMessage({ lead, channel, body: storedBody, interactive, isAutomation: false });
       res.json({ success: true, message: msg });
     } catch (err) {
       res.status(502).json({ error: err.message, message: err.message /* channel-send attaches the row here too */ });

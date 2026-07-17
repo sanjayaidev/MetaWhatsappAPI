@@ -80,7 +80,12 @@ module.exports = function createChannelSender({ supabase, decryptToken, encryptT
   // anything outside the 24h customer-service window) — free text will be
   // rejected by Meta outside that window. `body` is still passed for logging/
   // CRM display (a human-readable rendered preview of what was sent).
-  return async function sendChannelMessage({ lead, channel, body, isAutomation = false, template = null }) {
+  //
+  // `interactive`, when provided for the whatsapp channel, sends a proper
+  // Meta "interactive" object (buttons/list/cta_url — see whatsapp-interactive.js)
+  // instead of dumping that JSON as literal text. Takes priority over `body`
+  // but not over `template` (a template send always wins if both are passed).
+  return async function sendChannelMessage({ lead, channel, body, isAutomation = false, template = null, interactive = null }) {
     let status = 'sent';
     let externalId = null;
     let sendError = null;
@@ -98,6 +103,8 @@ module.exports = function createChannelSender({ supabase, decryptToken, encryptT
 
           const payload = template
             ? { messaging_product: 'whatsapp', to: lead.phone, type: 'template', template }
+            : interactive
+            ? { messaging_product: 'whatsapp', to: lead.phone, type: 'interactive', interactive }
             : { messaging_product: 'whatsapp', to: lead.phone, type: 'text', text: { body } };
 
           const result = await fetch(`https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`, {

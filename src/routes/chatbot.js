@@ -4,6 +4,30 @@
 const express = require('express');
 const crypto = require('crypto');
 const { generateReply: aiGenerateReply, DEFAULT_MODEL } = require('./ai-chat');
+const { validateInteractiveObject, WhatsAppValidationError } = require('../whatsapp-interactive');
+
+// Default system prompt for /chatbot/assistant-json-message. Spells out the
+// exact shapes Meta's WhatsApp Cloud API accepts for a free-form interactive
+// message (button / list / cta_url), including the same limits enforced by
+// whatsapp-interactive.js's validateTemplateConfig() — so the AI's output is
+// actually sendable, not just "some JSON".
+const DEFAULT_JSON_SYSTEM_PROMPT = [
+  'You generate WhatsApp Cloud API interactive message JSON for a business.',
+  'Return ONLY a single raw JSON object — no markdown code fences, no explanation, no text before or after it.',
+  'The object must be a valid WhatsApp "interactive" object with exactly one "type": "button", "list", or "cta_url". Pick whichever best fits the request (buttons for a few choices, list for many options, cta_url to send a link).',
+  '',
+  'type "button" shape: { "type": "button", "body": { "text": "..." }, "action": { "buttons": [ { "type": "reply", "reply": { "id": "...", "title": "..." } } ] } }',
+  '- 1 to 3 buttons. Each button title <= 20 characters, no emoji. Each button needs a unique short "id" (e.g. "opt_1").',
+  '',
+  'type "list" shape: { "type": "list", "body": { "text": "..." }, "action": { "button": "...", "sections": [ { "title": "...", "rows": [ { "id": "...", "title": "...", "description": "..." } ] } ] } }',
+  '- "action.button" (the label that opens the list) <= 20 characters. Section "title" <= 24 characters. Row "title" <= 24 characters. Row "description" is optional, <= 72 characters. Max 10 rows total across all sections combined.',
+  '',
+  'type "cta_url" shape: { "type": "cta_url", "body": { "text": "..." }, "action": { "name": "cta_url", "parameters": { "display_text": "...", "url": "..." } } }',
+  '- "display_text" <= 20 characters. "url" must be a full https:// link.',
+  '',
+  'Any of the three may optionally include "header": { "type": "text", "text": "..." } and/or "footer": { "text": "..." }.',
+  'Do not invent other message types, and do not wrap the object in an extra "interactive" or "messaging_product" key — return the interactive object itself.',
+].join('\n');
 
 module.exports = function chatbotRouter(deps) {
   const { supabase, generateReply, verifyUser } = deps;
@@ -109,24 +133,45 @@ module.exports = function chatbotRouter(deps) {
     }
   });
 
-  // POST /api/chatbot/assistant-json-message — JSON template generation mode
+  // POST /api/chatbot/assistant-json-message — JSON template generation mode.
+  // Returns { reply, interactive } where `interactive` is the parsed, Meta-
+  // validated object — ready to hand straight to /api/leads/:id/messages or
+  // /api/messages/reply-interactive as { interactive } / { raw_interactive }.
   router.post('/chatbot/assistant-json-message', verifyUser, async (req, res) => {
     const { message, system_prompt } = req.body || {};
     if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
 
-    const { data: config } = await supabase.from('wb_chatbot_config').select('*').eq('user_id', req.user.id).eq('type', 'dashboard_assistant').single();
-    
-    // Use provided system prompt or default to JSON-only mode
-    let systemPrompt = system_prompt || 'You are a JSON template generator. Return ONLY valid JSON. No explanations, no markdown, no extra text.';
-    
+    // Use provided system prompt or default to Meta-valid interactive JSON mode
+    let systemPrompt = system_prompt || DEFAULT_JSON_SYSTEM_PROMPT;
+
     try {
       // Use Mistral Small 4 119B as the default model for chatbot
-      const reply = await aiGenerateReply({ 
+      const raw = await aiGenerateReply({ 
         model: 'mistralai/mistral-small-4-119b-2603',
         systemPrompt, 
         userText: message.trim() 
       });
-      res.json({ reply });
+
+      // Strip accidental markdown fences (models sometimes add them despite instructions).
+      const cleaned = raw.trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '');
+
+      let interactive;
+      try {
+        interactive = JSON.parse(cleaned);
+      } catch (e) {
+        return res.status(502).json({ error: 'AI did not return valid JSON. Try rephrasing your request.', reply: raw });
+      }
+
+      // Never hand back "ready to send" JSON without checking it against Meta's
+      // real limits first — same guard interactive-templates.js uses for its
+      // AI customize-template flow.
+      try {
+        validateInteractiveObject(interactive);
+      } catch (err) {
+        return res.status(502).json({ error: `AI JSON does not match WhatsApp's format: ${err.message}`, reply: cleaned });
+      }
+
+      res.json({ reply: JSON.stringify(interactive, null, 2), interactive });
     } catch (err) {
       console.error('Assistant JSON message error:', err);
       res.status(500).json({ error: err.message });

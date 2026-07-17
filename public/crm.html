@@ -445,7 +445,19 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 
 <div class="channel-tab-panel" id="ctab-whatsapp">
 <div class="thread" id="thread-whatsapp"></div>
-<div class="reply-box"><textarea id="reply-whatsapp" placeholder="Reply on WhatsApp…"></textarea><button class="btn btn-primary" onclick="sendChannelMessage('whatsapp')">Send</button></div>
+<div class="reply-mode-tabs" style="display:flex;gap:6px;margin:8px 0 4px;">
+<button type="button" class="btn btn-ghost btn-xs reply-mode-tab active" data-mode="text" onclick="setWhatsappReplyMode('text')">💬 Text</button>
+<button type="button" class="btn btn-ghost btn-xs reply-mode-tab" data-mode="json" onclick="setWhatsappReplyMode('json')">🔘 Interactive JSON</button>
+</div>
+<div class="reply-box" id="reply-box-whatsapp-text">
+<textarea id="reply-whatsapp" placeholder="Reply on WhatsApp…"></textarea>
+<button class="btn btn-primary" onclick="sendChannelMessage('whatsapp')">Send</button>
+</div>
+<div class="reply-box" id="reply-box-whatsapp-json" style="display:none;flex-direction:column;">
+<textarea id="reply-whatsapp-json" style="font-family:'DM Mono',monospace;font-size:12px;" placeholder='{&quot;type&quot;:&quot;button&quot;,&quot;body&quot;:{&quot;text&quot;:&quot;Hi! How can we help?&quot;},&quot;action&quot;:{&quot;buttons&quot;:[{&quot;type&quot;:&quot;reply&quot;,&quot;reply&quot;:{&quot;id&quot;:&quot;yes&quot;,&quot;title&quot;:&quot;Yes please&quot;}}]}}'></textarea>
+<div style="font-size:11px;color:#888;margin:4px 0;">Paste or generate a button/list/cta_url interactive object (via the assistant's JSON tab) — sent as a formatted WhatsApp message, checked against Meta's limits before sending.</div>
+<button class="btn btn-primary" onclick="sendWhatsappInteractiveReply()">Send Interactive</button>
+</div>
 </div>
 <div class="channel-tab-panel" id="ctab-instagram">
 <div class="thread" id="thread-instagram"></div>
@@ -783,10 +795,54 @@ async function loadLeadMessages(id, channel) {
   el.innerHTML = data.messages.map(m => `<div class="msg-bubble msg-${m.direction}">${escapeHtml(m.body)}<div class="msg-time">${timeAgo(m.created_at)}</div></div>`).join('');
   el.scrollTop = el.scrollHeight;
 }
+function setWhatsappReplyMode(mode) {
+  document.querySelectorAll('#ctab-whatsapp .reply-mode-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+  document.getElementById('reply-box-whatsapp-text').style.display = mode === 'text' ? 'flex' : 'none';
+  document.getElementById('reply-box-whatsapp-json').style.display = mode === 'json' ? 'flex' : 'none';
+}
+
+// Explicit "Interactive JSON" mode send: always sends via { interactive },
+// never falls back to plain text, so a malformed paste fails loudly here
+// instead of silently going out as literal JSON text.
+async function sendWhatsappInteractiveReply() {
+  const box = document.getElementById('reply-whatsapp-json');
+  const raw = box.value.trim();
+  if (!raw) { showToast('Paste an interactive JSON object first', true); return; }
+  let interactive;
+  try {
+    interactive = JSON.parse(raw);
+  } catch (e) {
+    showToast('That is not valid JSON', true);
+    return;
+  }
+  if (interactive && typeof interactive.interactive === 'object') interactive = interactive.interactive;
+
+  const data = await apiCall(`/api/leads/${currentLeadId}/messages`, 'POST', { channel: 'whatsapp', interactive });
+  if (data.error) { showToast('Failed to send: ' + data.error, true); return; }
+  box.value = ''; loadLeadMessages(currentLeadId, 'whatsapp'); loadLeadTimeline(currentLeadId);
+  showToast('✓ Interactive message sent');
+}
+
 async function sendChannelMessage(channel) {
   const box = document.getElementById('reply-' + channel);
   const body = box.value.trim(); if (!body) return;
-  const data = await apiCall(`/api/leads/${currentLeadId}/messages`, 'POST', { channel, body });
+
+  // If the box holds a pasted WhatsApp interactive JSON object (buttons/list/
+  // cta_url — e.g. copied from the assistant's "Generate JSON" tab), send it
+  // as a real interactive message so the contact sees tappable buttons/a list
+  // instead of the raw JSON text. Plain text falls through unchanged.
+  const payload = { channel, body };
+  if (channel === 'whatsapp' && body.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(body);
+      const candidate = parsed && typeof parsed.interactive === 'object' ? parsed.interactive : parsed;
+      if (candidate && typeof candidate === 'object' && ['button', 'list', 'cta_url'].includes(candidate.type)) {
+        payload.interactive = candidate;
+      }
+    } catch (e) { /* not JSON — send as plain text */ }
+  }
+
+  const data = await apiCall(`/api/leads/${currentLeadId}/messages`, 'POST', payload);
   if (data.error) { showToast('Failed to send: ' + data.error, true); return; }
   box.value = ''; loadLeadMessages(currentLeadId, channel); loadLeadTimeline(currentLeadId);
 }
@@ -1811,10 +1867,12 @@ async function sendAssistantJsonMessage() {
       conversation_history: assistantConversationHistory.filter(m => m.role !== 'system')
     });
     
-    let replyText = data.reply || 'Failed to generate JSON template.';
+    let replyText = data.reply || data.error || 'Failed to generate JSON template.';
     try {
-      const parsed = JSON.parse(replyText);
-      replyText = '<pre style="background:var(--bg2);padding:8px;border-radius:8px;overflow-x:auto;font-size:11px;">' + escapeHtml(JSON.stringify(parsed, null, 2)) + '</pre>';
+      const parsed = data.interactive || JSON.parse(replyText);
+      const jsonStr = JSON.stringify(parsed, null, 2);
+      replyText = '<pre style="background:var(--bg2);padding:8px;border-radius:8px;overflow-x:auto;font-size:11px;">' + escapeHtml(jsonStr) + '</pre>'
+        + '<button class="btn btn-ghost btn-xs" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);showToast(\'Copied — paste into the WhatsApp reply box to send\')">📋 Copy</button>';
     } catch(e) {}
     
     // Add AI response to history and UI

@@ -1511,6 +1511,18 @@ function openReplyModal(phone, originalMessage) {
   document.getElementById('replyModal').classList.add('open');
 }
 
+// Pulls JSON text out of the assistant's rendered <pre> and drops it into the
+// reply modal's JSON tab (opening the modal in JSON mode if it's already open
+// for a lead), so a generated button/list/cta_url message can be sent as-is.
+function useGeneratedJsonInReply(preId) {
+  const pre = document.getElementById(preId);
+  if (!pre) return;
+  if (!replyTargetPhone) { showToast('Open a reply to a contact first, then use this JSON', true); return; }
+  document.getElementById('replyJsonInput').value = pre.textContent;
+  setReplyMode('json');
+  showToast('Loaded into the reply box — review, then hit Send');
+}
+
 async function sendReply() {
   if (!replyTargetPhone) return;
   const btn = document.getElementById('replySendBtn');
@@ -1863,20 +1875,23 @@ async function sendAssistantJsonMessage() {
   // Save history
   await saveAssistantHistory();
   
-  const systemPrompt = 'You are a JSON template generator. Return ONLY valid JSON. No explanations, no markdown, no extra text. Generate a message template based on the user request.';
-  
+  // No system_prompt override here — leave it unset so the backend uses its
+  // default, which spells out Meta's actual button/list/cta_url JSON shapes
+  // and limits (see DEFAULT_JSON_SYSTEM_PROMPT in src/routes/chatbot.js),
+  // and the response is validated against those limits before coming back.
   try {
     const data = await apiCall('/api/chatbot/assistant-json-message', 'POST', { 
-      message: msg, 
-      system_prompt: systemPrompt,
+      message: msg,
       conversation_history: assistantConversationHistory.filter(m => m.role !== 'system')
     });
     
-    let replyText = data.reply || 'Failed to generate JSON template.';
-    try {
-      const parsed = JSON.parse(replyText);
-      replyText = '<pre style="background:var(--bg2);padding:8px;border-radius:8px;overflow-x:auto;font-size:11px;">' + escapeHtml(JSON.stringify(parsed, null, 2)) + '</pre>';
-    } catch(e) {}
+    let replyText = data.reply || data.error || 'Failed to generate JSON template.';
+    if (data.interactive) {
+      const jsonStr = JSON.stringify(data.interactive, null, 2);
+      const id = 'json_' + Date.now();
+      replyText = '<pre id="' + id + '" style="background:var(--bg2);padding:8px;border-radius:8px;overflow-x:auto;font-size:11px;">' + escapeHtml(jsonStr) + '</pre>'
+        + '<button class="btn btn-ghost btn-xs" onclick="useGeneratedJsonInReply(\'' + id + '\')">Use in reply →</button>';
+    }
     
     // Add AI response to history and UI
     assistantConversationHistory.push({ role: 'assistant', content: replyText });
