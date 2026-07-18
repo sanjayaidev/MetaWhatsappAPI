@@ -85,7 +85,12 @@ async function handleEmailAuth() {
     if (error) { showAuthError(error.message); }
     else if (data.session) {
       localStorage.setItem('supabase_token', data.session.access_token);
-      window.location.href = '/dashboard.html';
+      // The Android app's WebView loads this page with ?client=android and
+      // watches for navigation away from /login.html as its "login done"
+      // signal, then pulls the token via evaluateJavascript. Desktop keeps
+      // going to /dashboard.html as before.
+      const params = new URLSearchParams(window.location.search);
+      window.location.href = params.get('client') === 'android' ? '/mobile.html' : '/dashboard.html';
     }
   } catch (err) { showAuthError(err.message); }
   btn.textContent = 'Sign In →'; btn.disabled = false;

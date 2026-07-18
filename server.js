@@ -13,6 +13,7 @@ const path = require('path');
 const fetch = require('node-fetch');
 const FormData = require('form-data');
 const multer = require('multer');
+const { sendNewMessagePush } = require('./src/push');
 const aiChatRouter = require('./src/routes/ai-chat');
 const { generateReply, DEFAULT_MODEL: DEFAULT_AI_MODEL } = aiChatRouter;
 const { encryptToken, decryptToken } = require('./src/crypto');
@@ -1171,6 +1172,42 @@ app.post('/api/messages/received/mark-read', verifyUser, async (req, res) => {
   res.json({ success: true });
 });
 
+// ================================================================
+// 10c. PUSH TOKEN REGISTRATION (Android app, FCM)
+// ================================================================
+// Called once after the WebView login succeeds and again whenever
+// Firebase rotates the token (FirebaseMessagingService.onNewToken).
+// Upsert on (user_id, fcm_token) so re-registering the same token is a
+// no-op rather than creating duplicate rows.
+app.post('/api/push/register-token', verifyUser, async (req, res) => {
+  const { fcm_token, platform } = req.body || {};
+  if (!fcm_token) return res.status(400).json({ error: 'fcm_token is required' });
+
+  const { error } = await supabase
+    .from('wb_device_tokens')
+    .upsert(
+      { user_id: req.user.id, fcm_token, platform: platform || 'android', updated_at: new Date().toISOString() },
+      { onConflict: 'user_id,fcm_token' }
+    );
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+// Called on logout so a signed-out device stops receiving pushes for
+// the account it just left.
+app.post('/api/push/unregister-token', verifyUser, async (req, res) => {
+  const { fcm_token } = req.body || {};
+  if (!fcm_token) return res.status(400).json({ error: 'fcm_token is required' });
+
+  const { error } = await supabase
+    .from('wb_device_tokens')
+    .delete()
+    .eq('user_id', req.user.id)
+    .eq('fcm_token', fcm_token);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
 // Manual free-form reply, only valid within WhatsApp's 24-hour customer
 // service window (https://developers.facebook.com/docs/whatsapp/...).
 // We use a 22-hour cutoff here — a safety margin under Meta's real 24h
@@ -1872,6 +1909,15 @@ async function handleIncomingMessage(value, msg) {
   } catch (e) {
     console.error('[webhook] failed to store inbound message:', e.message);
   }
+
+  // Nudge any registered Android devices for this user. Fire-and-forget —
+  // a push failure shouldn't block or fail webhook processing, and the
+  // 30s poll in mobile.html is still there as a fallback either way.
+  sendNewMessagePush(supabase, waAccount.user_id, {
+    phone: msg.from,
+    contactName,
+    body: message_body
+  }).catch(e => console.error('[webhook] push notification failed:', e.message));
 
   // Only plain text messages trigger the AI auto-reply.
   if (msg.type !== 'text' || !msg.text?.body) return;
