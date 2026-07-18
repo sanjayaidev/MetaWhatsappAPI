@@ -1997,8 +1997,8 @@ async function selectTemplate(templateId) {
   const tpl = state.approvedTemplates.find(t => t.id === templateId);
   if (!tpl) return;
 
-  const matches = tpl.body.match(/\{\{(\d+)\}\}/g) || [];
-  const placeholders = [...new Set(matches.map(m => m.match(/\{(\d+)\}/)?.[1] || ''))].filter(Boolean);
+  const matches = tpl.body.match(/\{\{([^}]+)\}\}/g) || [];
+  const placeholders = [...new Set(matches.map(m => m.match(/\{\{([^}]+)\}\}/)?.[1] || ''))].filter(Boolean);
 
   const body = document.getElementById('tplModalBody');
   const sub = document.getElementById('tplModalSub');
@@ -2006,7 +2006,7 @@ async function selectTemplate(templateId) {
   let fieldsHtml = placeholders.map(p => `
     <div class="placeholder-row">
       <span class="tag">{{${p}}}</span>
-      <input type="text" id="tplField_${p}" placeholder="Enter value for {{${p}}}..." />
+      <input type="text" id="tplField_${p.replace(/[^a-zA-Z0-9_-]/g, '_')}" placeholder="Enter value for {{${p}}}..." />
     </div>
   `).join('');
 
@@ -2015,7 +2015,7 @@ async function selectTemplate(templateId) {
   }
 
   body.innerHTML = `
-    <div class="tpl-preview">${tpl.body.replace(/\{\{(\d+)\}\}/g, (m, p) => `<span style="color:var(--purple);font-weight:600;">{{${p}}}</span>`)}</div>
+    <div class="tpl-preview">${tpl.body.replace(/\{\{([^}]+)\}\}/g, (m, p) => `<span style="color:var(--purple);font-weight:600;">{{${p}}}</span>`)}</div>
     ${fieldsHtml}
     <div class="modal-actions">
       <button class="cancel" onclick="closeTemplateModal()">Cancel</button>
@@ -2033,12 +2033,12 @@ async function sendTemplateMessage(templateId) {
   const tpl = state.approvedTemplates.find(t => t.id === templateId);
   if (!tpl) return;
 
-  const matches = tpl.body.match(/\{\{(\d+)\}\}/g) || [];
-  const placeholders = [...new Set(matches.map(m => m.match(/\{(\d+)\}/)?.[1] || ''))].filter(Boolean);
+  const matches = tpl.body.match(/\{\{([^}]+)\}\}/g) || [];
+  const placeholders = [...new Set(matches.map(m => m.match(/\{\{([^}]+)\}\}/)?.[1] || ''))].filter(Boolean);
 
   const values = {};
   for (const p of placeholders) {
-    const input = document.getElementById(`tplField_${p}`);
+    const input = document.getElementById(`tplField_${p.replace(/[^a-zA-Z0-9_-]/g, '_')}`);
     if (input) values[p] = input.value.trim() || `[${p}]`;
     else values[p] = `[${p}]`;
   }
