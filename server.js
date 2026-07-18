@@ -750,7 +750,22 @@ app.post('/api/contacts', verifyUser, async (req, res) => {
   
   const { error } = await supabase.from('wb_contacts').insert(rows);
   if (error) return res.status(500).json({ error: error.message });
-  
+
+  // Feed names into the persistent phone->name directory too, but only
+  // for numbers that don't already have one saved — a campaign list
+  // shouldn't be able to overwrite a name someone already saved from the
+  // inbox (e.g. a blank/wrong name column in a sloppy CSV upload).
+  // ignoreDuplicates: true means "insert if missing, skip if the
+  // (user_id, phone) pair already exists" rather than overwriting.
+  try {
+    await supabase.from('wb_known_contacts').upsert(
+      rows.map(r => ({ user_id: r.user_id, phone: r.phone, name: r.name, updated_at: new Date().toISOString() })),
+      { onConflict: 'user_id,phone', ignoreDuplicates: true }
+    );
+  } catch (e) {
+    console.error('[contacts] failed to update known-contacts directory:', e.message);
+  }
+
   // Return saved contacts
   const { data } = await supabase
     .from('wb_contacts')
@@ -759,6 +774,28 @@ app.post('/api/contacts', verifyUser, async (req, res) => {
     .order('created_at', { ascending: true });
   
   res.json({ success: true, contacts: data || [] });
+});
+
+// Persistent phone->name directory, used for Inbox sender display and
+// never touched by the campaign upload/delete cycle above. This one DOES
+// overwrite on conflict — unlike the campaign-upload feed-in, this is a
+// deliberate, explicit action from the person using the app, so it should
+// win over whatever a stale campaign list previously guessed at.
+app.post('/api/known-contacts', verifyUser, async (req, res) => {
+  const { phone, name } = req.body || {};
+  if (!phone || !name?.trim()) return res.status(400).json({ error: 'phone and name are required' });
+
+  const { error } = await supabase.from('wb_known_contacts').upsert(
+    {
+      user_id: req.user.id,
+      phone: String(phone).replace(/\D/g, ''),
+      name: name.trim(),
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: 'user_id,phone' }
+  );
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
 });
 
 // ================================================================
@@ -1880,11 +1917,14 @@ async function handleIncomingMessage(value, msg) {
     .single();
   if (!waAccount) return;
 
-  // Try to match the sender to a saved contact so the Received tab can show a name.
+  // Try to match the sender to a saved name so the Received tab can show
+  // one. Uses wb_known_contacts (persistent) rather than wb_contacts
+  // (a campaign audience list that gets fully wiped and replaced every
+  // time a new contact list is uploaded, or once a campaign completes).
   let contactName = '';
   try {
     const { data: contact } = await supabase
-      .from('wb_contacts')
+      .from('wb_known_contacts')
       .select('name')
       .eq('user_id', waAccount.user_id)
       .eq('phone', msg.from)

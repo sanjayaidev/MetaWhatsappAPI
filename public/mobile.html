@@ -1085,6 +1085,7 @@
           <div class="name" id="threadName">Contact</div>
           <div class="status" id="threadStatus">via WhatsApp</div>
         </div>
+        <button class="icon-btn" id="saveNameBtn" title="Save name" onclick="saveContactName()" style="display:none;">✏️</button>
         <button class="icon-btn" style="font-size:16px;">⋯</button>
       </div>
       <div class="msg-area" id="msgArea"></div>
@@ -1494,6 +1495,10 @@ function renderThread() {
   const avatar = getAvatar(c.phone);
   document.getElementById('threadAvatar').innerHTML = avatar ? `<img src="${avatar}" alt="avatar" />` : c.name.charAt(0).toUpperCase();
   document.getElementById('threadName').textContent = c.name;
+  // c.name falls back to the phone number itself when the server has no
+  // saved name for this sender (see API.getMessages), so that's the
+  // signal for "nothing saved yet, show the save-name button".
+  document.getElementById('saveNameBtn').style.display = (c.name === c.phone) ? '' : 'none';
   document.getElementById('threadStatus').textContent = c.messages.length > 0 ? 'Last message: ' + formatTime(c.messages[c.messages.length-1].at) : 'via WhatsApp';
 
   const area = document.getElementById('msgArea');
@@ -2228,6 +2233,25 @@ async function manualRefresh() {
     await loadChats();
   } finally {
     btn.classList.remove('spinning');
+  }
+}
+
+// Saves a display name for the currently open thread's sender into the
+// persistent phone->name directory (wb_known_contacts) — separate from
+// the campaign contact list, so it survives future campaign uploads.
+async function saveContactName() {
+  const c = state.conversations.find(x => x.phone === state.currentPhone);
+  if (!c) return;
+  const name = prompt('Save name for ' + c.phone);
+  if (!name || !name.trim()) return;
+
+  const res = await apiCall('/api/known-contacts', 'POST', { phone: c.phone, name: name.trim() });
+  if (res.success) {
+    c.name = name.trim();
+    renderThread();
+    renderChatList();
+  } else {
+    alert('Could not save name. Please try again.');
   }
 }
 
