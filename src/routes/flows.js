@@ -7,6 +7,25 @@ module.exports = function flowsRouter(deps) {
   const { getValidGoogleAccessToken } = require('../google-auth')(deps);
   const router = express.Router();
 
+  // Postgrest/Supabase errors carry code/details/hint that error.message alone
+  // drops (e.g. 42703 undefined column, 23502 not-null violation, 23503 FK
+  // violation, 23505 unique violation). Log all of it server-side so a schema
+  // mismatch is diagnosable from logs without reproducing the request.
+  function logDbError(context, error) {
+    if (!error) return;
+    console.error(`[DB ERROR] ${context}:`, {
+      message: error.message, code: error.code, details: error.details, hint: error.hint
+    });
+  }
+
+  // Pages allowed as an OAuth return target, keyed by the short name the
+  // frontend passes in ?return_to=. Whitelisted (rather than trusting an
+  // arbitrary path) so the callback can't be used as an open redirect.
+  const OAUTH_RETURN_PAGES = {
+    crm: '/crm.html?tab=flows',
+    'chatbot-builder': '/chatbot-builder.html?view=integrations'
+  };
+
   // GET /api/flows — list all flows for user
   router.get('/', verifyUser, async (req, res) => {
     const { data, error } = await supabase.from('wb_flows').select('*').eq('user_id', req.user.id).order('created_at', { ascending: false });
@@ -91,21 +110,28 @@ module.exports = function flowsRouter(deps) {
     const state = crypto.randomBytes(16).toString('hex');
     console.log('[OAuth URL] Generating state:', state, 'for user:', req.user.id);
 
+    // Which page should the callback bounce back to when this finishes?
+    // Whitelisted against OAUTH_RETURN_PAGES — anything unrecognized falls
+    // back to the CRM flows tab rather than trusting an arbitrary path.
+    const returnToKey = OAUTH_RETURN_PAGES[req.query.return_to] ? req.query.return_to : 'crm';
+
     // Store pending state in its own dedicated column (unique-constrained).
     // NOTE: this upsert on (user_id, service) will overwrite any existing row for this
     // service, including a previously-connected token, if the user restarts the flow
     // before finishing it. Acceptable for now, but worth revisiting if that matters.
+    // return_to rides in metadata (jsonb, no schema change needed) and is read
+    // back by the callback below.
     const { error: upsertError } = await supabase.from('wb_oauth_tokens').upsert({
       user_id: req.user.id,
       service,
       token_type: 'oauth2',
       state,
       access_token_enc: null,
-      metadata: {}
+      metadata: { return_to: returnToKey }
     }, { onConflict: 'user_id,service' });
 
     if (upsertError) {
-      console.error('[OAuth URL] Upsert failed:', upsertError);
+      logDbError('oauth-url upsert wb_oauth_tokens', upsertError);
       return res.status(500).json({ error: 'Failed to initiate OAuth' });
     }
 
@@ -122,6 +148,7 @@ module.exports = function flowsRouter(deps) {
         access_type: 'offline', prompt: 'consent',
         scope: ['https://www.googleapis.com/auth/spreadsheets.readonly', 
                 'https://www.googleapis.com/auth/drive.metadata.readonly',
+                'https://www.googleapis.com/auth/documents.readonly',
                 'https://www.googleapis.com/auth/gmail.send',
                 'https://www.googleapis.com/auth/userinfo.email'].join(' '),
         state
@@ -155,7 +182,8 @@ module.exports = function flowsRouter(deps) {
     // Find pending connection — lookup on the dedicated, unique, indexed state column
     const { data: pending, error: lookupError } = await supabase.from('wb_oauth_tokens')
       .select('*').eq('service', service).eq('state', state).single();
-    console.log('[OAuth Lookup] found:', !!pending, 'error:', lookupError);
+    if (lookupError) logDbError('oauth callback lookup wb_oauth_tokens', lookupError);
+    console.log('[OAuth Lookup] found:', !!pending, 'error:', lookupError?.message);
     if (!pending) return res.status(400).send('Could not match OAuth state');
 
     try {
@@ -190,20 +218,31 @@ module.exports = function flowsRouter(deps) {
         profileData = { pages: pagesData.data || [] };
       }
 
+      // Read back before this update overwrites metadata with the profile payload.
+      const returnToKey = pending.metadata?.return_to;
+
       // Store tokens. Rotate `state` to a fresh unused value rather than nulling it,
       // since the column is NOT NULL and unique-constrained — this just invalidates
       // the consumed state so it can't be reused.
-      await supabase.from('wb_oauth_tokens').update({
+      const { error: updateError } = await supabase.from('wb_oauth_tokens').update({
         access_token_enc: encryptToken(tokenData.access_token),
         refresh_token_enc: tokenData.refresh_token ? encryptToken(tokenData.refresh_token) : null,
         expires_at: tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000).toISOString() : null,
-        scopes: tokenData.scope?.split(',') || [],
+        // Google's token response returns `scope` as a SPACE-delimited string,
+        // not comma-delimited — splitting on ',' silently produced a single
+        // one-element array, so every scope-membership check downstream
+        // (e.g. "does this connection have Docs access?") was unreliable.
+        scopes: tokenData.scope?.split(' ') || [],
         metadata: { email: profileData.email, ...profileData },
         state: crypto.randomBytes(16).toString('hex'),
         updated_at: new Date().toISOString()
       }).eq('id', pending.id);
 
-      res.redirect('/crm.html?tab=flows&oauth=connected');
+      if (updateError) logDbError('oauth callback update wb_oauth_tokens', updateError);
+
+      const returnPath = OAUTH_RETURN_PAGES[returnToKey] || OAUTH_RETURN_PAGES.crm;
+      const separator = returnPath.includes('?') ? '&' : '?';
+      res.redirect(`${returnPath}${separator}oauth=connected`);
     } catch (err) {
       res.status(500).send(`OAuth connection failed: ${err.message}`);
     }
@@ -214,15 +253,18 @@ module.exports = function flowsRouter(deps) {
     const { service } = req.params;
     const { data, error } = await supabase.from('wb_oauth_tokens')
       .select('*').eq('user_id', req.user.id).eq('service', service).single();
+    if (error && error.code !== 'PGRST116') logDbError('status lookup wb_oauth_tokens', error); // PGRST116 = no rows, expected when never connected
     if (error || !data) return res.json({ connected: false });
 
     // Decrypt and return masked token info
     const isConnected = !!data.access_token_enc;
+    const scopes = data.scopes || [];
     res.json({
       connected: isConnected,
       email: data.metadata?.email,
       expires_at: data.expires_at,
-      scopes: data.scopes,
+      scopes,
+      has_docs_scope: scopes.includes('https://www.googleapis.com/auth/documents.readonly'),
       pages: data.metadata?.pages || []
     });
   });
@@ -300,12 +342,82 @@ module.exports = function flowsRouter(deps) {
     }
   });
 
+  // GET /api/oauth/google/docs — list Google Docs accessible to user
+  router.get('/google/docs', verifyUser, async (req, res) => {
+    let accessToken;
+    try {
+      accessToken = await getValidGoogleAccessToken(req.user.id);
+    } catch (err) {
+      return res.status(401).json({ error: err.message });
+    }
+
+    try {
+      const docsRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.document'&fields=files(id,name,mimeType,modifiedTime)&spaces=drive`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const docsData = await docsRes.json();
+      if (!docsRes.ok) throw new Error(docsData.error?.message || 'Failed to fetch docs');
+      const docs = (docsData.files || []).filter(f => f.mimeType === 'application/vnd.google-apps.document');
+      res.json({ docs });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/oauth/google/doc-content/:docId — fetch a doc's plain text for use
+  // as AI grounding context. Requires the documents.readonly scope granted at
+  // connect time — a connection made before that scope existed will 403 here
+  // until the user disconnects and reconnects Google.
+  router.get('/google/doc-content/:docId', verifyUser, async (req, res) => {
+    let accessToken;
+    try {
+      accessToken = await getValidGoogleAccessToken(req.user.id);
+    } catch (err) {
+      return res.status(401).json({ error: err.message });
+    }
+    const { docId } = req.params;
+
+    try {
+      const docRes = await fetch(`https://docs.googleapis.com/v1/documents/${docId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const docData = await docRes.json();
+      if (!docRes.ok) {
+        // Docs API 403s with PERMISSION_DENIED both for "wrong doc owner" and
+        // "token doesn't have documents.readonly" — the latter is by far the
+        // more common cause given this scope only just got added, so say so.
+        const message = docData.error?.message || 'Failed to fetch document';
+        const status = docRes.status === 403 ? 403 : 500;
+        return res.status(status).json({
+          error: status === 403
+            ? `${message} — if this document previously worked, your Google connection may predate Docs access; disconnect and reconnect Google to grant it.`
+            : message
+        });
+      }
+
+      // Docs API returns structured content (paragraphs -> elements -> textRun);
+      // flatten to plain text for use as AI context.
+      const text = (docData.body?.content || [])
+        .map(block => (block.paragraph?.elements || [])
+          .map(el => el.textRun?.content || '')
+          .join(''))
+        .join('');
+
+      res.json({ id: docId, title: docData.title, text });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/oauth/:service/disconnect — revoke OAuth connection
   router.post('/:service/disconnect', verifyUser, async (req, res) => {
     const { service } = req.params;
     const { error } = await supabase.from('wb_oauth_tokens').delete()
       .eq('user_id', req.user.id).eq('service', service);
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      logDbError('disconnect delete wb_oauth_tokens', error);
+      return res.status(500).json({ error: error.message });
+    }
     res.json({ success: true });
   });
 
