@@ -921,7 +921,7 @@ async function loadIntegrationsStatus(){
 // under (e.g. from supabase.auth.getSession()) so this page picks it up
 // automatically once it's served from the same origin as the dashboard.
 const API_BASE = '/api';
-const AUTH_TOKEN_STORAGE_KEY = 'wb_access_token'; // TODO: match your existing auth storage key
+const AUTH_TOKEN_STORAGE_KEY = 'supabase_token'; // matches login.html storage key
 let apiOnline = false;
 
 function getAuthToken(){ return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || ''; }
