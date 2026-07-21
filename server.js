@@ -35,6 +35,7 @@ const chatbotRouter = require('./src/routes/chatbot');
 const billingRouter = require('./src/routes/billing');
 const webhooksInboundRouter = require('./src/routes/webhooks-inbound');
 const sheetWatchersRouter = require('./src/routes/sheet-watchers');
+const botBuilderRouter = require('./src/routes/bot-builder');
 const { startSheetPoller } = require('./src/sheet-poller');
 const createChannelSender = require('./src/channel-send');
 
@@ -2363,6 +2364,10 @@ app.use('/api/billing', billingRouter(crmDeps));
 // below via startSheetPoller; this was previously coded but never mounted,
 // so every request to it 404'd and the frontend tab always showed empty.
 app.use('/api/sheet-watchers', verifyUser, sheetWatchersRouter(crmDeps));
+
+// /api/bot-builder — Chatbot builder UI routes (rules & templates)
+// Every route here needs a logged-in user, so verifyUser is applied at mount level.
+app.use('/api/bot-builder', verifyUser, botBuilderRouter(crmDeps));
 
 // Public lead-capture endpoints (Google Sheet Apps Script, generic form tools)
 // and the authenticated "generate my webhook URL" endpoint that feeds them.
