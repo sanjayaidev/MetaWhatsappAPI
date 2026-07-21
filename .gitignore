@@ -1,3 +1,3 @@
-(public/chatbot-login.html)
-
 (public/chatbot-builder.html)
+
+Since only a single HTML file was modified and there are no build artifacts, dependency directories, or temporary files in the changes, no additional ignore rules are needed.
