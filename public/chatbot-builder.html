@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chatbot Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --green:#25D366; --green-dark:#128C7E; --green-light:#e4f8ec;
+    --ink:#0f1a17; --ink-2:#37473f; --muted:#6b7b73;
+    --bg:#f5f8f6; --panel:#ffffff; --line:#e1e9e4;
+    --radius:12px; --radius-sm:8px;
+    --trigger:#0d9488; --trigger-bg:#e8f8f6;
+    --action:#128C7E; --action-bg:#e4f8ec;
+    --ai:#7c4fd6; --ai-bg:#f1ecfc;
+    --cond:#c2760a; --cond-bg:#fdf1de;
+    --follow:#d1495b; --follow-bg:#fbe9eb;
+    --shadow:0 1px 2px rgba(15,26,23,.04), 0 8px 24px rgba(15,26,23,.05);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--ink);}
+  h1,h2,h3,.brand,.nav-item,.block-title,.btn{font-family:'Sora',sans-serif;}
+  code,pre,.mono{font-family:'JetBrains Mono',monospace;}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
+  input,select,textarea{font-family:inherit;font-size:13.5px;color:var(--ink);}
+
+  .app{display:grid;grid-template-columns:220px 1fr;min-height:100vh;}
+
+  /* RAIL */
+  .rail{background:var(--panel);border-right:1px solid var(--line);padding:20px 14px;display:flex;flex-direction:column;gap:22px;position:sticky;top:0;height:100vh;}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;padding:0 6px;}
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px var(--green-light);}
+  .nav{display:flex;flex-direction:column;gap:3px;}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--radius-sm);font-size:13.5px;font-weight:600;color:var(--muted);transition:background .15s,color .15s;text-align:left;width:100%;}
+  .nav-item:hover{background:var(--bg);color:var(--ink);}
+  .nav-item.active{background:var(--green-light);color:var(--green-dark);}
+  .nav-item .ic{width:18px;text-align:center;font-size:14px;}
+  .rail-foot{margin-top:auto;}
+  .conn-badge{border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px;font-size:11.5px;color:var(--muted);line-height:1.5;}
+  .conn-badge .row{display:flex;align-items:center;gap:6px;font-weight:700;color:var(--ink);font-size:12.5px;}
+  .conn-badge .pulse{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px var(--green-light);flex-shrink:0;}
+
+  /* MAIN */
+  .workspace{padding:26px 34px 60px;max-width:1180px;}
+  .view{display:none;}
+  .view.active{display:block;}
+  .view-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px;}
+  .view-head h1{font-size:21px;font-weight:700;}
+  .view-head p{color:var(--muted);font-size:13px;margin-top:3px;}
+  .btn{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;padding:9px 16px;border-radius:var(--radius-sm);transition:filter .15s,background .15s;}
+  .btn-primary{background:var(--green-dark);color:#fff;}
+  .btn-primary:hover{filter:brightness(1.08);}
+  .btn-ghost{background:var(--panel);border:1px solid var(--line);color:var(--ink-2);}
+  .btn-ghost:hover{background:var(--bg);}
+  .btn-sm{padding:6px 11px;font-size:12px;}
+  .btn-danger{color:var(--follow);}
+
+  /* RULES LAYOUT */
+  .rules-layout{display:grid;grid-template-columns:270px 1fr;gap:20px;align-items:start;}
+  .rule-list{display:flex;flex-direction:column;gap:8px;}
+  .rule-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:12px 13px;cursor:pointer;transition:border-color .15s,box-shadow .15s;}
+  .rule-card:hover{border-color:#c6dccf;}
+  .rule-card.selected{border-color:var(--green-dark);box-shadow:0 0 0 1px var(--green-dark);}
+  .rule-card .kw-row{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:7px;}
+  .kw-chip{background:var(--trigger-bg);color:var(--trigger);font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px;}
+  .rule-card .meta{display:flex;align-items:center;justify-content:space-between;font-size:11.5px;color:var(--muted);}
+  .rule-card .action-tag{display:inline-flex;align-items:center;gap:4px;font-weight:700;}
+  .rule-card .action-tag.tpl{color:var(--action);}
+  .rule-card .action-tag.ai{color:var(--ai);}
+
+  /* BLOCK CHAIN */
+  .chain{position:relative;padding-left:26px;}
+  .chain::before{content:"";position:absolute;left:9px;top:8px;bottom:8px;width:2px;background:var(--line);}
+  .block{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;margin-bottom:14px;box-shadow:var(--shadow);}
+  .block::before{content:"";position:absolute;left:-21.5px;top:22px;width:11px;height:11px;border-radius:50%;background:var(--panel);border:2.5px solid var(--dot,var(--green-dark));}
+  .block-trigger{--dot:var(--trigger);}
+  .block-action{--dot:var(--action);}
+  .block-ai{--dot:var(--ai);}
+  .block-cond{--dot:var(--cond);}
+  .block-follow{--dot:var(--follow);}
+  .block-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+  .block-title{display:flex;align-items:center;gap:9px;font-size:13.5px;font-weight:700;}
+  .block-title .badge-ic{width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;}
+  .block-trigger .badge-ic{background:var(--trigger-bg);color:var(--trigger);}
+  .block-action .badge-ic{background:var(--action-bg);color:var(--action);}
+  .block-ai .badge-ic{background:var(--ai-bg);color:var(--ai);}
+  .block-cond .badge-ic{background:var(--cond-bg);color:var(--cond);}
+  .block-follow .badge-ic{background:var(--follow-bg);color:var(--follow);}
+  .block-sub{font-size:11.5px;color:var(--muted);font-weight:500;}
+
+  .field{margin-bottom:12px;}
+  .field:last-child{margin-bottom:0;}
+  .field label{display:block;font-size:11.5px;font-weight:700;color:var(--ink-2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.3px;}
+  .field input[type=text],.field input[type=number],.field input[type=url],.field input[type=tel],.field select,.field textarea{
+    width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:var(--bg);outline:none;transition:border-color .15s;
+  }
+  .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--green-dark);background:#fff;}
+  .field textarea{resize:vertical;min-height:60px;}
+  .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .hint{font-size:11px;color:var(--muted);margin-top:5px;}
+
+  .tag-input{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--bg);}
+  .tag{display:inline-flex;align-items:center;gap:6px;background:var(--trigger-bg);color:var(--trigger);font-size:12px;font-weight:700;padding:4px 6px 4px 10px;border-radius:99px;}
+  .tag button{font-size:13px;line-height:1;opacity:.7;}
+  .tag button:hover{opacity:1;}
+  .tag-input input{border:none;background:none;flex:1;min-width:100px;padding:4px;}
+  .tag-input input:focus{outline:none;}
+
+  .seg{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px;}
+  .seg button{padding:7px 13px;font-size:12.5px;font-weight:700;border-radius:7px;color:var(--muted);}
+  .seg button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(15,26,23,.08);}
+
+  .type-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px;}
+  .type-opt{border:1.5px solid var(--line);border-radius:9px;padding:10px 6px;text-align:center;font-size:11px;font-weight:700;color:var(--muted);transition:all .15s;}
+  .type-opt .ic{display:block;font-size:16px;margin-bottom:4px;}
+  .type-opt:hover{border-color:#c6dccf;}
+  .type-opt.on{border-color:var(--action);background:var(--action-bg);color:var(--action);}
+
+  .split{display:grid;grid-template-columns:1.15fr .85fr;gap:20px;align-items:start;}
+  .json-panel{background:#0f1a17;border-radius:var(--radius);padding:16px 18px;position:sticky;top:26px;}
+  .json-panel .jp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+  .json-panel .jp-head span{color:#9fd4c8;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
+  .json-panel pre{color:#d7ecdf;font-size:12px;line-height:1.65;white-space:pre-wrap;word-break:break-word;}
+  .json-panel .k{color:#7fd6b8;} .json-panel .s{color:#f4c99b;}
+
+  .opt-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+  .opt-row input{flex:1;}
+  .opt-row .rm{color:var(--follow);font-size:13px;padding:6px;flex-shrink:0;}
+  .add-row{font-size:12px;font-weight:700;color:var(--action);display:inline-flex;align-items:center;gap:5px;padding:6px 0;}
+
+  .cond-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:8px;align-items:center;margin-bottom:9px;padding:10px;background:var(--bg);border-radius:8px;}
+  .cond-row select,.cond-row input{padding:7px 9px;font-size:12.5px;}
+  .cond-row .rm{color:var(--follow);font-size:13px;padding:4px;}
+  .cond-else{display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;color:var(--ink-2);margin-top:10px;}
+  .cond-else select{padding:7px 9px;font-size:12.5px;flex:1;max-width:220px;}
+
+  .switch{position:relative;width:38px;height:22px;border-radius:99px;background:var(--line);flex-shrink:0;transition:background .15s;}
+  .switch::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.2);}
+  .switch.on{background:var(--follow);}
+  .switch.on::after{transform:translateX(16px);}
+  .follow-toggle{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+  .follow-toggle .lbl{font-size:12.5px;font-weight:700;color:var(--ink-2);}
+  .follow-body{transition:opacity .15s;}
+  .follow-body.disabled{opacity:.4;pointer-events:none;}
+
+  .empty{background:var(--panel);border:1.5px dashed var(--line);border-radius:var(--radius);padding:44px 24px;text-align:center;color:var(--muted);}
+  .empty .ic{font-size:26px;margin-bottom:10px;}
+  .empty h3{font-size:14px;color:var(--ink);margin-bottom:5px;font-family:'Sora',sans-serif;}
+  .empty p{font-size:12.5px;max-width:280px;margin:0 auto 14px;line-height:1.6;}
+
+  /* TEMPLATES VIEW */
+  .tpl-layout{display:grid;grid-template-columns:230px 1fr;gap:20px;align-items:start;}
+  .tpl-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 12px;cursor:pointer;margin-bottom:8px;transition:border-color .15s;}
+  .tpl-card:hover{border-color:#c6dccf;}
+  .tpl-card.selected{border-color:var(--action);box-shadow:0 0 0 1px var(--action);}
+  .tpl-card .name{font-size:13px;font-weight:700;margin-bottom:3px;}
+  .tpl-card .type{font-size:11px;color:var(--muted);text-transform:capitalize;}
+
+  /* INTEGRATIONS */
+  .int-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;}
+  .int-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;}
+  .int-card .top{display:flex;align-items:center;gap:11px;margin-bottom:10px;}
+  .int-card .ic{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
+  .int-card h3{font-size:14px;}
+  .int-card p{font-size:12px;color:var(--muted);margin:8px 0 14px;line-height:1.55;}
+  .int-status{display:flex;align-items:center;justify-content:space-between;}
+  .status-pill{font-size:11px;font-weight:700;padding:4px 9px;border-radius:99px;}
+  .status-pill.off{background:#f1f4f2;color:var(--muted);}
+  .status-pill.on{background:var(--green-light);color:var(--green-dark);}
+
+  /* toast */
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(120%);background:var(--ink);color:#fff;font-size:12.5px;font-weight:600;padding:10px 18px;border-radius:99px;box-shadow:0 8px 24px rgba(0,0,0,.2);z-index:200;transition:transform .25s ease;display:flex;align-items:center;gap:8px;}
+  .toast.show{transform:translateX(-50%) translateY(0);}
+  .toast.err{background:var(--follow);}
+  .toast .dot2{width:6px;height:6px;border-radius:50%;background:var(--green);}
+  .toast.err .dot2{background:#fff;}
+
+  /* connection view */
+  .conn-status-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;}
+  .conn-status-card .left{display:flex;align-items:center;gap:12px;}
+  .conn-status-card .dot3{width:11px;height:11px;border-radius:50%;background:var(--line);flex-shrink:0;}
+  .conn-status-card .dot3.on{background:var(--green);box-shadow:0 0 0 4px var(--green-light);}
+  .conn-status-card .dot3.err{background:var(--follow);box-shadow:0 0 0 4px var(--follow-bg);}
+  .conn-status-card h3{font-size:14px;}
+  .conn-status-card p{font-size:12px;color:var(--muted);margin-top:2px;}
+  .conn-methods{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .conn-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px;}
+  .conn-card .m-head{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+  .conn-card .m-head .badge-ic{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:14px;background:var(--green-light);color:var(--green-dark);flex-shrink:0;}
+  .conn-card h3{font-size:14.5px;}
+  .conn-card .m-desc{font-size:12px;color:var(--muted);margin:8px 0 16px;line-height:1.6;}
+  .num-pick{border:1.5px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:border-color .15s;}
+  .num-pick:hover{border-color:#c6dccf;}
+  .num-pick.sel{border-color:var(--action);background:var(--action-bg);}
+  .num-pick .n-name{font-size:13px;font-weight:700;}
+  .num-pick .n-phone{font-size:11.5px;color:var(--muted);}
+  .num-pick .n-quality{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:99px;background:var(--green-light);color:var(--green-dark);}
+  .fb-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;background:#1877F2;color:#fff;font-weight:700;font-size:13.5px;padding:11px;border-radius:8px;}
+  .fb-btn:hover{filter:brightness(1.06);}
+  .fb-btn:disabled{opacity:.6;cursor:default;}
+  .field-err{border-color:var(--follow) !important;}
+  .form-err{font-size:12px;color:var(--follow);margin-top:8px;}
+
+  @media (max-width:900px){
+    .app{grid-template-columns:1fr;}
+    .rail{position:relative;height:auto;flex-direction:row;overflow-x:auto;align-items:center;}
+    .nav{flex-direction:row;}
+    .rail-foot{display:none;}
+    .rules-layout,.tpl-layout,.split{grid-template-columns:1fr;}
+    .json-panel{position:static;}
+    .conn-methods{grid-template-columns:1fr;}
+  }
+  @media (max-width:640px){
+    .workspace{padding:16px 14px 90px;}
+    .app{grid-template-columns:1fr;padding-bottom:58px;}
+    .rail{position:fixed;bottom:0;left:0;right:0;top:auto;height:58px;border-right:none;border-top:1px solid var(--line);z-index:50;padding:0 8px;justify-content:space-between;}
+    .brand{display:none;}
+    .rail-foot{display:none;}
+    .nav{flex:1;display:flex;justify-content:space-around;}
+    .nav-item{flex-direction:column;gap:2px;padding:6px 8px;font-size:9.5px;}
+    .nav-item .ic{font-size:16px;}
+    .view-head{flex-direction:column;align-items:flex-start;gap:10px;}
+    .view-head .btn{width:100%;justify-content:center;}
+    .type-grid{grid-template-columns:repeat(3,1fr);}
+    .field-row{grid-template-columns:1fr;}
+    .cond-row{grid-template-columns:1fr;}
+    .cond-row .rm{justify-self:end;}
+    .rules-layout,.tpl-layout{gap:14px;}
+    .block{padding:15px 16px;}
+    .chain{padding-left:22px;}
+    .block::before{left:-18.5px;}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- RAIL -->
+  <aside class="rail">
+    <div class="brand"><span class="dot"></span>Bot Builder</div>
+    <nav class="nav">
+      <button class="nav-item active" data-view="rules"><span class="ic">&#9881;</span>Rules</button>
+      <button class="nav-item" data-view="templates"><span class="ic">&#9776;</span>Templates</button>
+      <button class="nav-item" data-view="integrations"><span class="ic">&#128279;</span>Integrations</button>
+      <button class="nav-item" data-view="connection"><span class="ic">&#128246;</span>Connection</button>
+    </nav>
+    <div class="rail-foot">
+      <div class="conn-badge" id="rail-conn-badge">
+        <div class="row"><span class="pulse"></span>Checking connection&hellip;</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="workspace">
+
+    <!-- RULES VIEW -->
+    <section class="view active" id="view-rules">
+      <div class="view-head">
+        <div><h1>Rules</h1><p>Match a keyword, send a reply, add conditions and follow-ups.</p></div>
+        <button class="btn btn-primary" id="btn-new-rule">+ New rule</button>
+      </div>
+      <div class="rules-layout">
+        <div class="rule-list" id="rule-list"></div>
+        <div id="rule-editor"></div>
+      </div>
+    </section>
+
+    <!-- TEMPLATES VIEW -->
+    <section class="view" id="view-templates">
+      <div class="view-head">
+        <div><h1>Templates</h1><p>Same message shape, swap the content. Reused across rules.</p></div>
+        <button class="btn btn-primary" id="btn-new-template">+ New template</button>
+      </div>
+      <div class="tpl-layout">
+        <div id="tpl-list"></div>
+        <div id="tpl-editor"></div>
+      </div>
+    </section>
+
+    <!-- INTEGRATIONS VIEW -->
+    <section class="view" id="view-integrations">
+      <div class="view-head">
+        <div><h1>Integrations</h1><p>Pull data into triggers, conditions and AI context.</p></div>
+      </div>
+      <div class="int-grid" id="int-grid"></div>
+    </section>
+
+    <!-- CONNECTION VIEW -->
+    <section class="view" id="view-connection">
+      <div class="view-head">
+        <div><h1>Connection</h1><p>Same two ways to connect as the main dashboard.</p></div>
+      </div>
+      <div id="conn-status"></div>
+      <div class="conn-methods">
+        <div class="conn-card">
+          <div class="m-head"><span class="badge-ic">&#128273;</span><h3>Manual token</h3></div>
+          <p class="m-desc">Paste a WABA ID, phone number ID and permanent access token from Meta Business Manager. Good for testing or if you manage the app yourself.</p>
+          <div class="field"><label>WABA ID</label><input type="text" id="m-waba" placeholder="e.g. 102938475600" /></div>
+          <div class="field"><label>Access token</label><input type="text" id="m-token" placeholder="Permanent access token" /></div>
+          <div id="m-numbers"></div>
+          <div id="m-err"></div>
+          <button class="btn btn-primary" id="btn-manual-verify" style="width:100%;justify-content:center;margin-top:6px;">Verify numbers</button>
+        </div>
+        <div class="conn-card">
+          <div class="m-head"><span class="badge-ic">&#9889;</span><h3>Embedded signup</h3></div>
+          <p class="m-desc">One-click connect through Facebook — no copying IDs or tokens. Recommended for customers connecting their own number.</p>
+          <button class="fb-btn" id="btn-embedded-connect">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="#fff"><path d="M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06c0 5 3.66 9.15 8.44 9.94v-7.03H7.9v-2.91h2.54V9.85c0-2.5 1.49-3.89 3.78-3.89 1.1 0 2.24.2 2.24.2v2.46h-1.26c-1.24 0-1.63.77-1.63 1.56v1.88h2.78l-.44 2.91h-2.34V22c4.78-.79 8.44-4.94 8.44-9.94Z"/></svg>
+            Connect with Facebook
+          </button>
+          <p class="hint" style="margin-top:10px;">Uses Meta's Embedded Signup flow — opens a Facebook popup where the customer picks or creates their WABA.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ---------------- STATE ---------------- */
+let rules = [];
+let templates = [];
+let integrations = [
+  {id:'sheets', name:'Google Sheets', icon:'&#128203;', desc:'Look up prices, slots or FAQ rows, and log replies back to a sheet.', connected:true},
+  {id:'docs', name:'Google Docs', icon:'&#128196;', desc:'Feed a doc into the AI action as grounding context for answers.', connected:false},
+  {id:'shopify', name:'Shopify', icon:'&#128722;', desc:'Pull product cards, prices and order status into templates & conditions.', connected:false},
+];
+let selectedRuleId = null;
+let selectedTplId = null;
+let uid = () => Math.random().toString(36).slice(2,9);
+
+const TYPE_META = {
+  plaintext:{label:'Text', icon:'&#128172;'},
+  buttons:{label:'Buttons', icon:'&#128280;'},
+  list:{label:'List', icon:'&#128203;'},
+  cta:{label:'CTA / Call', icon:'&#128279;'},
+  product:{label:'Product', icon:'&#128230;'},
+};
+
+function newTemplate(type){
+  return {
+    id: uid(), name:'Untitled template', type: type||'plaintext',
+    header:{type:'none', value:''}, body:'', footer:'',
+    buttons:[{title:''}],
+    list:{buttonLabel:'View options', options:[{title:'',description:''}]},
+    cta:{label:'', kind:'url', value:''},
+    product:{image:'', title:'', price:'', body:''}
+  };
+}
+function newRule(){
+  return {
+    id:uid(), name:'New rule', keywords:[], matchType:'contains',
+    action:{type:'template', templateId:null, aiPrompt:'', aiFallback:"I'll get a teammate to help with that."},
+    conditions:[], elseTemplateId:null,
+    followUp:{enabled:false, hours:4, condition:'no_reply', templateId:null}
+  };
+}
+
+/* seed example data so the UI isn't empty on first look */
+(function seed(){
+  const t1 = newTemplate('list');
+  t1.name='Meeting slots'; t1.body='Pick a time that works for you.'; t1.footer='Reschedule anytime';
+  t1.list={buttonLabel:'Choose a time', options:[{title:'10:00 AM',description:'30 min call'},{title:'2:00 PM',description:'30 min call'}]};
+  const t2 = newTemplate('product');
+  t2.name='Featured product'; t2.product={image:'https://picsum.photos/seed/wa/300/300', title:'Wireless Earbuds Pro', price:'₹1,999', body:'Back in stock — free shipping this week.'};
+  const t3 = newTemplate('plaintext');
+  t3.name='Store hours'; t3.body="We're open 9 AM–9 PM, Monday to Saturday.";
+  templates.push(t1,t2,t3);
+
+  const r1 = newRule();
+  r1.name='Book a meeting'; r1.keywords=['book','schedule','meeting','appointment'];
+  r1.action={type:'template', templateId:t1.id};
+  r1.conditions=[{id:uid(), variable:'reply_option', operator:'equals', value:'10:00 AM', templateId:t3.id}];
+  r1.followUp={enabled:true, hours:4, condition:'no_reply', templateId:t3.id};
+  rules.push(r1);
+
+  const r2 = newRule();
+  r2.name='Product enquiry'; r2.keywords=['price','buy','product'];
+  r2.action={type:'ai', templateId:null, aiPrompt:'Answer questions about our earbuds using the connected product doc. Be concise, mention price and stock.', aiFallback:"Let me connect you to our team for that."};
+  rules.push(r2);
+
+  selectedRuleId = r1.id; selectedTplId = t1.id;
+})();
+
+/* ---------------- NAV ---------------- */
+document.querySelectorAll('.nav-item').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-'+btn.dataset.view).classList.add('active');
+    if(btn.dataset.view==='templates') renderTemplates();
+    if(btn.dataset.view==='integrations') renderIntegrations();
+    if(btn.dataset.view==='connection') renderConnection();
+  });
+});
+
+/* ---------------- RULES: LIST ---------------- */
+function renderRuleList(){
+  const el = document.getElementById('rule-list');
+  if(rules.length===0){
+    el.innerHTML = `<div class="empty"><div class="ic">&#129513;</div><h3>No rules yet</h3><p>A rule matches a keyword and decides what gets sent back.</p></div>`;
+    return;
+  }
+  el.innerHTML = rules.map(r=>{
+    const act = r.action.type==='template' ? `<span class="action-tag tpl">&#9654; ${templateName(r.action.templateId)}</span>` : `<span class="action-tag ai">&#10024; AI reply</span>`;
+    return `<div class="rule-card ${r.id===selectedRuleId?'selected':''}" data-id="${r.id}">
+      <div class="kw-row">${r.keywords.slice(0,3).map(k=>`<span class="kw-chip">${escapeHtml(k)}</span>`).join('')}${r.keywords.length>3?`<span class="kw-chip">+${r.keywords.length-3}</span>`:''}</div>
+      <div class="meta">${act}<span>${r.followUp.enabled?'&#9200; follow-up':''}</span></div>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.rule-card').forEach(c=>c.addEventListener('click',()=>{selectedRuleId=c.dataset.id; renderRuleList(); renderRuleEditor();}));
+}
+function templateName(id){ const t=templates.find(t=>t.id===id); return t? t.name : 'Choose template'; }
+
+document.getElementById('btn-new-rule').addEventListener('click',()=>{
+  const r = newRule(); rules.unshift(r); selectedRuleId=r.id; renderRuleList(); renderRuleEditor();
+});
+
+/* ---------------- RULES: EDITOR ---------------- */
+function renderRuleEditor(){
+  const wrap = document.getElementById('rule-editor');
+  const rule = rules.find(r=>r.id===selectedRuleId);
+  if(!rule){ wrap.innerHTML = `<div class="empty"><div class="ic">&#128072;</div><h3>Pick a rule</h3><p>Or create a new one to start building.</p></div>`; return; }
+
+  const tplOptions = (selected)=> `<option value="">Choose a template&hellip;</option>` + templates.map(t=>`<option value="${t.id}" ${t.id===selected?'selected':''}>${escapeHtml(t.name)}</option>`).join('');
+
+  wrap.innerHTML = `
+    <div class="chain">
+      <!-- TRIGGER -->
+      <div class="block block-trigger">
+        <div class="block-head">
+          <div class="block-title"><span class="badge-ic">&#127919;</span>Trigger</div>
+          <span class="block-sub">when a keyword matches</span>
+        </div>
+        <div class="field">
+          <label>Rule name</label>
+          <input type="text" id="f-rule-name" value="${escapeAttr(rule.name)}" placeholder="e.g. Book a meeting" />
+        </div>
+        <div class="field">
+          <label>Keywords</label>
+          <div class="tag-input" id="kw-wrap">
+            ${rule.keywords.map(k=>`<span class="tag">${escapeHtml(k)}<button data-kw="${escapeAttr(k)}">&times;</button></span>`).join('')}
+            <input type="text" id="kw-input" placeholder="Type a keyword, press Enter" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Match type</label>
+          <div class="seg" id="match-seg">
+            <button data-v="exact" class="${rule.matchType==='exact'?'on':''}">Exact</button>
+            <button data-v="contains" class="${rule.matchType==='contains'?'on':''}">Contains</button>
+            <button data-v="fuzzy" class="${rule.matchType==='fuzzy'?'on':''}">Fuzzy</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ACTION -->
+      <div class="block ${rule.action.type==='ai'?'block-ai':'block-action'}" id="action-block">
+        <div class="block-head">
+          <div class="block-title"><span class="badge-ic">${rule.action.type==='ai'?'&#10024;':'&#9993;'}</span>Reply with</div>
+          <div class="seg" id="action-seg">
+            <button data-v="template" class="${rule.action.type==='template'?'on':''}">Template</button>
+            <button data-v="ai" class="${rule.action.type==='ai'?'on':''}">AI message</button>
+          </div>
+        </div>
+        <div id="action-body"></div>
+      </div>
+
+      <!-- CONDITIONS -->
+      <div class="block block-cond">
+        <div class="block-head">
+          <div class="block-title"><span class="badge-ic">&#8942;&#8942;</span>Custom rules</div>
+          <span class="block-sub">if / else on the reply</span>
+        </div>
+        <div id="cond-rows"></div>
+        <button class="add-row" id="add-cond">+ Add condition</button>
+        <div class="cond-else">
+          Else, reply with
+          <select id="else-tpl">${tplOptions(rule.elseTemplateId)}</select>
+        </div>
+      </div>
+
+      <!-- FOLLOW UP -->
+      <div class="block block-follow">
+        <div class="block-head">
+          <div class="block-title"><span class="badge-ic">&#8987;</span>Follow-up</div>
+          <div class="follow-toggle"><span class="switch ${rule.followUp.enabled?'on':''}" id="follow-switch"></span></div>
+        </div>
+        <div class="follow-body ${rule.followUp.enabled?'':'disabled'}" id="follow-body">
+          <div class="field-row">
+            <div class="field"><label>Wait</label>
+              <input type="number" min="1" id="f-follow-hours" value="${rule.followUp.hours}" /></div>
+            <div class="field"><label>If</label>
+              <select id="f-follow-cond">
+                <option value="no_reply" ${rule.followUp.condition==='no_reply'?'selected':''}>No reply</option>
+                <option value="no_purchase" ${rule.followUp.condition==='no_purchase'?'selected':''}>No purchase</option>
+              </select></div>
+          </div>
+          <div class="field"><label>Then send</label>
+            <select id="f-follow-tpl">${tplOptions(rule.followUp.templateId)}</select></div>
+          <p class="hint">Sent hours after the trigger fires, unless the condition above no longer applies.</p>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:6px;padding-left:26px;">
+      <button class="btn btn-primary btn-sm" id="btn-save-rule">Save rule</button>
+      <button class="btn btn-ghost btn-danger btn-sm" id="btn-delete-rule">Delete rule</button>
+    </div>
+  `;
+
+  renderActionBody(rule);
+  renderConditions(rule);
+
+  // trigger name / keywords
+  wrap.querySelector('#f-rule-name').addEventListener('input', e=>{rule.name=e.target.value; renderRuleList();});
+  const kwInput = wrap.querySelector('#kw-input');
+  kwInput.addEventListener('keydown', e=>{
+    if(e.key==='Enter' && kwInput.value.trim()){
+      rule.keywords.push(kwInput.value.trim()); kwInput.value='';
+      renderRuleEditor(); renderRuleList();
+    }
+  });
+  wrap.querySelectorAll('[data-kw]').forEach(b=>b.addEventListener('click',()=>{
+    rule.keywords = rule.keywords.filter(k=>k!==b.dataset.kw); renderRuleEditor(); renderRuleList();
+  }));
+  wrap.querySelectorAll('#match-seg button').forEach(b=>b.addEventListener('click',()=>{
+    rule.matchType=b.dataset.v; renderRuleEditor();
+  }));
+
+  // action type toggle
+  wrap.querySelectorAll('#action-seg button').forEach(b=>b.addEventListener('click',()=>{
+    rule.action.type=b.dataset.v; renderRuleEditor(); renderRuleList();
+  }));
+
+  // conditions
+  wrap.querySelector('#add-cond').addEventListener('click',()=>{
+    rule.conditions.push({id:uid(), variable:'reply_option', operator:'equals', value:'', templateId:null});
+    renderRuleEditor();
+  });
+  wrap.querySelector('#else-tpl').addEventListener('change', e=>{rule.elseTemplateId=e.target.value||null;});
+
+  // follow up
+  wrap.querySelector('#follow-switch').addEventListener('click',()=>{
+    rule.followUp.enabled=!rule.followUp.enabled; renderRuleEditor(); renderRuleList();
+  });
+  wrap.querySelector('#f-follow-hours').addEventListener('input', e=>{rule.followUp.hours=+e.target.value||1;});
+  wrap.querySelector('#f-follow-cond').addEventListener('change', e=>{rule.followUp.condition=e.target.value;});
+  wrap.querySelector('#f-follow-tpl').addEventListener('change', e=>{rule.followUp.templateId=e.target.value||null;});
+
+  wrap.querySelector('#btn-save-rule').addEventListener('click', ()=> saveRuleToServer(rule));
+
+  wrap.querySelector('#btn-delete-rule').addEventListener('click', async ()=>{
+    if(rule.serverId){ try{ await api.deleteRule(rule.serverId); }catch(e){ toast('Could not delete on server', true); } }
+    rules = rules.filter(r=>r.id!==rule.id);
+    selectedRuleId = rules[0]?.id || null;
+    renderRuleList(); renderRuleEditor();
+  });
+}
+
+function renderActionBody(rule){
+  const el = document.getElementById('action-body');
+  const tplOptions = (selected)=> `<option value="">Choose a template&hellip;</option>` + templates.map(t=>`<option value="${t.id}" ${t.id===selected?'selected':''}>${escapeHtml(t.name)}</option>`).join('');
+  if(rule.action.type==='template'){
+    el.innerHTML = `
+      <div class="field">
+        <label>Template</label>
+        <select id="f-action-tpl">${tplOptions(rule.action.templateId)}</select>
+        <p class="hint">Manage the message shape in the Templates tab.</p>
+      </div>
+    `;
+    el.querySelector('#f-action-tpl').addEventListener('change', e=>{rule.action.templateId=e.target.value||null; renderRuleList();});
+  } else {
+    el.innerHTML = `
+      <div class="field">
+        <label>System prompt</label>
+        <textarea id="f-ai-prompt" placeholder="Answer questions using the connected docs. Keep it under 3 sentences.">${escapeHtml(rule.action.aiPrompt)}</textarea>
+      </div>
+      <div class="field">
+        <label>Fallback if unsure</label>
+        <input type="text" id="f-ai-fallback" value="${escapeAttr(rule.action.aiFallback)}" />
+      </div>
+      <div class="field">
+        <label>Knowledge source</label>
+        <div style="display:flex;gap:8px;">
+          <span class="tag" style="background:var(--ai-bg);color:var(--ai);">Google Docs</span>
+          <span class="tag" style="background:var(--ai-bg);color:var(--ai);">Product Sheet</span>
+        </div>
+        <p class="hint">Connected in the Integrations tab.</p>
+      </div>
+    `;
+    el.querySelector('#f-ai-prompt').addEventListener('input', e=>{rule.action.aiPrompt=e.target.value;});
+    el.querySelector('#f-ai-fallback').addEventListener('input', e=>{rule.action.aiFallback=e.target.value;});
+  }
+}
+
+function renderConditions(rule){
+  const el = document.getElementById('cond-rows');
+  const tplOptions = (selected)=> `<option value="">Reply with&hellip;</option>` + templates.map(t=>`<option value="${t.id}" ${t.id===selected?'selected':''}>${escapeHtml(t.name)}</option>`).join('');
+  if(rule.conditions.length===0){
+    el.innerHTML = `<p class="hint" style="margin-bottom:10px;">No conditions — the reply above always sends as-is.</p>`;
+  } else {
+    el.innerHTML = rule.conditions.map(c=>`
+      <div class="cond-row" data-id="${c.id}">
+        <select class="c-var">
+          <option value="reply_option" ${c.variable==='reply_option'?'selected':''}>Reply option</option>
+          <option value="sheet_lookup" ${c.variable==='sheet_lookup'?'selected':''}>Sheet lookup</option>
+          <option value="order_status" ${c.variable==='order_status'?'selected':''}>Shopify order status</option>
+          <option value="cart_value" ${c.variable==='cart_value'?'selected':''}>Cart value</option>
+        </select>
+        <select class="c-op">
+          <option value="equals" ${c.operator==='equals'?'selected':''}>equals</option>
+          <option value="contains" ${c.operator==='contains'?'selected':''}>contains</option>
+          <option value="gt" ${c.operator==='gt'?'selected':''}>&gt;</option>
+          <option value="lt" ${c.operator==='lt'?'selected':''}>&lt;</option>
+        </select>
+        <input type="text" class="c-val" value="${escapeAttr(c.value)}" placeholder="value" />
+        <select class="c-tpl">${tplOptions(c.templateId)}</select>
+        <button class="rm" data-rm="${c.id}">&times;</button>
+      </div>
+    `).join('');
+  }
+  el.querySelectorAll('.cond-row').forEach(row=>{
+    const c = rule.conditions.find(c=>c.id===row.dataset.id);
+    row.querySelector('.c-var').addEventListener('change', e=>c.variable=e.target.value);
+    row.querySelector('.c-op').addEventListener('change', e=>c.operator=e.target.value);
+    row.querySelector('.c-val').addEventListener('input', e=>c.value=e.target.value);
+    row.querySelector('.c-tpl').addEventListener('change', e=>c.templateId=e.target.value||null);
+  });
+  el.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>{
+    rule.conditions = rule.conditions.filter(c=>c.id!==b.dataset.rm); renderRuleEditor();
+  }));
+}
+
+/* ---------------- TEMPLATES ---------------- */
+function renderTemplates(){
+  if(!selectedTplId && templates.length) selectedTplId = templates[0].id;
+  renderTplList(); renderTplEditor();
+}
+function renderTplList(){
+  const el = document.getElementById('tpl-list');
+  if(templates.length===0){ el.innerHTML = `<div class="empty"><div class="ic">&#128203;</div><h3>No templates</h3><p>Create one to reuse across rules.</p></div>`; return; }
+  el.innerHTML = templates.map(t=>`
+    <div class="tpl-card ${t.id===selectedTplId?'selected':''}" data-id="${t.id}">
+      <div class="name">${escapeHtml(t.name)}</div>
+      <div class="type">${TYPE_META[t.type].icon} ${TYPE_META[t.type].label}</div>
+    </div>`).join('');
+  el.querySelectorAll('.tpl-card').forEach(c=>c.addEventListener('click',()=>{selectedTplId=c.dataset.id; renderTplList(); renderTplEditor();}));
+}
+document.getElementById('btn-new-template').addEventListener('click',()=>{
+  const t = newTemplate('plaintext'); templates.unshift(t); selectedTplId=t.id; renderTplList(); renderTplEditor();
+});
+
+function renderTplEditor(){
+  const wrap = document.getElementById('tpl-editor');
+  const t = templates.find(t=>t.id===selectedTplId);
+  if(!t){ wrap.innerHTML = `<div class="empty"><div class="ic">&#128072;</div><h3>Pick a template</h3></div>`; return; }
+
+  wrap.innerHTML = `
+    <div class="split">
+      <div>
+        <div class="field">
+          <label>Template name</label>
+          <input type="text" id="t-name" value="${escapeAttr(t.name)}" />
+        </div>
+        <div class="type-grid" id="type-grid">
+          ${Object.entries(TYPE_META).map(([k,m])=>`<div class="type-opt ${t.type===k?'on':''}" data-type="${k}"><span class="ic">${m.icon}</span>${m.label}</div>`).join('')}
+        </div>
+        <div id="type-fields"></div>
+      </div>
+      <div class="json-panel">
+        <div class="jp-head"><span>JSON preview</span></div>
+        <pre id="json-preview"></pre>
+      </div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:10px;">
+      <button class="btn btn-primary btn-sm" id="btn-save-tpl">Save template</button>
+      <button class="btn btn-ghost btn-danger btn-sm" id="btn-delete-tpl">Delete template</button>
+    </div>
+  `;
+
+  wrap.querySelector('#t-name').addEventListener('input', e=>{t.name=e.target.value; renderTplList(); updateJsonPreview(t);});
+  wrap.querySelectorAll('.type-opt').forEach(o=>o.addEventListener('click',()=>{
+    t.type=o.dataset.type; renderTplEditor();
+  }));
+  wrap.querySelector('#btn-save-tpl').addEventListener('click', ()=> saveTemplateToServer(t));
+  wrap.querySelector('#btn-delete-tpl').addEventListener('click', async ()=>{
+    if(t.serverId){ try{ await api.deleteTemplate(t.serverId); }catch(e){ toast('Could not delete on server', true); } }
+    templates = templates.filter(x=>x.id!==t.id); selectedTplId = templates[0]?.id || null;
+    renderTplList(); renderTplEditor();
+  });
+
+  renderTypeFields(t);
+  updateJsonPreview(t);
+}
+
+function renderTypeFields(t){
+  const el = document.getElementById('type-fields');
+  const headerField = `
+    <div class="field-row">
+      <div class="field"><label>Header</label>
+        <select id="h-type">
+          <option value="none" ${t.header.type==='none'?'selected':''}>None</option>
+          <option value="text" ${t.header.type==='text'?'selected':''}>Text</option>
+          <option value="image" ${t.header.type==='image'?'selected':''}>Image URL</option>
+        </select></div>
+      <div class="field"><label>&nbsp;</label>
+        <input type="text" id="h-value" placeholder="${t.header.type==='image'?'https://...':'Header text'}" value="${escapeAttr(t.header.value)}" ${t.header.type==='none'?'disabled':''} /></div>
+    </div>`;
+
+  let body = '';
+  if(t.type==='plaintext'){
+    body = `<div class="field"><label>Message</label><textarea id="f-body">${escapeHtml(t.body)}</textarea></div>`;
+  } else if(t.type==='buttons'){
+    body = headerField + `
+      <div class="field"><label>Body</label><textarea id="f-body">${escapeHtml(t.body)}</textarea></div>
+      <div class="field"><label>Footer</label><input type="text" id="f-footer" value="${escapeAttr(t.footer)}" /></div>
+      <div class="field"><label>Buttons (max 3)</label><div id="btn-rows"></div>
+        <button class="add-row" id="add-btn">+ Add button</button></div>`;
+  } else if(t.type==='list'){
+    body = headerField + `
+      <div class="field"><label>Body</label><textarea id="f-body">${escapeHtml(t.body)}</textarea></div>
+      <div class="field"><label>Footer</label><input type="text" id="f-footer" value="${escapeAttr(t.footer)}" /></div>
+      <div class="field"><label>List button label</label><input type="text" id="f-list-label" value="${escapeAttr(t.list.buttonLabel)}" /></div>
+      <div class="field"><label>Options (radio-style, single select)</label><div id="list-rows"></div>
+        <button class="add-row" id="add-opt">+ Add option</button></div>`;
+  } else if(t.type==='cta'){
+    body = headerField + `
+      <div class="field"><label>Body</label><textarea id="f-body">${escapeHtml(t.body)}</textarea></div>
+      <div class="field"><label>Footer</label><input type="text" id="f-footer" value="${escapeAttr(t.footer)}" /></div>
+      <div class="field-row">
+        <div class="field"><label>Button type</label>
+          <select id="cta-kind"><option value="url" ${t.cta.kind==='url'?'selected':''}>Open link</option><option value="phone" ${t.cta.kind==='phone'?'selected':''}>Call number</option></select></div>
+        <div class="field"><label>Button label</label><input type="text" id="cta-label" value="${escapeAttr(t.cta.label)}" /></div>
+      </div>
+      <div class="field"><label>${t.cta.kind==='phone'?'Phone number':'URL'}</label><input type="${t.cta.kind==='phone'?'tel':'url'}" id="cta-value" value="${escapeAttr(t.cta.value)}" /></div>`;
+  } else if(t.type==='product'){
+    body = `
+      <div class="field"><label>Image URL</label><input type="url" id="p-image" value="${escapeAttr(t.product.image)}" /></div>
+      <div class="field-row">
+        <div class="field"><label>Product title</label><input type="text" id="p-title" value="${escapeAttr(t.product.title)}" /></div>
+        <div class="field"><label>Price</label><input type="text" id="p-price" value="${escapeAttr(t.product.price)}" /></div>
+      </div>
+      <div class="field"><label>Message</label><textarea id="f-body">${escapeHtml(t.product.body)}</textarea></div>`;
+  }
+  el.innerHTML = body;
+  bindTypeFields(t);
+}
+
+function bindTypeFields(t){
+  const q = s=>document.querySelector(s);
+  if(q('#h-type')) q('#h-type').addEventListener('change', e=>{t.header.type=e.target.value; renderTypeFields(t); updateJsonPreview(t);});
+  if(q('#h-value')) q('#h-value').addEventListener('input', e=>{t.header.value=e.target.value; updateJsonPreview(t);});
+  if(q('#f-footer')) q('#f-footer').addEventListener('input', e=>{t.footer=e.target.value; updateJsonPreview(t);});
+
+  if(t.type==='plaintext'){
+    q('#f-body').addEventListener('input', e=>{t.body=e.target.value; updateJsonPreview(t);});
+  }
+  if(t.type==='buttons'){
+    q('#f-body').addEventListener('input', e=>{t.body=e.target.value; updateJsonPreview(t);});
+    renderRepeatRows('btn-rows', t.buttons, ['title'], ()=>{ if(t.buttons.length<3) t.buttons.push({title:''}); }, t, 3);
+    q('#add-btn').addEventListener('click', ()=>{ if(t.buttons.length<3){ t.buttons.push({title:''}); renderTypeFields(t); updateJsonPreview(t);} });
+  }
+  if(t.type==='list'){
+    q('#f-body').addEventListener('input', e=>{t.body=e.target.value; updateJsonPreview(t);});
+    q('#f-list-label').addEventListener('input', e=>{t.list.buttonLabel=e.target.value; updateJsonPreview(t);});
+    renderRepeatRows('list-rows', t.list.options, ['title','description'], null, t);
+    q('#add-opt').addEventListener('click', ()=>{ t.list.options.push({title:'',description:''}); renderTypeFields(t); updateJsonPreview(t); });
+  }
+  if(t.type==='cta'){
+    q('#cta-kind').addEventListener('change', e=>{t.cta.kind=e.target.value; renderTypeFields(t); updateJsonPreview(t);});
+    q('#cta-label').addEventListener('input', e=>{t.cta.label=e.target.value; updateJsonPreview(t);});
+    q('#cta-value').addEventListener('input', e=>{t.cta.value=e.target.value; updateJsonPreview(t);});
+  }
+  if(t.type==='product'){
+    q('#p-image').addEventListener('input', e=>{t.product.image=e.target.value; updateJsonPreview(t);});
+    q('#p-title').addEventListener('input', e=>{t.product.title=e.target.value; updateJsonPreview(t);});
+    q('#p-price').addEventListener('input', e=>{t.product.price=e.target.value; updateJsonPreview(t);});
+    q('#f-body').addEventListener('input', e=>{t.product.body=e.target.value; updateJsonPreview(t);});
+  }
+}
+
+function renderRepeatRows(containerId, arr, fields, _unused, t){
+  const el = document.getElementById(containerId);
+  el.innerHTML = arr.map((item,i)=>`
+    <div class="opt-row" data-i="${i}">
+      ${fields.map(f=>`<input type="text" class="rr-${f}" placeholder="${f==='title'?'Label':'Description (optional)'}" value="${escapeAttr(item[f]||'')}" />`).join('')}
+      ${arr.length>1?`<button class="rm" data-rm="${i}">&times;</button>`:''}
+    </div>`).join('');
+  el.querySelectorAll('.opt-row').forEach(row=>{
+    const i = +row.dataset.i;
+    fields.forEach(f=>{
+      row.querySelector('.rr-'+f).addEventListener('input', e=>{ arr[i][f]=e.target.value; updateJsonPreview(t); });
+    });
+  });
+  el.querySelectorAll('[data-rm]').forEach(b=>b.addEventListener('click',()=>{
+    arr.splice(+b.dataset.rm,1); renderTypeFields(t); updateJsonPreview(t);
+  }));
+}
+
+function computeTemplateJSON(t){
+  const base = { template_id: t.name.toLowerCase().replace(/\s+/g,'_')||'untitled', type:'interactive', interactive_type:t.type };
+  if(t.type!=='plaintext' && t.type!=='product' && t.header.type!=='none') base.header = {type:t.header.type, [t.header.type==='image'?'url':'text']: t.header.value};
+  if(t.type==='plaintext'){ base.body = t.body; }
+  else if(t.type==='buttons'){ base.body=t.body; base.footer=t.footer||undefined; base.action={buttons:t.buttons.filter(b=>b.title).map((b,i)=>({id:'btn_'+i, title:b.title}))}; }
+  else if(t.type==='list'){ base.body=t.body; base.footer=t.footer||undefined; base.action={button:t.list.buttonLabel, options:t.list.options.filter(o=>o.title).map((o,i)=>({id:'opt_'+i, title:o.title, description:o.description||undefined}))}; }
+  else if(t.type==='cta'){ base.body=t.body; base.footer=t.footer||undefined; base.action={button_label:t.cta.label, kind:t.cta.kind, value:t.cta.value}; }
+  else if(t.type==='product'){ base.header={type:'image', url:t.product.image}; base.body=t.product.body; base.product={title:t.product.title, price:t.product.price}; }
+  return base;
+}
+function updateJsonPreview(t){
+  const el = document.getElementById('json-preview');
+  if(!el) return;
+  el.textContent = JSON.stringify(computeTemplateJSON(t), (k,v)=>v===undefined?undefined:v, 2);
+}
+
+/* ---------------- INTEGRATIONS ---------------- */
+function renderIntegrations(){
+  const el = document.getElementById('int-grid');
+  el.innerHTML = integrations.map(i=>`
+    <div class="int-card">
+      <div class="top"><div class="ic" style="background:${i.connected?'var(--green-light)':'#f1f4f2'};color:${i.connected?'var(--green-dark)':'var(--muted)'};">${i.icon}</div><h3>${i.name}</h3></div>
+      <p>${i.desc}</p>
+      <div class="int-status">
+        <span class="status-pill ${i.connected?'on':'off'}">${i.connected?'Connected':'Not connected'}</span>
+        <button class="btn btn-sm ${i.connected?'btn-ghost':'btn-primary'}" data-id="${i.id}">${i.connected?'Manage':'Connect'}</button>
+      </div>
+    </div>`).join('');
+  el.querySelectorAll('[data-id]').forEach(b=>b.addEventListener('click',()=>{
+    const i = integrations.find(i=>i.id===b.dataset.id); i.connected=!i.connected; renderIntegrations();
+  }));
+}
+
+/* ---------------- API LAYER ---------------- */
+// Points at src/routes/bot-builder.js (rules/templates) and the existing
+// wa_accounts endpoints already in server.js (/api/wa/manual/*, /api/wa/accounts).
+//
+// AUTH: every one of these routes sits behind `verifyUser`, which expects a
+// Supabase JWT as `Authorization: Bearer <token>`. Set AUTH_TOKEN_STORAGE_KEY
+// below to whatever key your dashboard/login.html already stores that token
+// under (e.g. from supabase.auth.getSession()) so this page picks it up
+// automatically once it's served from the same origin as the dashboard.
+const API_BASE = '/api';
+const AUTH_TOKEN_STORAGE_KEY = 'wb_access_token'; // TODO: match your existing auth storage key
+let apiOnline = false;
+
+function getAuthToken(){ return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || ''; }
+
+async function apiCall(path, opts={}){
+  const token = getAuthToken();
+  const res = await fetch(API_BASE + path, {
+    headers:{
+      'Content-Type':'application/json',
+      ...(token ? {Authorization:`Bearer ${token}`} : {})
+    },
+    ...opts
+  });
+  if(!res.ok){ const e = await res.json().catch(()=>({error:res.statusText})); throw new Error(e.error||'Request failed'); }
+  return res.status===204 ? null : res.json();
+}
+const api = {
+  listRules: ()=>apiCall('/bot-builder/rules'),
+  saveRule: (r)=> r.serverId ? apiCall(`/bot-builder/rules/${r.serverId}`,{method:'PUT',body:JSON.stringify(r)})
+                              : apiCall('/bot-builder/rules',{method:'POST',body:JSON.stringify(r)}),
+  deleteRule: (serverId)=>apiCall(`/bot-builder/rules/${serverId}`,{method:'DELETE'}),
+  listTemplates: ()=>apiCall('/bot-builder/templates'),
+  saveTemplate: (t)=> t.serverId ? apiCall(`/bot-builder/templates/${t.serverId}`,{method:'PUT',body:JSON.stringify({name:t.name,type:t.type,payload:computeTemplateJSON(t)})})
+                                  : apiCall('/bot-builder/templates',{method:'POST',body:JSON.stringify({name:t.name,type:t.type,payload:computeTemplateJSON(t)})}),
+  deleteTemplate: (serverId)=>apiCall(`/bot-builder/templates/${serverId}`,{method:'DELETE'}),
+  // Existing endpoints — not new ones. Two-step manual flow: verify lists
+  // every number under the WABA, save persists the one the user picks.
+  listAccounts: ()=>apiCall('/wa/accounts'),
+  manualVerify: (waba_id, access_token)=>apiCall('/wa/manual/verify',{method:'POST',body:JSON.stringify({waba_id, access_token})}),
+  manualSave: (data)=>apiCall('/wa/manual/save',{method:'POST',body:JSON.stringify(data)}),
+  disconnectAccount: (id)=>apiCall(`/wa/accounts/${id}`,{method:'DELETE'}),
+};
+
+function toast(msg, isErr){
+  const el = document.getElementById('toast');
+  el.innerHTML = `<span class="dot2"></span>${escapeHtml(msg)}`;
+  el.className = 'toast show' + (isErr?' err':'');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=>el.classList.remove('show'), 2600);
+}
+
+async function saveRuleToServer(rule){
+  try{
+    const res = await api.saveRule(rule);
+    rule.serverId = res.rule.id; apiOnline = true;
+    toast('Rule saved');
+  }catch(err){
+    toast(!getAuthToken() ? 'Not signed in — saved locally only' : (err.message||'Could not save rule'), true);
+  }
+}
+async function saveTemplateToServer(t){
+  try{
+    const res = await api.saveTemplate(t);
+    t.serverId = res.template.id; apiOnline = true;
+    toast('Template saved');
+  }catch(err){
+    toast(!getAuthToken() ? 'Not signed in — saved locally only' : (err.message||'Could not save template'), true);
+  }
+}
+
+async function loadFromServer(){
+  try{
+    const [rulesRes, templatesRes] = await Promise.all([api.listRules(), api.listTemplates()]);
+    apiOnline = true;
+    const serverTemplates = templatesRes.templates || [];
+    const serverRules = rulesRes.rules || [];
+    if(serverTemplates.length){
+      templates = serverTemplates.map(t=>({...newTemplate(t.type), ...t.payload, id:uid(), serverId:t.id, name:t.name, type:t.type}));
+    }
+    if(serverRules.length){
+      rules = serverRules.map(r=>({
+        id:uid(), serverId:r.id, name:r.name, keywords:r.keywords||[], matchType:r.match_type,
+        action:{type:r.action_type, templateId:r.action_template_id, aiPrompt:r.ai_prompt||'', aiFallback:r.ai_fallback||''},
+        conditions:r.conditions||[], elseTemplateId:r.else_template_id,
+        followUp: r.follow_up || {enabled:false}
+      }));
+    }
+    selectedRuleId = rules[0]?.id || null;
+    renderRuleList(); renderRuleEditor();
+  }catch(err){
+    // not signed in yet, or backend not mounted — keep the seeded local demo data
+    apiOnline = false;
+  }
+}
+
+/* ---------------- CONNECTION VIEW ---------------- */
+let connectionState = null; // one row from GET /api/wa/accounts, or null
+let verifiedNumbers = [];   // result of the last /wa/manual/verify call
+
+function renderConnStatusCard(){
+  const el = document.getElementById('conn-status');
+  if(!el) return;
+  if(!connectionState){
+    el.innerHTML = `<div class="conn-status-card"><div class="left"><span class="dot3"></span><div><h3>Not connected</h3><p>Choose a method below to link a WhatsApp Business number.</p></div></div></div>`;
+    return;
+  }
+  const s = connectionState;
+  el.innerHTML = `<div class="conn-status-card">
+    <div class="left"><span class="dot3 on"></span>
+      <div><h3>Connected</h3>
+      <p>${escapeHtml(s.phone_number||s.phone_number_id||'—')} · ${escapeHtml(s.display_name||'')} · quality ${escapeHtml(s.quality_rating||'—')}</p></div>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="btn-disconnect">Disconnect</button>
+  </div>`;
+  el.querySelector('#btn-disconnect')?.addEventListener('click', async ()=>{
+    try{ await api.disconnectAccount(s.id); connectionState=null; renderConnStatusCard(); updateRailBadge(); toast('Disconnected'); }
+    catch(e){ toast(e.message||'Could not disconnect', true); }
+  });
+}
+
+function updateRailBadge(){
+  const el = document.getElementById('rail-conn-badge');
+  if(!el) return;
+  if(connectionState){
+    el.innerHTML = `<div class="row"><span class="pulse"></span>WABA Connected</div>${escapeHtml(connectionState.phone_number||connectionState.phone_number_id||'')}`;
+  } else {
+    el.innerHTML = `<div class="row"><span class="pulse" style="background:var(--muted);box-shadow:none;"></span>Not connected</div>Add a WABA in the Connection tab`;
+  }
+}
+
+async function renderConnection(){
+  try{
+    const res = await api.listAccounts();
+    connectionState = (res.accounts && res.accounts[0]) || null;
+    apiOnline = true;
+  }catch(e){ /* not signed in, or no backend yet — leave last known state */ }
+  renderConnStatusCard();
+  updateRailBadge();
+}
+
+document.getElementById('btn-manual-verify').addEventListener('click', async ()=>{
+  const waba = document.getElementById('m-waba').value.trim();
+  const token = document.getElementById('m-token').value.trim();
+  const errEl = document.getElementById('m-err');
+  const numEl = document.getElementById('m-numbers');
+  errEl.innerHTML = ''; numEl.innerHTML = '';
+  [waba,token].forEach((v,i)=>{
+    document.getElementById(['m-waba','m-token'][i]).classList.toggle('field-err', !v);
+  });
+  if(!waba||!token){ errEl.innerHTML = `<p class="form-err">WABA ID and access token are both required.</p>`; return; }
+
+  const btn = document.getElementById('btn-manual-verify');
+  btn.disabled = true; btn.textContent = 'Verifying…';
+  try{
+    const res = await api.manualVerify(waba, token);
+    verifiedNumbers = res.numbers || [];
+    if(!verifiedNumbers.length){ errEl.innerHTML = `<p class="form-err">No phone numbers found under this WABA.</p>`; return; }
+    numEl.innerHTML = `<div class="field"><label>Pick the number to connect</label>` +
+      verifiedNumbers.map((n,i)=>`
+        <div class="num-pick" data-i="${i}">
+          <div><div class="n-name">${escapeHtml(n.display_name||n.phone_number)}</div><div class="n-phone">${escapeHtml(n.phone_number)}</div></div>
+          <span class="n-quality">${escapeHtml(n.quality_rating||'—')}</span>
+        </div>`).join('') +
+      `</div><button class="btn btn-primary" id="btn-manual-save" style="width:100%;justify-content:center;">Connect this number</button>`;
+    let picked = 0;
+    numEl.querySelectorAll('.num-pick').forEach(el=>el.addEventListener('click',()=>{
+      picked = +el.dataset.i;
+      numEl.querySelectorAll('.num-pick').forEach(x=>x.classList.remove('sel'));
+      el.classList.add('sel');
+    }));
+    numEl.querySelector('.num-pick')?.classList.add('sel');
+    numEl.querySelector('#btn-manual-save').addEventListener('click', async ()=>{
+      const saveBtn = numEl.querySelector('#btn-manual-save');
+      saveBtn.disabled = true; saveBtn.textContent = 'Connecting…';
+      try{
+        const chosen = verifiedNumbers[picked];
+        const saveRes = await api.manualSave({ waba_id:waba, phone_number_id:chosen.phone_number_id, access_token:token });
+        toast('WhatsApp number connected');
+        await renderConnection();
+      }catch(err){
+        errEl.innerHTML = `<p class="form-err">${escapeHtml(err.message||'Could not save this connection')}</p>`;
+      }finally{
+        saveBtn.disabled = false; saveBtn.textContent = 'Connect this number';
+      }
+    });
+  }catch(err){
+    errEl.innerHTML = `<p class="form-err">${escapeHtml(err.message||'Could not verify this token')}</p>`;
+  }finally{
+    btn.disabled = false; btn.textContent = 'Verify numbers';
+  }
+});
+
+document.getElementById('btn-embedded-connect').addEventListener('click', async ()=>{
+  // Your Embedded Signup already runs through a Supabase Edge Function
+  // (see server.js comment near /api/internal/wa/embedded-signup-complete),
+  // not a route in server.js itself — so this can't be fully wired without
+  // that function's exact contract (its name, whether it exposes a
+  // `/start` step, what params it expects). The shape is:
+  //   1. FB.login(...) in the browser to get an auth code
+  //   2. POST that code to your edge function (it exchanges the code,
+  //      subscribes webhooks, registers the number)
+  //   3. edge function calls /api/internal/wa/embedded-signup-complete
+  //      with the internal secret to persist the wa_accounts row
+  //   4. this page just needs to re-run renderConnection() after that
+  if(typeof FB === 'undefined'){
+    toast('Facebook SDK not loaded on this page yet', true);
+    return;
+  }
+  FB.login(async (response)=>{
+    if(!response.authResponse?.code){ toast('Embedded signup was cancelled', true); return; }
+    try{
+      // TODO: replace with your actual edge function URL + contract, e.g.:
+      // await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-embedded-signup`, {
+      //   method:'POST',
+      //   headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${getAuthToken()}` },
+      //   body: JSON.stringify({ code: response.authResponse.code })
+      // });
+      toast('Wire this button to your whatsapp-embedded-signup edge function', true);
+    }catch(err){ toast(err.message||'Embedded signup failed', true); }
+  }, { config_id: window.META_EMBEDDED_CONFIG_ID, response_type:'code', override_default_response_type:true });
+});
+
+/* ---------------- UTIL ---------------- */
+function escapeHtml(s=''){ return s.replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function escapeAttr(s=''){ return escapeHtml(s).replace(/"/g,'&quot;'); }
+
+/* ---------------- INIT ---------------- */
+renderRuleList();
+renderRuleEditor();
+updateRailBadge();
+loadFromServer();
+api.listAccounts().then(res=>{connectionState=(res.accounts&&res.accounts[0])||null; updateRailBadge();}).catch(()=>{});
+</script>
+</body>
+</html>
