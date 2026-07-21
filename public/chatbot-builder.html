@@ -1110,33 +1110,110 @@ document.getElementById('btn-manual-verify').addEventListener('click', async ()=
 });
 
 document.getElementById('btn-embedded-connect').addEventListener('click', async ()=>{
-  // Your Embedded Signup already runs through a Supabase Edge Function
-  // (see server.js comment near /api/internal/wa/embedded-signup-complete),
-  // not a route in server.js itself — so this can't be fully wired without
-  // that function's exact contract (its name, whether it exposes a
-  // `/start` step, what params it expects). The shape is:
-  //   1. FB.login(...) in the browser to get an auth code
-  //   2. POST that code to your edge function (it exchanges the code,
-  //      subscribes webhooks, registers the number)
-  //   3. edge function calls /api/internal/wa/embedded-signup-complete
-  //      with the internal secret to persist the wa_accounts row
-  //   4. this page just needs to re-run renderConnection() after that
-  if(typeof FB === 'undefined'){
-    toast('Facebook SDK not loaded on this page yet', true);
-    return;
+  // Embedded Signup flow matching dashboard.html implementation
+  const EDGE_FN_BASE = 'https://vnytcmoyvfyrvcmshwsz.supabase.co/functions/v1/whatsapp-embedded-signup';
+  
+  let waEsCurrentState = null;
+  let waEsAuthCode = null;
+  let waEsSessionInfo = null;
+  
+  const btn = document.getElementById('btn-embedded-connect');
+  const statusHint = btn.parentElement.querySelector('.hint') || btn.nextElementSibling;
+  
+  btn.disabled = true;
+  waEsAuthCode = null;
+  waEsSessionInfo = null;
+  if(statusHint) statusHint.textContent = 'Opening Facebook login…';
+
+  try {
+    // Step 1: Call edge function /start to get state and config_id
+    const res = await fetch(`${EDGE_FN_BASE}/start`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getAuthToken()}` }
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Failed to start signup');
+    waEsCurrentState = data.state;
+
+    // Step 2: Open FB.login with the config_id from edge function
+    FB.login((response) => {
+      if (response.authResponse?.code) {
+        waEsAuthCode = response.authResponse.code;
+        maybeFinishEmbeddedSignup();
+      } else {
+        if(statusHint) statusHint.textContent = '';
+        btn.disabled = false;
+        toast('Facebook login was cancelled or denied', true);
+      }
+    }, {
+      config_id: data.configId,
+      response_type: 'code',
+      override_default_response_type: true,
+      extras: { sessionInfoVersion: '3' }
+    });
+  } catch (err) {
+    if(statusHint) statusHint.textContent = '';
+    btn.disabled = false;
+    toast(err.message, true);
   }
-  FB.login(async (response)=>{
-    if(!response.authResponse?.code){ toast('Embedded signup was cancelled', true); return; }
-    try{
-      // TODO: replace with your actual edge function URL + contract, e.g.:
-      // await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-embedded-signup`, {
-      //   method:'POST',
-      //   headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${getAuthToken()}` },
-      //   body: JSON.stringify({ code: response.authResponse.code })
-      // });
-      toast('Wire this button to your whatsapp-embedded-signup edge function', true);
-    }catch(err){ toast(err.message||'Embedded signup failed', true); }
-  }, { config_id: window.META_EMBEDDED_CONFIG_ID, response_type:'code', override_default_response_type:true });
+
+  // Handle postMessage from Facebook popup
+  function handleMessage(event) {
+    if (!event.origin.endsWith('facebook.com')) return;
+    let msgData;
+    try { msgData = JSON.parse(event.data); } catch { return; }
+    if (msgData.type !== 'WA_EMBEDDED_SIGNUP') return;
+
+    if (msgData.event === 'FINISH' || msgData.event === 'FINISH_ONLY_WABA') {
+      waEsSessionInfo = msgData.data; // { waba_id, phone_number_id }
+      maybeFinishEmbeddedSignup();
+    } else if (msgData.event === 'CANCEL') {
+      if(statusHint) statusHint.textContent = '';
+      btn.disabled = false;
+      toast('Signup cancelled at step: ' + (msgData.data?.current_step || '?'), true);
+    } else if (msgData.event === 'ERROR') {
+      if(statusHint) statusHint.textContent = '';
+      btn.disabled = false;
+      toast('Signup error: ' + (msgData.data?.error_message || 'unknown'), true);
+    }
+  }
+  
+  window.addEventListener('message', handleMessage);
+
+  // Finish the signup once we have both auth code and session info
+  async function maybeFinishEmbeddedSignup() {
+    if (!waEsAuthCode || !waEsSessionInfo) return;
+    
+    if(statusHint) statusHint.textContent = 'Finishing setup…';
+
+    try {
+      const res = await fetch(`${EDGE_FN_BASE}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
+        body: JSON.stringify({
+          state: waEsCurrentState,
+          code: waEsAuthCode,
+          waba_id: waEsSessionInfo.waba_id,
+          phone_number_id: waEsSessionInfo.phone_number_id
+        })
+      });
+      const data = await res.json();
+      if(statusHint) statusHint.textContent = '';
+      btn.disabled = false;
+      
+      if (data.success) {
+        toast(`✅ ${data.phone_number} connected!`);
+        // Reload connection state
+        api.listAccounts().then(res=>{connectionState=(res.accounts&&res.accounts[0])||null; updateRailBadge();}).catch(()=>{});
+      } else {
+        toast(data.error || 'Failed to connect number', true);
+      }
+    } catch (err) {
+      if(statusHint) statusHint.textContent = '';
+      btn.disabled = false;
+      toast('Network error: ' + err.message, true);
+    }
+  }
 });
 
 /* ---------------- UTIL ---------------- */
