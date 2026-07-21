@@ -403,7 +403,29 @@ module.exports = function flowsRouter(deps) {
           .join(''))
         .join('');
 
-      res.json({ id: docId, title: docData.title, text });
+      res.json({ id: docId, title: docData.title, content: text });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  
+  // GET /api/oauth/google/sheet-data/:spreadsheetId/values/:range — fetch sheet data for testing
+  router.get('/google/sheet-data/:spreadsheetId/values/:range', verifyUser, async (req, res) => {
+    let accessToken;
+    try {
+      accessToken = await getValidGoogleAccessToken(req.user.id);
+    } catch (err) {
+      return res.status(401).json({ error: err.message });
+    }
+    const { spreadsheetId, range } = req.params;
+
+    try {
+      const valuesRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const valuesData = await valuesRes.json();
+      if (!valuesRes.ok) throw new Error(valuesData.error?.message || 'Failed to fetch sheet data');
+      res.json({ values: valuesData.values || [] });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
