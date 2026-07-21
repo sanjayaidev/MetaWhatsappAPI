@@ -1,5 +1,35 @@
-(public/mobile.html is a source/config file, and there are no build artifacts, dependencies, or temp files in the changes)
+```
+# Database migrations
+migrations/*.sql
 
-```javascript
+# Logs and temp files
+*.log
+*.tmp
+*.swp
 
+# Environment
+.env
+.env.local
+*.env.*
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.egg-info/
+
+# Build outputs
+dist/
+build/
+target/
+*.out
+
+# Editors
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
 ```
