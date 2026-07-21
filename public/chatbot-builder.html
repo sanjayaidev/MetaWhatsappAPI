@@ -298,6 +298,80 @@
         <div><h1>Integrations</h1><p>Pull data into triggers, conditions and AI context.</p></div>
       </div>
       <div class="int-grid" id="int-grid"></div>
+      
+      <!-- Sheet Lookup Configuration -->
+      <div id="sheet-lookup-section" style="display:none;margin-top:20px;">
+        <div class="card">
+          <div class="card-header"><div class="card-title">📊 Sheet Lookup Configuration</div></div>
+          <p style="font-size:12.5px;color:var(--text2);margin-bottom:15px;">Configure which sheet and columns to use for lookups in your chatbot rules.</p>
+          
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;">
+            <div style="flex:1;min-width:180px;">
+              <label style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;">Select Workbook:</label>
+              <select id="sheetLookupWorkbook" style="width:100%;margin-top:6px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" onchange="onSheetLookupWorkbookSelected()">
+                <option value="">Loading workbooks…</option>
+              </select>
+            </div>
+            <div style="width:20px;text-align:center;padding-bottom:8px;"><span style="font-size:16px;color:var(--text2);">→</span></div>
+            <div style="flex:1;min-width:180px;">
+              <label style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;">Select Sheet:</label>
+              <select id="sheetLookupWorksheet" style="width:100%;margin-top:6px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" onchange="onSheetLookupWorksheetSelected()" disabled>
+                <option value="">Select workbook first</option>
+              </select>
+            </div>
+            <div style="width:20px;text-align:center;padding-bottom:8px;"><span style="font-size:16px;color:var(--text2);">→</span></div>
+            <div style="flex:1;min-width:180px;">
+              <label style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;">Lookup Column:</label>
+              <select id="sheetLookupColumn" style="width:100%;margin-top:6px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" onchange="saveSheetLookupConfig()" disabled>
+                <option value="">Select sheet first</option>
+              </select>
+            </div>
+          </div>
+          
+          <div class="field">
+            <label>Return Column (optional)</label>
+            <select id="sheetLookupReturnColumn" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" onchange="saveSheetLookupConfig()" disabled>
+              <option value="">Same as lookup column</option>
+            </select>
+            <div class="hint">When a lookup matches, return data from this column. Leave empty to return the entire row.</div>
+          </div>
+          
+          <div style="display:flex;gap:10px;margin-top:16px;">
+            <button class="btn btn-primary btn-sm" onclick="saveSheetLookupConfig()">💾 Save Lookup Config</button>
+            <button class="btn btn-ghost btn-sm" onclick="testSheetLookup()">🧪 Test Lookup</button>
+          </div>
+          
+          <div id="sheetLookupTestResult" style="margin-top:12px;padding:12px;background:var(--bg);border-radius:8px;display:none;"></div>
+        </div>
+      </div>
+      
+      <!-- Docs Configuration -->
+      <div id="docs-config-section" style="display:none;margin-top:20px;">
+        <div class="card">
+          <div class="card-header"><div class="card-title">📄 Google Docs Configuration</div></div>
+          <p style="font-size:12.5px;color:var(--text2);margin-bottom:15px;">Select a document to use as AI grounding context for your chatbot responses.</p>
+          
+          <div style="margin-bottom:16px;">
+            <label style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;">Select Document:</label>
+            <select id="docsSelector" style="width:100%;margin-top:6px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" onchange="onDocSelected()">
+              <option value="">Loading documents…</option>
+            </select>
+          </div>
+          
+          <div id="docPreview" style="display:none;">
+            <div class="field">
+              <label>Document Preview (first 500 chars)</label>
+              <textarea id="docPreviewText" readonly style="width:100%;min-height:120px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);resize:vertical;"></textarea>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:12px;">
+              <button class="btn btn-primary btn-sm" onclick="saveDocsConfig()">💾 Save Doc Selection</button>
+              <button class="btn btn-ghost btn-sm" onclick="refreshDocContent()">🔄 Refresh Content</button>
+            </div>
+          </div>
+          
+          <div id="docsSaveStatus" style="margin-top:12px;font-size:12px;color:var(--muted);"></div>
+        </div>
+      </div>
     </section>
 
     <!-- CONNECTION VIEW -->
@@ -830,6 +904,12 @@ function updateJsonPreview(t){
 }
 
 /* ---------------- INTEGRATIONS ---------------- */
+let sheetLookupConfig = { workbookId: '', workbookName: '', worksheet: '', lookupColumn: '', returnColumn: '' };
+let docsConfig = { docId: '', docName: '', content: '' };
+let availableSheets = [];
+let availableDocs = [];
+let currentSheetColumns = [];
+
 function renderIntegrations(){
   const el = document.getElementById('int-grid');
   el.innerHTML = integrations.map(i=>{
@@ -890,6 +970,19 @@ function renderIntegrations(){
       window.location.href = data.url;
     }catch(err){ toast(err.message||'Could not start Google connect', true); }
   }));
+  
+  // Show config sections when Sheets or Docs is connected
+  const sheetsIntegration = integrations.find(i=>i.id==='sheets');
+  const docsIntegration = integrations.find(i=>i.id==='docs');
+  const sheetSection = document.getElementById('sheet-lookup-section');
+  const docsSection = document.getElementById('docs-config-section');
+  
+  if(sheetSection) sheetSection.style.display = (sheetsIntegration && sheetsIntegration.connected) ? 'block' : 'none';
+  if(docsSection) docsSection.style.display = (docsIntegration && docsIntegration.connected) ? 'block' : 'none';
+  
+  // Load configs if visible
+  if(sheetsIntegration && sheetsIntegration.connected) loadSheetLookupConfig();
+  if(docsIntegration && docsIntegration.connected) loadDocsConfig();
 }
 
 async function loadIntegrationsStatus(){
@@ -904,11 +997,317 @@ async function loadIntegrationsStatus(){
       i.email = status.email;
     });
     docs.needsDocsScope = !!status.connected && !status.has_docs_scope;
+    
+    // Load available sheets and docs if connected
+    if(status.connected) {
+      loadAvailableSheets();
+      loadAvailableDocs();
+    }
   }catch(err){
     sheets.loading = false; docs.loading = false;
     toast('Could not check Google connection status', true);
   }
   renderIntegrations();
+}
+
+// Sheet Lookup functions
+async function loadAvailableSheets() {
+  try {
+    const data = await apiCall('/oauth/google/sheets');
+    if(data.error || !data.sheets) {
+      console.error('Failed to load sheets:', data.error);
+      return;
+    }
+    availableSheets = data.sheets || [];
+    populateSheetLookupWorkbook();
+  } catch(err) {
+    console.error('[loadAvailableSheets]', err);
+  }
+}
+
+function populateSheetLookupWorkbook() {
+  const select = document.getElementById('sheetLookupWorkbook');
+  if(!select) return;
+  
+  if(!availableSheets.length) {
+    select.innerHTML = '<option value="">No workbooks found</option>';
+    return;
+  }
+  
+  select.innerHTML = '<option value="">Select a workbook…</option>' + 
+    availableSheets.map(s => `<option value="${s.id}" data-name="${escapeAttr(s.name)}">${escapeHtml(s.name)}</option>`).join('');
+  
+  // Restore saved selection
+  if(sheetLookupConfig.workbookId && availableSheets.some(s => s.id === sheetLookupConfig.workbookId)) {
+    select.value = sheetLookupConfig.workbookId;
+    onSheetLookupWorkbookSelected();
+  }
+}
+
+async function onSheetLookupWorkbookSelected() {
+  const select = document.getElementById('sheetLookupWorkbook');
+  const worksheetSelect = document.getElementById('sheetLookupWorksheet');
+  const workbookId = select.value;
+  
+  if(!workbookId) {
+    worksheetSelect.innerHTML = '<option value="">Select workbook first</option>';
+    worksheetSelect.disabled = true;
+    currentSheetColumns = [];
+    return;
+  }
+  
+  const workbookName = select.options[select.selectedIndex]?.dataset?.name || '';
+  sheetLookupConfig.workbookId = workbookId;
+  sheetLookupConfig.workbookName = workbookName;
+  
+  worksheetSelect.innerHTML = '<option value="">Loading sheets…</option>';
+  worksheetSelect.disabled = true;
+  
+  try {
+    const data = await apiCall(`/oauth/google/worksheets/${encodeURIComponent(workbookId)}`);
+    if(data.error || !data.worksheets) {
+      worksheetSelect.innerHTML = '<option value="">Failed to load sheets</option>';
+      return;
+    }
+    
+    if(!data.worksheets.length) {
+      worksheetSelect.innerHTML = '<option value="">No sheets in this workbook</option>';
+      return;
+    }
+    
+    worksheetSelect.innerHTML = '<option value="">Select a sheet…</option>' + 
+      data.worksheets.map(w => `<option value="${escapeAttr(w)}">${escapeHtml(w)}</option>`).join('');
+    worksheetSelect.disabled = false;
+    
+    // Restore saved selection
+    if(sheetLookupConfig.worksheet && data.worksheets.includes(sheetLookupConfig.worksheet)) {
+      worksheetSelect.value = sheetLookupConfig.worksheet;
+      await onSheetLookupWorksheetSelected();
+    }
+  } catch(err) {
+    worksheetSelect.innerHTML = '<option value="">Error loading sheets</option>';
+    console.error('[onSheetLookupWorkbookSelected]', err);
+  }
+}
+
+async function onSheetLookupWorksheetSelected() {
+  const worksheetSelect = document.getElementById('sheetLookupWorksheet');
+  const columnSelect = document.getElementById('sheetLookupColumn');
+  const returnColumnSelect = document.getElementById('sheetLookupReturnColumn');
+  const worksheet = worksheetSelect.value;
+  const workbookId = sheetLookupConfig.workbookId;
+  
+  if(!worksheet || !workbookId) {
+    columnSelect.innerHTML = '<option value="">Select sheet first</option>';
+    columnSelect.disabled = true;
+    returnColumnSelect.innerHTML = '<option value="">Same as lookup column</option>';
+    returnColumnSelect.disabled = true;
+    currentSheetColumns = [];
+    return;
+  }
+  
+  sheetLookupConfig.worksheet = worksheet;
+  columnSelect.innerHTML = '<option value="">Loading columns…</option>';
+  columnSelect.disabled = true;
+  
+  try {
+    const data = await apiCall(`/oauth/google/columns/${encodeURIComponent(workbookId)}/${encodeURIComponent(worksheet)}`);
+    if(data.error || !data.columns) {
+      columnSelect.innerHTML = '<option value="">Failed to load columns</option>';
+      return;
+    }
+    
+    currentSheetColumns = data.columns || [];
+    
+    if(!currentSheetColumns.length) {
+      columnSelect.innerHTML = '<option value="">No columns found (ensure row 1 has headers)</option>';
+      return;
+    }
+    
+    const colOptions = currentSheetColumns.map(c => `<option value="${escapeAttr(c)}">${escapeHtml(c)}</option>`).join('');
+    columnSelect.innerHTML = '<option value="">Select lookup column…</option>' + colOptions;
+    columnSelect.disabled = false;
+    
+    returnColumnSelect.innerHTML = '<option value="">Same as lookup column</option>' + colOptions;
+    returnColumnSelect.disabled = false;
+    
+    // Restore saved selections
+    if(sheetLookupConfig.lookupColumn && currentSheetColumns.includes(sheetLookupConfig.lookupColumn)) {
+      columnSelect.value = sheetLookupConfig.lookupColumn;
+    }
+    if(sheetLookupConfig.returnColumn && currentSheetColumns.includes(sheetLookupConfig.returnColumn)) {
+      returnColumnSelect.value = sheetLookupConfig.returnColumn;
+    }
+  } catch(err) {
+    columnSelect.innerHTML = '<option value="">Error loading columns</option>';
+    console.error('[onSheetLookupWorksheetSelected]', err);
+  }
+}
+
+function saveSheetLookupConfig() {
+  const columnSelect = document.getElementById('sheetLookupColumn');
+  const returnColumnSelect = document.getElementById('sheetLookupReturnColumn');
+  
+  sheetLookupConfig.lookupColumn = columnSelect.value;
+  sheetLookupConfig.returnColumn = returnColumnSelect.value;
+  
+  localStorage.setItem('chatbot_sheet_lookup_config', JSON.stringify(sheetLookupConfig));
+  toast('✅ Sheet lookup configuration saved');
+}
+
+function loadSheetLookupConfig() {
+  try {
+    const saved = localStorage.getItem('chatbot_sheet_lookup_config');
+    if(saved) {
+      sheetLookupConfig = JSON.parse(saved);
+    }
+  } catch(err) {
+    console.error('[loadSheetLookupConfig]', err);
+  }
+}
+
+async function testSheetLookup() {
+  const resultEl = document.getElementById('sheetLookupTestResult');
+  if(!resultEl) return;
+  
+  if(!sheetLookupConfig.workbookId || !sheetLookupConfig.worksheet || !sheetLookupConfig.lookupColumn) {
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<span style="color:var(--follow);">⚠️ Please configure workbook, sheet, and lookup column first.</span>';
+    return;
+  }
+  
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = '🧪 Testing lookup...';
+  
+  try {
+    // Test by fetching first few rows from the sheet
+    const range = encodeURIComponent(`${sheetLookupConfig.worksheet}!A1:C5`);
+    const data = await apiCall(`/oauth/google/sheet-data/${encodeURIComponent(sheetLookupConfig.workbookId)}/values/${range}`);
+    
+    if(data.error || !data.values) {
+      resultEl.innerHTML = `<span style="color:var(--follow);">❌ Error: ${escapeHtml(data.error || 'Failed to fetch data')}</span>`;
+      return;
+    }
+    
+    const preview = data.values.slice(0, 3).map(row => 
+      `<div style="font-family:monospace;font-size:11px;padding:4px 0;border-bottom:1px dashed var(--line);">${row.join(' | ')}</div>`
+    ).join('');
+    
+    resultEl.innerHTML = `<div style="margin-bottom:8px;font-weight:700;color:var(--green-dark);">✅ Preview of sheet data:</div>${preview}`;
+  } catch(err) {
+    resultEl.innerHTML = `<span style="color:var(--follow);">❌ Error: ${escapeHtml(err.message)}</span>`;
+  }
+}
+
+// Docs functions
+async function loadAvailableDocs() {
+  try {
+    const data = await apiCall('/oauth/google/docs');
+    if(data.error || !data.docs) {
+      console.error('Failed to load docs:', data.error);
+      return;
+    }
+    availableDocs = data.docs || [];
+    populateDocsSelector();
+  } catch(err) {
+    console.error('[loadAvailableDocs]', err);
+  }
+}
+
+function populateDocsSelector() {
+  const select = document.getElementById('docsSelector');
+  if(!select) return;
+  
+  if(!availableDocs.length) {
+    select.innerHTML = '<option value="">No documents found</option>';
+    return;
+  }
+  
+  select.innerHTML = '<option value="">Select a document…</option>' + 
+    availableDocs.map(d => `<option value="${d.id}" data-name="${escapeAttr(d.name)}">${escapeHtml(d.name)}</option>`).join('');
+  
+  // Restore saved selection
+  if(docsConfig.docId && availableDocs.some(d => d.id === docsConfig.docId)) {
+    select.value = docsConfig.docId;
+    onDocSelected();
+  }
+}
+
+async function onDocSelected() {
+  const select = document.getElementById('docsSelector');
+  const previewEl = document.getElementById('docPreview');
+  const previewText = document.getElementById('docPreviewText');
+  const docId = select.value;
+  
+  if(!docId) {
+    if(previewEl) previewEl.style.display = 'none';
+    docsConfig.docId = '';
+    docsConfig.docName = '';
+    return;
+  }
+  
+  const docName = select.options[select.selectedIndex]?.dataset?.name || '';
+  docsConfig.docId = docId;
+  docsConfig.docName = docName;
+  
+  if(previewEl) previewEl.style.display = 'block';
+  if(previewText) previewText.value = 'Loading document content...';
+  
+  await refreshDocContent();
+}
+
+async function refreshDocContent() {
+  const previewText = document.getElementById('docPreviewText');
+  const statusEl = document.getElementById('docsSaveStatus');
+  
+  if(!docsConfig.docId) return;
+  
+  if(previewText) previewText.value = 'Loading...';
+  if(statusEl) statusEl.textContent = 'Fetching document...';
+  
+  try {
+    const data = await apiCall(`/oauth/google/doc-content/${encodeURIComponent(docsConfig.docId)}`);
+    if(data.error || !data.content) {
+      if(previewText) previewText.value = `Error: ${data.error || 'Failed to load content'}`;
+      if(statusEl) statusEl.textContent = '';
+      return;
+    }
+    
+    docsConfig.content = data.content;
+    if(previewText) previewText.value = data.content.substring(0, 500) + (data.content.length > 500 ? '...' : '');
+    if(statusEl) statusEl.textContent = `Loaded ${data.content.length} characters`;
+  } catch(err) {
+    if(previewText) previewText.value = `Error: ${err.message}`;
+    if(statusEl) statusEl.textContent = '';
+    console.error('[refreshDocContent]', err);
+  }
+}
+
+function saveDocsConfig() {
+  if(!docsConfig.docId) {
+    toast('Please select a document first', true);
+    return;
+  }
+  
+  localStorage.setItem('chatbot_docs_config', JSON.stringify(docsConfig));
+  document.getElementById('docsSaveStatus').textContent = '✅ Document selection saved';
+  toast('✅ Document configuration saved');
+  
+  setTimeout(() => {
+    const statusEl = document.getElementById('docsSaveStatus');
+    if(statusEl) statusEl.textContent = '';
+  }, 3000);
+}
+
+function loadDocsConfig() {
+  try {
+    const saved = localStorage.getItem('chatbot_docs_config');
+    if(saved) {
+      docsConfig = JSON.parse(saved);
+    }
+  } catch(err) {
+    console.error('[loadDocsConfig]', err);
+  }
 }
 
 /* ---------------- API LAYER ---------------- */
