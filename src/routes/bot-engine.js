@@ -71,7 +71,9 @@ async function matchRule({ supabase }, { userId, phone, text, replyOptionId }) {
 
   const followUp = rule.follow_up || {};
   if (followUp.enabled) {
-    const dueAt = new Date(Date.now() + (followUp.hours || 4) * 3600 * 1000).toISOString();
+    // Enforce strict maximum follow-up time of 20 hours
+    const followUpHours = Math.min(followUp.hours || 4, 20);
+    const dueAt = new Date(Date.now() + followUpHours * 3600 * 1000).toISOString();
     const { error: insertErr } = await supabase.from('wb_bot_conversation_state').insert({
       user_id: userId, phone, rule_id: rule.id,
       last_inbound_at: new Date().toISOString(), follow_up_due_at: dueAt
