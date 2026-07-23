@@ -97,7 +97,13 @@ module.exports = function botBuilderRouter(deps) {
         ai_fallback: r.action.aiFallback || null,
         conditions: r.conditions || [],
         else_template_id: r.elseTemplateId || null,
-        follow_up: r.followUp || { enabled: false },
+        follow_up: (() => {
+          const fu = r.followUp || { enabled: false };
+          if (fu.enabled && fu.hours) {
+            fu.hours = Math.min(fu.hours, 20);
+          }
+          return fu;
+        })(),
         active: r.active !== false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -122,7 +128,13 @@ module.exports = function botBuilderRouter(deps) {
         ai_fallback: r.action?.aiFallback || null,
         conditions: r.conditions || [],
         else_template_id: r.elseTemplateId || null,
-        follow_up: r.followUp || { enabled: false },
+        follow_up: (() => {
+          const fu = r.followUp || { enabled: false };
+          if (fu.enabled && fu.hours) {
+            fu.hours = Math.min(fu.hours, 20);
+          }
+          return fu;
+        })(),
         active: r.active !== false,
         updated_at: new Date().toISOString()
       })
