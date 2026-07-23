@@ -578,8 +578,8 @@ function renderRuleEditor(){
         </div>
         <div class="follow-body ${rule.followUp.enabled?'':'disabled'}" id="follow-body">
           <div class="field-row">
-            <div class="field"><label>Wait</label>
-              <input type="number" min="1" id="f-follow-hours" value="${rule.followUp.hours}" /></div>
+            <div class="field"><label>Wait (max 20h)</label>
+              <input type="number" min="1" max="20" id="f-follow-hours" value="${rule.followUp.hours}" /></div>
             <div class="field"><label>If</label>
               <select id="f-follow-cond">
                 <option value="no_reply" ${rule.followUp.condition==='no_reply'?'selected':''}>No reply</option>
@@ -633,7 +633,12 @@ function renderRuleEditor(){
   wrap.querySelector('#follow-switch').addEventListener('click',()=>{
     rule.followUp.enabled=!rule.followUp.enabled; renderRuleEditor(); renderRuleList();
   });
-  wrap.querySelector('#f-follow-hours').addEventListener('input', e=>{rule.followUp.hours=+e.target.value||1;});
+  wrap.querySelector('#f-follow-hours').addEventListener('input', e=>{
+    let val = +e.target.value || 1;
+    if (val > 20) val = 20;
+    if (val < 1) val = 1;
+    rule.followUp.hours = val;
+  });
   wrap.querySelector('#f-follow-cond').addEventListener('change', e=>{rule.followUp.condition=e.target.value;});
   wrap.querySelector('#f-follow-tpl').addEventListener('change', e=>{rule.followUp.templateId=e.target.value||null;});
 
@@ -1400,7 +1405,13 @@ async function loadFromServer(){
         id:uid(), serverId:r.id, name:r.name, keywords:r.keywords||[], matchType:r.match_type,
         action:{type:r.action_type, templateId:r.action_template_id, aiPrompt:r.ai_prompt||'', aiFallback:r.ai_fallback||''},
         conditions:r.conditions||[], elseTemplateId:r.else_template_id,
-        followUp: r.follow_up || {enabled:false}
+        followUp: (() => {
+          const fu = r.follow_up || {enabled:false};
+          if (fu.enabled && fu.hours) {
+            fu.hours = Math.min(fu.hours, 20);
+          }
+          return fu;
+        })()
       }));
     }
     selectedRuleId = rules[0]?.id || null;
