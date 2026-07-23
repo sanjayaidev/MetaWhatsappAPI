@@ -579,7 +579,7 @@ function renderRuleEditor(){
         <div class="follow-body ${rule.followUp.enabled?'':'disabled'}" id="follow-body">
           <div class="field-row">
             <div class="field"><label>Wait (max 20h)</label>
-              <input type="number" min="1" max="20" id="f-follow-hours" value="${rule.followUp.hours}" /></div>
+              <select id="f-follow-hours">${Array.from({length:20},(_,i)=>i+1).map(h=>`<option value="${h}" ${h===rule.followUp.hours?'selected':''}>${h}h</option>`).join('')}</select></div>
             <div class="field"><label>If</label>
               <select id="f-follow-cond">
                 <option value="no_reply" ${rule.followUp.condition==='no_reply'?'selected':''}>No reply</option>
@@ -633,10 +633,8 @@ function renderRuleEditor(){
   wrap.querySelector('#follow-switch').addEventListener('click',()=>{
     rule.followUp.enabled=!rule.followUp.enabled; renderRuleEditor(); renderRuleList();
   });
-  wrap.querySelector('#f-follow-hours').addEventListener('input', e=>{
-    let val = +e.target.value || 1;
-    if (val > 20) val = 20;
-    if (val < 1) val = 1;
+  wrap.querySelector('#f-follow-hours').addEventListener('change', e=>{
+    let val = Math.min(20, Math.max(1, +e.target.value || 1));
     rule.followUp.hours = val;
   });
   wrap.querySelector('#f-follow-cond').addEventListener('change', e=>{rule.followUp.condition=e.target.value;});
@@ -1372,9 +1370,44 @@ function toast(msg, isErr){
   toast._t = setTimeout(()=>el.classList.remove('show'), 2600);
 }
 
+// Template pickers store the template's *local* id (uid()), not its
+// server UUID (t.serverId). Rows in wb_bot_rules reference templates by
+// their real wb_bot_templates.id (uuid), so any local id must be resolved
+// (and the template saved first, if it hasn't been yet) before a rule is
+// sent to the API — otherwise Postgres rejects it with something like
+// `invalid input syntax for type uuid: "jzrcij2"`.
+async function resolveTemplateId(localId){
+  if(!localId) return null;
+  const t = templates.find(t=>t.id===localId);
+  if(!t) return null;
+  if(!t.serverId) await saveTemplateToServer(t);
+  return t.serverId || null;
+}
+
 async function saveRuleToServer(rule){
   try{
-    const res = await api.saveRule(rule);
+    const resolvedConditions = [];
+    for(const c of rule.conditions||[]){
+      resolvedConditions.push({...c, templateId: await resolveTemplateId(c.templateId)});
+    }
+    const payload = {
+      ...rule,
+      action: {...rule.action, templateId: await resolveTemplateId(rule.action.templateId)},
+      elseTemplateId: await resolveTemplateId(rule.elseTemplateId),
+      followUp: {...rule.followUp, templateId: await resolveTemplateId(rule.followUp.templateId)},
+      conditions: resolvedConditions
+    };
+
+    if(payload.action.type==='template' && !payload.action.templateId){
+      toast('Choose (and save) a template for this rule\u2019s reply first', true);
+      return;
+    }
+    if(payload.followUp.enabled && !payload.followUp.templateId){
+      toast('Choose (and save) a follow-up template first', true);
+      return;
+    }
+
+    const res = await api.saveRule(payload);
     rule.serverId = res.rule.id; apiOnline = true;
     toast('Rule saved');
   }catch(err){
