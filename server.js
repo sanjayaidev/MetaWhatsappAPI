@@ -36,6 +36,7 @@ const billingRouter = require('./src/routes/billing');
 const webhooksInboundRouter = require('./src/routes/webhooks-inbound');
 const sheetWatchersRouter = require('./src/routes/sheet-watchers');
 const botBuilderRouter = require('./src/routes/bot-builder');
+const { matchRule } = require('./src/routes/bot-engine');
 const { startSheetPoller } = require('./src/sheet-poller');
 const createChannelSender = require('./src/channel-send');
 
@@ -1183,13 +1184,31 @@ app.get('/api/campaigns/:id/logs', verifyUser, async (req, res) => {
 // ================================================================
 app.get('/api/messages/received', verifyUser, async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
-  const { data, error } = await supabase
-    .from('wb_inbound_messages')
-    .select('*')
-    .eq('user_id', req.user.id)
-    .order('created_at', { ascending: false })
-    .limit(limit);
-  if (error) return res.status(500).json({ error: error.message });
+
+  const [{ data: inbound, error: inErr }, { data: outbound, error: outErr }] = await Promise.all([
+    supabase
+      .from('wb_inbound_messages')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: false })
+      .limit(limit),
+    supabase
+      .from('wb_outbound_messages')
+      .select('*')
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+  ]);
+  if (inErr) return res.status(500).json({ error: inErr.message });
+  if (outErr) return res.status(500).json({ error: outErr.message });
+
+  // Merge both into one chronological thread. `direction` lets the client
+  // tell an AI/bot/agent reply (out) apart from a customer message (in)
+  // without guessing from field shape.
+  const merged = [
+    ...(inbound || []).map(m => ({ ...m, direction: 'in' })),
+    ...(outbound || []).map(m => ({ ...m, direction: 'out' }))
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, limit);
 
   const { count: unread } = await supabase
     .from('wb_inbound_messages')
@@ -1197,7 +1216,7 @@ app.get('/api/messages/received', verifyUser, async (req, res) => {
     .eq('user_id', req.user.id)
     .eq('is_read', false);
 
-  res.json({ success: true, messages: data || [], unread: unread || 0 });
+  res.json({ success: true, messages: merged, unread: unread || 0 });
 });
 
 app.post('/api/messages/received/mark-read', verifyUser, async (req, res) => {
@@ -1312,6 +1331,11 @@ app.post('/api/messages/reply', verifyUser, async (req, res) => {
     if (!result.ok || !responseData.messages?.[0]?.id) {
       return res.status(502).json({ error: responseData.error?.message || `Meta API ${result.status}` });
     }
+    logOutboundMessage({
+      userId: req.user.id, waAccountId: waAccount.id, phone,
+      messageType: 'text', messageBody: message.trim(),
+      waMessageId: responseData.messages[0].id, source: 'manual'
+    });
     res.json({ success: true, wa_message_id: responseData.messages[0].id });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1459,6 +1483,12 @@ app.post('/api/messages/reply-interactive', verifyUser, async (req, res) => {
     if (!result.ok || !responseData.messages?.[0]?.id) {
       return res.status(502).json({ error: responseData.error?.message || `Meta API ${result.status}` });
     }
+    logOutboundMessage({
+      userId: req.user.id, waAccountId: waAccount.id, phone,
+      messageType: raw_interactive ? (raw_interactive.type || 'interactive') : (kind || 'interactive'),
+      messageBody: '[interactive reply]',
+      waMessageId: responseData.messages[0].id, source: 'manual'
+    });
     res.json({ success: true, wa_message_id: responseData.messages[0].id });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1782,26 +1812,53 @@ app.post('/webhook', async (req, res) => {
   // Verify signature — if META_APP_SECRET is configured, a valid signature is mandatory.
   // (Previously this only checked when a signature header happened to be present,
   // so a request with the header stripped would sail through unverified.)
+  // signatureValid stays true (i.e. "not required") when no secret is configured,
+  // and we no longer bail out silently on failure — the attempt is logged below
+  // first so rejected deliveries are still visible for debugging, THEN skipped.
+  let signatureValid = true;
+  let signatureReason = null;
   if (process.env.META_APP_SECRET) {
     const sigHeader = req.headers['x-hub-signature-256'] || '';
     if (!sigHeader) {
-      console.warn('[webhook] rejected: missing x-hub-signature-256 header');
-      return;
-    }
-    const expected = 'sha256=' + crypto.createHmac('sha256', process.env.META_APP_SECRET).update(req.rawBody).digest('hex');
-    try {
-      const sigBuf = Buffer.from(sigHeader);
-      const expBuf = Buffer.from(expected);
-      if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
-        console.warn('[webhook] signature verification FAILED');
-        return;
+      signatureValid = false;
+      signatureReason = 'missing x-hub-signature-256 header';
+    } else {
+      const expected = 'sha256=' + crypto.createHmac('sha256', process.env.META_APP_SECRET).update(req.rawBody).digest('hex');
+      try {
+        const sigBuf = Buffer.from(sigHeader);
+        const expBuf = Buffer.from(expected);
+        if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+          signatureValid = false;
+          signatureReason = 'signature mismatch';
+        }
+      } catch (_) {
+        signatureValid = false;
+        signatureReason = 'signature comparison error';
       }
-    } catch (_) { return; }
+    }
+    if (!signatureValid) console.warn('[webhook] rejected:', signatureReason);
   } else {
     console.warn('[webhook] META_APP_SECRET not set — skipping signature verification (INSECURE, set it in production)');
   }
 
   const body = req.body;
+
+  // Fire-and-forget audit log of every delivery Meta sends us, valid or not,
+  // so webhook issues (missed events, bad signatures, unexpected payload
+  // shapes) can be diagnosed after the fact instead of only via console.log.
+  supabase.from('wb_webhook_logs').insert({
+    waba_id: body?.entry?.[0]?.id || null,
+    object_type: body?.object || null,
+    fields: [...new Set((body?.entry || []).flatMap(e => (e.changes || []).map(c => c.field)))],
+    signature_valid: signatureValid,
+    reject_reason: signatureReason,
+    payload: body,
+    created_at: new Date().toISOString()
+  }).then(({ error }) => {
+    if (error) console.error('[webhook] failed to write webhook log:', error.message);
+  });
+
+  if (!signatureValid) return;
   if (body.object !== 'whatsapp_business_account') return;
 
   for (const entry of (body.entry || [])) {
@@ -1903,6 +1960,33 @@ function extractMessagePreview(msg) {
   }
 }
 
+// Persists a message WE sent (AI auto-reply, bot-builder rule, template
+// auto-reply, or a human agent's manual reply) so it shows up in the
+// conversation thread alongside inbound messages. Previously nothing sent
+// this way was ever saved — replies went straight to the Graph API and the
+// only trace of them was an optimistic, client-side-only bubble in
+// mobile.html that disappeared on refresh or wasn't visible from crm.html
+// or a second device at all. Fire-and-forget: a logging failure should
+// never block or fail the actual send.
+async function logOutboundMessage({ userId, waAccountId = null, phone, contactName = '', messageType = 'text', messageBody = '', waMessageId = null, source }) {
+  try {
+    const { error } = await supabase.from('wb_outbound_messages').insert({
+      user_id: userId,
+      wa_account_id: waAccountId,
+      phone,
+      contact_name: contactName,
+      message_type: messageType,
+      message_body: messageBody,
+      wa_message_id: waMessageId,
+      source, // 'manual' | 'ai_auto_reply' | 'template_auto_reply' | 'bot_builder'
+      created_at: new Date().toISOString()
+    });
+    if (error) console.error('[outbound-log] failed to store sent message:', error.message);
+  } catch (err) {
+    console.error('[outbound-log] failed to store sent message:', err.message);
+  }
+}
+
 // Handles a single incoming WhatsApp message: logs it (all types, so it shows
 // up in the Received tab) and, for plain text only, checks the account's
 // auto-reply setting, asks the configured AI model for a reply, and sends it back.
@@ -1960,6 +2044,85 @@ async function handleIncomingMessage(value, msg) {
     body: message_body
   }).catch(e => console.error('[webhook] push notification failed:', e.message));
 
+  // Chatbot-builder rules (src/routes/bot-engine.js) run before the generic
+  // dashboard auto-reply below. This engine was previously fully built but
+  // never actually invoked from here — it only existed as an "integration
+  // note" comment at the bottom of bot-engine.js — which is why bot-builder
+  // rules silently never fired even though the dashboard's own auto-reply
+  // toggle worked fine.
+  if (msg.type === 'text' && msg.text?.body) {
+    let match = null;
+    try {
+      match = await matchRule({ supabase }, {
+        userId: waAccount.user_id,
+        phone: msg.from,
+        text: msg.text.body,
+        replyOptionId: msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id
+      });
+    } catch (err) {
+      console.error('[webhook] bot-engine matchRule failed:', err.message);
+    }
+
+    if (match) {
+      if (match.actionType === 'template' && match.templateId) {
+        try {
+          const { data: tpl } = await supabase
+            .from('wb_bot_templates').select('payload').eq('id', match.templateId).single();
+          if (tpl) {
+            const plainToken = decryptToken(waAccount.access_token);
+            const result = await fetch(`https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${plainToken}` },
+              body: JSON.stringify({ messaging_product: 'whatsapp', to: msg.from, ...tpl.payload })
+            });
+            const responseData = await result.json().catch(() => ({}));
+            if (result.ok) {
+              logOutboundMessage({
+                userId: waAccount.user_id, waAccountId: waAccount.id, phone: msg.from,
+                contactName, messageType: 'bot_template',
+                messageBody: `[bot rule ${match.ruleId}] template reply`,
+                waMessageId: responseData?.messages?.[0]?.id || null, source: 'bot_builder'
+              });
+            } else {
+              console.error('[webhook] bot-engine template send failed:', responseData?.error?.message || result.status);
+            }
+          }
+        } catch (err) {
+          console.error('[webhook] bot-engine template send failed:', err.message);
+        }
+      } else if (match.actionType === 'ai') {
+        try {
+          const replyText = await generateReply({
+            model: DEFAULT_AI_MODEL,
+            systemPrompt: match.aiPrompt || 'You are a helpful business assistant.',
+            userText: msg.text.body
+          }).catch(() => match.aiFallback);
+          if (replyText) {
+            const plainToken = decryptToken(waAccount.access_token);
+            const result = await fetch(`https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${plainToken}` },
+              body: JSON.stringify({ messaging_product: 'whatsapp', to: msg.from, type: 'text', text: { body: replyText } })
+            });
+            const responseData = await result.json().catch(() => ({}));
+            if (result.ok) {
+              logOutboundMessage({
+                userId: waAccount.user_id, waAccountId: waAccount.id, phone: msg.from,
+                contactName, messageType: 'text', messageBody: replyText,
+                waMessageId: responseData?.messages?.[0]?.id || null, source: 'bot_builder'
+              });
+            } else {
+              console.error('[webhook] bot-engine AI send failed:', responseData?.error?.message || result.status);
+            }
+          }
+        } catch (err) {
+          console.error('[webhook] bot-engine AI reply failed:', err.message);
+        }
+      }
+      return; // a bot-builder rule handled this — skip the generic auto_reply settings below
+    }
+  }
+
   // Only plain text messages trigger the AI auto-reply.
   if (msg.type !== 'text' || !msg.text?.body) return;
 
@@ -1989,7 +2152,7 @@ async function handleIncomingMessage(value, msg) {
       const payload = buildMessagePayload(tpl.kind, tpl.config, msg.from, vars);
 
       const plainToken = decryptToken(waAccount.access_token);
-      await fetch(
+      const result = await fetch(
         `https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`,
         {
           method: 'POST',
@@ -1997,6 +2160,16 @@ async function handleIncomingMessage(value, msg) {
           body: JSON.stringify(payload),
         }
       );
+      const responseData = await result.json().catch(() => ({}));
+      if (result.ok) {
+        logOutboundMessage({
+          userId: waAccount.user_id, waAccountId: waAccount.id, phone: msg.from,
+          contactName, messageType: tpl.kind || 'interactive', messageBody: '[template auto-reply]',
+          waMessageId: responseData?.messages?.[0]?.id || null, source: 'template_auto_reply'
+        });
+      } else {
+        console.error('[webhook] template auto-reply failed:', responseData?.error?.message || result.status);
+      }
     } catch (err) {
       console.error('[webhook] template auto-reply failed:', err.message);
     }
@@ -2018,7 +2191,7 @@ async function handleIncomingMessage(value, msg) {
 
   try {
     const plainToken = decryptToken(waAccount.access_token);
-    await fetch(
+    const result = await fetch(
       `https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`,
       {
         method: 'POST',
@@ -2031,6 +2204,16 @@ async function handleIncomingMessage(value, msg) {
         }),
       }
     );
+    const responseData = await result.json().catch(() => ({}));
+    if (result.ok) {
+      logOutboundMessage({
+        userId: waAccount.user_id, waAccountId: waAccount.id, phone: msg.from,
+        contactName, messageType: 'text', messageBody: replyText,
+        waMessageId: responseData?.messages?.[0]?.id || null, source: 'ai_auto_reply'
+      });
+    } else {
+      console.error('[webhook] failed to send auto-reply:', responseData?.error?.message || result.status);
+    }
   } catch (err) {
     console.error('[webhook] failed to send auto-reply:', err.message);
   }
