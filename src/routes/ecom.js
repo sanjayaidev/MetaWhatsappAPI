@@ -18,6 +18,23 @@ module.exports = function ecomRouter(deps) {
   const payments = createPaymentsModule({ supabase });
   const router = express.Router();
 
+  // ── Merchant ecom settings (default payment provider, currency, bot copy) ─
+  router.get('/settings', async (req, res) => {
+    const { data, error } = await supabase.from('wb_ecom_settings').select('*').eq('user_id', req.user.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ settings: data || { user_id: req.user.id, default_provider: 'stripe', currency: 'INR', catalog_greeting: "Here's what we have available:", checkout_button_label: 'Checkout' } });
+  });
+
+  router.put('/settings', async (req, res) => {
+    const allowed = ['default_provider', 'currency', 'catalog_greeting', 'checkout_button_label'];
+    const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
+    const { data, error } = await supabase.from('wb_ecom_settings')
+      .upsert({ user_id: req.user.id, ...updates, updated_at: new Date().toISOString() })
+      .select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ settings: data });
+  });
+
   // ── Products ──────────────────────────────────────────────────────────
   router.get('/products', async (req, res) => {
     const { data, error } = await supabase.from('wb_products')

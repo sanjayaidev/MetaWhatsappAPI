@@ -38,6 +38,9 @@ const sheetWatchersRouter = require('./src/routes/sheet-watchers');
 const botBuilderRouter = require('./src/routes/bot-builder');
 const ecomRouter = require('./src/routes/ecom');
 const paymentsWebhookRouter = require('./src/routes/payments-webhook');
+const createCartModule = require('./src/ecom/cart');
+const createPaymentsModule = require('./src/payments');
+const ecomMessages = require('./src/ecom/messages');
 const { matchRule } = require('./src/routes/bot-engine');
 const { startSheetPoller } = require('./src/sheet-poller');
 const createChannelSender = require('./src/channel-send');
@@ -58,6 +61,12 @@ const supabase = createClient(
     realtime: { transport: WebSocket }
   }
 );
+
+// Ecom cart/checkout — instantiated once here so both the REST routers
+// (mounted further down) and handleIncomingMessage's bot flow (below) share
+// the exact same cart/order logic instead of two divergent copies.
+const ecomCart = createCartModule({ supabase });
+const ecomPayments = createPaymentsModule({ supabase });
 
 // ================================================================
 // 2. CRYPTO — AES-256-GCM for WA token encryption
@@ -2033,6 +2042,76 @@ async function logOutboundMessage({ userId, waAccountId = null, phone, contactNa
 // Handles a single incoming WhatsApp message: logs it (all types, so it shows
 // up in the Received tab) and, for plain text only, checks the account's
 // auto-reply setting, asks the configured AI model for a reply, and sends it back.
+// Handles a tap on an ecom-flow button/list row (ids like "ecom_add:<id>",
+// "ecom_view_cart", "ecom_checkout", "ecom_clear"). Runs BEFORE bot-engine's
+// keyword rules — these are direct cart actions from a specific button tap,
+// not something a keyword match should ever intercept.
+async function handleEcomInteraction({ waAccount, from, contactName, replyId }) {
+  const plainToken = decryptToken(waAccount.access_token);
+
+  async function send(payload) {
+    const result = await fetch(`https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${plainToken}` },
+      body: JSON.stringify(payload)
+    });
+    const responseData = await result.json().catch(() => ({}));
+    if (result.ok) {
+      const { message_type, message_body } = extractOutboundPreview(payload);
+      logOutboundMessage({
+        userId: waAccount.user_id, waAccountId: waAccount.id, phone: from,
+        contactName, messageType: message_type, messageBody: message_body,
+        waMessageId: responseData?.messages?.[0]?.id || null, source: 'bot_builder'
+      });
+    } else {
+      console.error('[webhook] ecom send failed:', responseData?.error?.message || result.status);
+    }
+  }
+
+  const { data: settings } = await supabase.from('wb_ecom_settings').select('*').eq('user_id', waAccount.user_id).maybeSingle();
+  const currency = settings?.currency || 'INR';
+  const checkoutLabel = settings?.checkout_button_label || 'Checkout';
+  const provider = settings?.default_provider || 'stripe';
+
+  if (replyId.startsWith('ecom_add:')) {
+    const productId = replyId.slice('ecom_add:'.length);
+    const { data: product } = await supabase.from('wb_products').select('name').eq('id', productId).single();
+    await ecomCart.addItem(waAccount.user_id, 'whatsapp', from, productId, 1, contactName);
+    const summary = await ecomCart.getSummary(waAccount.user_id, 'whatsapp', from);
+    await send(ecomMessages.buildAddedToCartMessage(from, product?.name || 'Item', summary, currency));
+    return;
+  }
+
+  if (replyId === 'ecom_view_cart') {
+    const summary = await ecomCart.getSummary(waAccount.user_id, 'whatsapp', from);
+    await send(ecomMessages.buildCartSummaryMessage(from, summary, checkoutLabel, currency));
+    return;
+  }
+
+  if (replyId === 'ecom_clear') {
+    const summary = await ecomCart.getSummary(waAccount.user_id, 'whatsapp', from);
+    if (summary.cart) await ecomCart.clearCart(summary.cart.id);
+    await send({ messaging_product: 'whatsapp', to: from, type: 'text', text: { body: 'Cart cleared. Say "shop" to browse products again!' } });
+    return;
+  }
+
+  if (replyId === 'ecom_checkout') {
+    const { order, items } = await ecomCart.checkoutCart(waAccount.user_id, 'whatsapp', from, currency);
+    const checkoutResult = await ecomPayments.createCheckout({
+      provider, order, items,
+      successUrl: `${SELF_URL}/ecom-pay.html?order_id=${order.id}&status=success`,
+      cancelUrl: `${SELF_URL}/ecom-pay.html?order_id=${order.id}&status=cancel`,
+    });
+    await supabase.from('wb_orders').update({ provider, provider_order_id: checkoutResult.provider_order_id }).eq('id', order.id);
+    // Razorpay has no redirect URL of its own (Checkout.js is a client-side
+    // widget, not a hosted page) — point at this repo's own /ecom-pay.html,
+    // which mounts Checkout.js using the order's client_fields, instead.
+    const payUrl = checkoutResult.checkout_url || `${SELF_URL}/ecom-pay.html?order_id=${order.id}`;
+    await send(ecomMessages.buildCheckoutLinkMessage(from, payUrl));
+    return;
+  }
+}
+
 async function handleIncomingMessage(value, msg) {
   const phoneNumberId = value?.metadata?.phone_number_id;
   if (!phoneNumberId) return;
@@ -2086,6 +2165,20 @@ async function handleIncomingMessage(value, msg) {
     contactName,
     body: message_body
   }).catch(e => console.error('[webhook] push notification failed:', e.message));
+
+  // Ecom flow buttons ("Add to cart", "Checkout", "View Cart", "Clear cart")
+  // are handled directly, before bot-engine's keyword rules even run — a
+  // button tap is an explicit action, not something a keyword match should
+  // intercept or override.
+  const ecomReplyId = msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id;
+  if (ecomReplyId && ecomReplyId.startsWith('ecom_')) {
+    try {
+      await handleEcomInteraction({ waAccount, from: msg.from, contactName, replyId: ecomReplyId });
+    } catch (err) {
+      console.error('[webhook] ecom interaction failed:', err.message);
+    }
+    return;
+  }
 
   // Chatbot-builder rules (src/routes/bot-engine.js) run before the generic
   // dashboard auto-reply below. This engine was previously fully built but
@@ -2171,6 +2264,40 @@ async function handleIncomingMessage(value, msg) {
           }
         } catch (err) {
           console.error('[webhook] bot-engine AI reply failed:', err.message);
+        }
+      } else if (match.actionType === 'ecom_catalog') {
+        try {
+          const productIds = match.actionConfig?.product_ids;
+          let query = supabase.from('wb_products').select('*').eq('user_id', waAccount.user_id).eq('is_active', true).order('created_at', { ascending: false });
+          if (Array.isArray(productIds) && productIds.length) query = query.in('id', productIds);
+          const { data: products } = await query;
+
+          const { data: settings } = await supabase.from('wb_ecom_settings').select('catalog_greeting').eq('user_id', waAccount.user_id).maybeSingle();
+
+          if (!products?.length) {
+            console.error('[webhook] ecom_catalog rule fired but merchant has no active products');
+            return;
+          }
+          const payload = ecomMessages.buildCatalogMessage(msg.from, products, settings?.catalog_greeting);
+          const plainToken = decryptToken(waAccount.access_token);
+          const result = await fetch(`https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${plainToken}` },
+            body: JSON.stringify(payload)
+          });
+          const responseData = await result.json().catch(() => ({}));
+          if (result.ok) {
+            const { message_type, message_body } = extractOutboundPreview(payload);
+            logOutboundMessage({
+              userId: waAccount.user_id, waAccountId: waAccount.id, phone: msg.from,
+              contactName, messageType: message_type, messageBody: message_body,
+              waMessageId: responseData?.messages?.[0]?.id || null, source: 'bot_builder'
+            });
+          } else {
+            console.error('[webhook] ecom_catalog send failed:', responseData?.error?.message || result.status);
+          }
+        } catch (err) {
+          console.error('[webhook] ecom_catalog rule failed:', err.message);
         }
       }
       return; // a bot-builder rule handled this — skip the generic auto_reply settings below
@@ -2596,6 +2723,19 @@ app.use('/api/oauth', flowsRouter(crmDeps)); // OAuth callbacks for flow builder
 app.use('/api/meetings', meetingsRouter(crmDeps));
 app.use('/api', chatbotRouter(crmDeps)); // exposes /api/chatbot-config, /api/chatbot/*
 app.use('/api/billing', billingRouter(crmDeps));
+// Public (no-auth) — read-only, and only exposes the fields ecom-pay.html
+// needs to render/poll a checkout: no contact info, no merchant data.
+// Registered before the verifyUser-gated /api/ecom mount below so it isn't
+// swallowed by it.
+app.get('/api/ecom/orders/:id/public', async (req, res) => {
+  const { data: order, error } = await supabase.from('wb_orders')
+    .select('id, amount, currency, status, provider, provider_order_id').eq('id', req.params.id).single();
+  if (error || !order) return res.status(404).json({ error: 'Order not found' });
+  const client_fields = order.provider === 'razorpay' && order.provider_order_id
+    ? { razorpay_order_id: order.provider_order_id, razorpay_key_id: process.env.RAZORPAY_TEST_KEY_ID || process.env.RAZORPAY_KEY_ID }
+    : {};
+  res.json({ order, client_fields });
+});
 app.use('/api/ecom', verifyUser, ecomRouter(crmDeps));
 // Public — payment providers call this directly with no user session.
 // The order id embedded in each provider's payload is how we find the merchant.

@@ -97,6 +97,7 @@ module.exports = function botBuilderRouter(deps) {
         ai_fallback: r.action.aiFallback || null,
         conditions: r.conditions || [],
         else_template_id: r.elseTemplateId || null,
+        action_config: r.action.config || {},
         follow_up: (() => {
           const fu = r.followUp || { enabled: false };
           if (fu.enabled && fu.hours) {
@@ -128,6 +129,7 @@ module.exports = function botBuilderRouter(deps) {
         ai_fallback: r.action?.aiFallback || null,
         conditions: r.conditions || [],
         else_template_id: r.elseTemplateId || null,
+        action_config: r.action?.config || {},
         follow_up: (() => {
           const fu = r.followUp || { enabled: false };
           if (fu.enabled && fu.hours) {

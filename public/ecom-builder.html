@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ecom | WaBlast Pro</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Syne:wght@800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'DM Sans', sans-serif; background: #080b10; color: #e8f0fb; min-height: 100vh; }
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 16px 28px; border-bottom: 1px solid #182238; }
+.brand { display: flex; align-items: center; gap: 10px; font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 800; }
+.brand-icon { width: 34px; height: 34px; background: #22d172; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.tabs { display: flex; gap: 6px; padding: 0 28px; border-bottom: 1px solid #182238; }
+.tab { padding: 12px 18px; font-size: 13px; font-weight: 600; color: #7a90b0; cursor: pointer; border-bottom: 2px solid transparent; }
+.tab.active { color: #e8f0fb; border-bottom-color: #22d172; }
+.panel { display: none; padding: 24px 28px; max-width: 980px; }
+.panel.active { display: block; }
+h2 { font-size: 18px; margin-bottom: 4px; }
+.sub { color: #7a90b0; font-size: 13px; margin-bottom: 20px; }
+.card { background: #0f1520; border: 1px solid #263550; border-radius: 16px; padding: 20px; margin-bottom: 16px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; }
+.fg { flex: 1; min-width: 160px; margin-bottom: 12px; }
+.fg label { display: block; font-size: 11px; font-weight: 600; color: #7a90b0; letter-spacing: .04em; text-transform: uppercase; margin-bottom: 6px; }
+input, textarea, select { width: 100%; background: #0c1018; border: 1px solid #263550; border-radius: 10px; padding: 10px 12px; color: #e8f0fb; font-family: inherit; font-size: 14px; }
+input:focus, textarea:focus, select:focus { outline: none; border-color: #22d172; }
+button.primary { background: #22d172; color: #000; font-weight: 700; border: none; border-radius: 10px; padding: 10px 18px; cursor: pointer; font-size: 13px; }
+button.primary:hover { background: #1bbf64; }
+button.ghost { background: transparent; color: #7a90b0; border: 1px solid #263550; border-radius: 10px; padding: 9px 16px; cursor: pointer; font-size: 13px; }
+button.ghost:hover { border-color: #f04f6e; color: #f04f6e; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #182238; }
+th { color: #7a90b0; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.badge.pending { background: rgba(240,193,79,0.15); color: #f0c14f; }
+.badge.paid { background: rgba(34,209,114,0.15); color: #22d172; }
+.badge.failed, .badge.cancelled { background: rgba(240,79,110,0.15); color: #f04f6e; }
+.badge.fulfilled { background: rgba(90,140,255,0.15); color: #5a8cff; }
+.checklist { max-height: 220px; overflow-y: auto; border: 1px solid #263550; border-radius: 10px; padding: 8px; }
+.checklist label { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.empty { color: #445570; font-size: 13px; padding: 24px; text-align: center; }
+.toast { position: fixed; bottom: 24px; right: 24px; background: #0f1520; border: 1px solid #263550; border-radius: 12px; padding: 12px 18px; font-size: 13px; display: none; }
+.toast.error { border-color: #f04f6e; color: #f04f6e; }
+.toast.success { border-color: #22d172; color: #22d172; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><div class="brand-icon">🛍️</div>Ecom Module</div>
+  <a href="/dashboard.html" style="color:#7a90b0;font-size:13px;text-decoration:none">← Back to Dashboard</a>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="products">Products</div>
+  <div class="tab" data-tab="automation">Automation</div>
+  <div class="tab" data-tab="orders">Orders</div>
+  <div class="tab" data-tab="settings">Settings</div>
+</div>
+
+<!-- PRODUCTS -->
+<div class="panel active" id="panel-products">
+  <h2>Product Catalog</h2>
+  <p class="sub">These are the products your bot can show and sell through WhatsApp/Instagram chat — no Meta Catalog or separate store needed.</p>
+
+  <div class="card">
+    <div class="row">
+      <div class="fg"><label>Name</label><input id="p_name" placeholder="Blueberry cheesecake"></div>
+      <div class="fg"><label>Price</label><input id="p_price" type="number" step="0.01" placeholder="499"></div>
+      <div class="fg"><label>Currency</label><input id="p_currency" value="INR"></div>
+    </div>
+    <div class="row">
+      <div class="fg"><label>Image URL</label><input id="p_image" placeholder="https://…"></div>
+      <div class="fg"><label>Stock qty (blank = unlimited)</label><input id="p_stock" type="number"></div>
+    </div>
+    <div class="fg"><label>Description</label><textarea id="p_desc" rows="2"></textarea></div>
+    <button class="primary" onclick="saveProduct()">Add Product</button>
+  </div>
+
+  <div class="card" style="padding:0">
+    <table>
+      <thead><tr><th>Name</th><th>Price</th><th>Stock</th><th>Active</th><th></th></tr></thead>
+      <tbody id="productsBody"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- AUTOMATION -->
+<div class="panel" id="panel-automation">
+  <h2>Catalog Trigger</h2>
+  <p class="sub">When a customer types one of these keywords, the bot sends them your product catalog as a chat message.</p>
+  <div class="card">
+    <div class="row">
+      <div class="fg"><label>Trigger keywords (comma-separated)</label><input id="a_keywords" placeholder="shop, buy, products, catalog"></div>
+    </div>
+    <div class="fg">
+      <label>Products to include (leave all unchecked to show all active products)</label>
+      <div class="checklist" id="productChecklist"><div class="empty">Loading…</div></div>
+    </div>
+    <button class="primary" onclick="saveCatalogRule()">Save Trigger</button>
+  </div>
+
+  <h2 style="margin-top:28px">How the rest of the flow works</h2>
+  <p class="sub">These steps happen automatically once the catalog trigger above is set — nothing else to configure.</p>
+  <div class="card">
+    <table>
+      <tbody>
+        <tr><td style="width:140px"><b>Add to cart</b></td><td>Customer taps a product in the catalog list → added to their cart automatically.</td></tr>
+        <tr><td><b>View Cart</b></td><td>Shown after every "Add to cart" tap, or the customer can say "cart".</td></tr>
+        <tr><td><b>Checkout</b></td><td>Tapping "Checkout" creates the order and sends a secure payment link using the provider set in Settings.</td></tr>
+        <tr><td><b>Confirmation</b></td><td>Once payment is confirmed, the bot automatically messages the customer back — no manual step needed.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ORDERS -->
+<div class="panel" id="panel-orders">
+  <h2>Orders</h2>
+  <p class="sub">Every order placed through the ecom bot flow, across WhatsApp and Instagram.</p>
+  <div class="card" style="padding:0">
+    <table>
+      <thead><tr><th>Order</th><th>Channel</th><th>Contact</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+      <tbody id="ordersBody"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div class="panel" id="panel-settings">
+  <h2>Checkout Settings</h2>
+  <p class="sub">Which payment provider and currency the bot uses when a customer checks out.</p>
+  <div class="card">
+    <div class="row">
+      <div class="fg"><label>Default provider</label>
+        <select id="s_provider"><option value="stripe">Stripe</option><option value="razorpay">Razorpay</option><option value="paypal">PayPal</option></select>
+      </div>
+      <div class="fg"><label>Currency</label><input id="s_currency" value="INR"></div>
+    </div>
+    <div class="fg"><label>Catalog greeting</label><input id="s_greeting" placeholder="Here's what we have available:"></div>
+    <div class="fg"><label>Checkout button label</label><input id="s_checkout_label" placeholder="Checkout"></div>
+    <button class="primary" onclick="saveSettings()">Save Settings</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const AUTH_TOKEN_STORAGE_KEY = 'supabase_token'; // matches login.html / chatbot-builder.html storage key
+function getAuthToken(){ return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || ''; }
+
+async function apiCall(path, opts={}){
+  const token = getAuthToken();
+  const res = await fetch('/api/ecom' + path, {
+    headers: { 'Content-Type': 'application/json', ...(token ? {Authorization:`Bearer ${token}`} : {}) },
+    ...opts
+  });
+  if(!res.ok){ const e = await res.json().catch(()=>({error:res.statusText})); throw new Error(e.error||'Request failed'); }
+  return res.status===204 ? null : res.json();
+}
+async function botBuilderCall(path, opts={}){
+  const token = getAuthToken();
+  const res = await fetch('/api/bot-builder' + path, {
+    headers: { 'Content-Type': 'application/json', ...(token ? {Authorization:`Bearer ${token}`} : {}) },
+    ...opts
+  });
+  if(!res.ok){ const e = await res.json().catch(()=>({error:res.statusText})); throw new Error(e.error||'Request failed'); }
+  return res.status===204 ? null : res.json();
+}
+
+function toast(msg, type='success'){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast ' + type; t.style.display = 'block';
+  setTimeout(()=> t.style.display='none', 3000);
+}
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-'+tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'automation') loadProductChecklist();
+    if (tab.dataset.tab === 'orders') loadOrders();
+  };
+});
+
+/* ---------------- PRODUCTS ---------------- */
+let products = [];
+
+async function loadProducts(){
+  try {
+    const data = await apiCall('/products');
+    products = data.products || [];
+    renderProducts();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+function renderProducts(){
+  const body = document.getElementById('productsBody');
+  if (!products.length) { body.innerHTML = '<tr><td colspan="5" class="empty">No products yet — add your first one above.</td></tr>'; return; }
+  body.innerHTML = products.map(p => `
+    <tr>
+      <td>${p.name}</td>
+      <td>${p.currency} ${Number(p.price).toFixed(2)}</td>
+      <td>${p.stock_qty === null ? '∞' : p.stock_qty}</td>
+      <td>${p.is_active ? '✅' : '—'}</td>
+      <td><button class="ghost" onclick="deleteProduct('${p.id}')">Delete</button></td>
+    </tr>
+  `).join('');
+}
+
+async function saveProduct(){
+  const name = document.getElementById('p_name').value.trim();
+  const price = document.getElementById('p_price').value;
+  if (!name || !price) { toast('Name and price are required', 'error'); return; }
+  try {
+    await apiCall('/products', { method: 'POST', body: JSON.stringify({
+      name, price: Number(price),
+      currency: document.getElementById('p_currency').value.trim() || 'INR',
+      image_url: document.getElementById('p_image').value.trim() || null,
+      stock_qty: document.getElementById('p_stock').value ? Number(document.getElementById('p_stock').value) : null,
+      description: document.getElementById('p_desc').value.trim(),
+    })});
+    ['p_name','p_price','p_image','p_stock','p_desc'].forEach(id => document.getElementById(id).value = '');
+    toast('Product added');
+    loadProducts();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function deleteProduct(id){
+  if (!confirm('Delete this product?')) return;
+  try { await apiCall('/products/'+id, { method: 'DELETE' }); toast('Deleted'); loadProducts(); }
+  catch (err) { toast(err.message, 'error'); }
+}
+
+/* ---------------- AUTOMATION (catalog trigger rule) ---------------- */
+const ECOM_RULE_NAME = '__ecom_catalog_trigger'; // internal marker so we always edit the same rule
+let existingCatalogRule = null;
+
+async function loadProductChecklist(){
+  if (!products.length) await loadProducts();
+  const list = document.getElementById('productChecklist');
+  if (!products.length) { list.innerHTML = '<div class="empty">Add products first.</div>'; return; }
+
+  let selectedIds = [];
+  try {
+    const { rules } = await botBuilderCall('/rules');
+    existingCatalogRule = (rules || []).find(r => r.name === ECOM_RULE_NAME) || null;
+    if (existingCatalogRule) {
+      document.getElementById('a_keywords').value = (existingCatalogRule.keywords || []).join(', ');
+      selectedIds = existingCatalogRule.action_config?.product_ids || [];
+    }
+  } catch (err) { toast(err.message, 'error'); }
+
+  list.innerHTML = products.map(p => `
+    <label><input type="checkbox" value="${p.id}" ${selectedIds.includes(p.id) ? 'checked' : ''}> ${p.name}</label>
+  `).join('');
+}
+
+async function saveCatalogRule(){
+  const keywords = document.getElementById('a_keywords').value.split(',').map(s=>s.trim()).filter(Boolean);
+  if (!keywords.length) { toast('Add at least one keyword', 'error'); return; }
+  const productIds = Array.from(document.querySelectorAll('#productChecklist input:checked')).map(el => el.value);
+
+  const body = {
+    name: ECOM_RULE_NAME,
+    keywords, matchType: 'contains',
+    action: { type: 'ecom_catalog', config: { product_ids: productIds } },
+    active: true,
+  };
+  try {
+    if (existingCatalogRule) await botBuilderCall('/rules/'+existingCatalogRule.id, { method: 'PUT', body: JSON.stringify(body) });
+    else await botBuilderCall('/rules', { method: 'POST', body: JSON.stringify(body) });
+    toast('Catalog trigger saved');
+    loadProductChecklist();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* ---------------- ORDERS ---------------- */
+async function loadOrders(){
+  try {
+    const { orders } = await apiCall('/orders');
+    const body = document.getElementById('ordersBody');
+    if (!orders.length) { body.innerHTML = '<tr><td colspan="6" class="empty">No orders yet.</td></tr>'; return; }
+    body.innerHTML = orders.map(o => `
+      <tr>
+        <td>#${o.id.slice(0,8)}</td>
+        <td>${o.channel}</td>
+        <td>${o.contact_name || o.contact_id || '—'}</td>
+        <td>${o.currency} ${Number(o.amount).toFixed(2)}</td>
+        <td><span class="badge ${o.status}">${o.status}</span></td>
+        <td>
+          <select onchange="updateOrderStatus('${o.id}', this.value)">
+            ${['pending','paid','failed','cancelled','fulfilled'].map(s=>`<option value="${s}" ${s===o.status?'selected':''}>${s}</option>`).join('')}
+          </select>
+        </td>
+      </tr>
+    `).join('');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function updateOrderStatus(id, status){
+  try { await apiCall('/orders/'+id, { method: 'PUT', body: JSON.stringify({ status }) }); toast('Order updated'); }
+  catch (err) { toast(err.message, 'error'); }
+}
+
+/* ---------------- SETTINGS ---------------- */
+async function loadSettings(){
+  try {
+    const { settings } = await apiCall('/settings');
+    document.getElementById('s_provider').value = settings.default_provider || 'stripe';
+    document.getElementById('s_currency').value = settings.currency || 'INR';
+    document.getElementById('s_greeting').value = settings.catalog_greeting || '';
+    document.getElementById('s_checkout_label').value = settings.checkout_button_label || '';
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function saveSettings(){
+  try {
+    await apiCall('/settings', { method: 'PUT', body: JSON.stringify({
+      default_provider: document.getElementById('s_provider').value,
+      currency: document.getElementById('s_currency').value.trim() || 'INR',
+      catalog_greeting: document.getElementById('s_greeting').value.trim(),
+      checkout_button_label: document.getElementById('s_checkout_label').value.trim(),
+    })});
+    toast('Settings saved');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+loadProducts();
+loadSettings();
+</script>
+</body>
+</html>

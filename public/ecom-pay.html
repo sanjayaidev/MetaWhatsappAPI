@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Complete your payment</title>
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'DM Sans', -apple-system, sans-serif; background: #080b10; color: #e8f0fb; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.card { max-width: 420px; width: 100%; background: #0f1520; border: 1px solid #263550; border-radius: 20px; padding: 32px; text-align: center; }
+h1 { font-size: 20px; margin-bottom: 8px; }
+p { color: #7a90b0; font-size: 14px; margin-bottom: 20px; }
+.amount { font-size: 32px; font-weight: 700; margin: 16px 0; }
+.status { display: inline-block; padding: 6px 14px; border-radius: 999px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.status.pending { background: rgba(240,193,79,0.15); color: #f0c14f; }
+.status.paid { background: rgba(34,209,114,0.15); color: #22d172; }
+.status.failed { background: rgba(240,79,110,0.15); color: #f04f6e; }
+button { width: 100%; padding: 13px; background: #22d172; color: #000; font-weight: 700; border: none; border-radius: 12px; cursor: pointer; font-size: 14px; margin-top: 16px; }
+button:disabled { background: #263550; color: #445570; cursor: not-allowed; }
+.error { color: #f04f6e; font-size: 13px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 id="title">Loading order…</h1>
+  <p id="subtitle"></p>
+  <div class="amount" id="amount"></div>
+  <div class="status pending" id="statusBadge">Checking…</div>
+  <button id="payBtn" style="display:none">Pay Now</button>
+  <div class="error" id="error"></div>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const orderId = params.get('order_id');
+const returnedStatus = params.get('status'); // 'success' | 'cancel', when redirected back from Stripe/PayPal
+
+function showError(msg) { document.getElementById('error').textContent = msg; }
+function setStatus(status) {
+  const badge = document.getElementById('statusBadge');
+  badge.className = 'status ' + status;
+  badge.textContent = status === 'paid' ? 'Payment received' : status === 'failed' ? 'Payment failed' : 'Pending';
+}
+
+async function loadOrder() {
+  if (!orderId) { showError('Missing order_id in the link.'); return; }
+  try {
+    // This page is reached from a chat link, not a logged-in session, so it
+    // uses a lightweight public read (no auth) scoped to just this order's
+    // display fields — see the /api/ecom/orders/:id/public route in fix.patch.
+    const res = await fetch(`/api/ecom/orders/${orderId}/public`);
+    const data = await res.json();
+    if (!res.ok) { showError(data.error || 'Order not found'); return; }
+
+    document.getElementById('title').textContent = 'Complete your order';
+    document.getElementById('subtitle').textContent = `Order #${orderId.slice(0, 8)}`;
+    document.getElementById('amount').textContent = `${data.order.currency} ${Number(data.order.amount).toFixed(2)}`;
+    setStatus(data.order.status === 'paid' ? 'paid' : data.order.status === 'failed' ? 'failed' : 'pending');
+
+    if (data.order.status === 'paid') return; // nothing more to do
+    if (data.order.status === 'failed') { showError('This payment did not go through. Please ask the seller for a new checkout link.'); return; }
+
+    if (data.order.provider === 'razorpay' && data.client_fields?.razorpay_order_id) {
+      mountRazorpay(data);
+    } else if (returnedStatus) {
+      // Came back from a Stripe/PayPal redirect — poll our own backend
+      // (which itself verifies with the provider) rather than trusting the
+      // query string, since a customer can edit a URL by hand.
+      pollStatus();
+    }
+  } catch (err) {
+    showError('Could not load order: ' + err.message);
+  }
+}
+
+function mountRazorpay(data) {
+  const script = document.createElement('script');
+  script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+  script.onload = () => {
+    const btn = document.getElementById('payBtn');
+    btn.style.display = 'block';
+    btn.onclick = () => {
+      const rzp = new Razorpay({
+        key: data.client_fields.razorpay_key_id,
+        order_id: data.client_fields.razorpay_order_id,
+        amount: Math.round(Number(data.order.amount) * 100),
+        currency: data.order.currency,
+        name: 'Complete your order',
+        handler: () => { setStatus('paid'); document.getElementById('title').textContent = 'Payment received!'; btn.style.display = 'none'; },
+        modal: { ondismiss: () => {} },
+      });
+      rzp.open();
+    };
+  };
+  document.head.appendChild(script);
+}
+
+async function pollStatus() {
+  document.getElementById('title').textContent = 'Confirming your payment…';
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const res = await fetch(`/api/ecom/orders/${orderId}/public`);
+    const data = await res.json();
+    if (data.order?.status === 'paid') {
+      setStatus('paid'); document.getElementById('title').textContent = 'Payment received!'; return;
+    }
+    if (data.order?.status === 'failed') {
+      setStatus('failed'); document.getElementById('title').textContent = 'Payment failed'; return;
+    }
+  }
+  document.getElementById('title').textContent = 'Still confirming…';
+  document.getElementById('subtitle').textContent = "This can take a minute. It's safe to close this page — you'll be notified once it's confirmed.";
+}
+
+loadOrder();
+</script>
+</body>
+</html>

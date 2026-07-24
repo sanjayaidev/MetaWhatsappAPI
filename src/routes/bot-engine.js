@@ -83,10 +83,13 @@ async function matchRule({ supabase }, { userId, phone, text, replyOptionId }) {
 
   return {
     ruleId: rule.id,
-    actionType: rule.action_type,      // 'template' | 'ai'
+    actionType: rule.action_type,      // 'template' | 'ai' | 'ecom_catalog'
     templateId,                        // wb_bot_templates.id, when actionType === 'template'
     aiPrompt: rule.ai_prompt,
-    aiFallback: rule.ai_fallback
+    aiFallback: rule.ai_fallback,
+    // ecom_catalog: action_config.product_ids (uuid[]) selects which products
+    // to show. Empty/absent = show all active products (server.js caps at 10).
+    actionConfig: rule.action_config || {},
   };
 }
 
