@@ -1,6 +1,10 @@
 // DEPRECATED — sm is now mounted inside the root server.js under /sm.
 // This file is no longer the entry point and is not run in production.
 
+// DEPRECATED — sm/ is now mounted inside the root server.js under /sm,
+// sharing that process's pg pool (src/db.js). This file is kept for
+// reference/rollback only and is NOT the production entry point — do not
+// run this file directly in deployment (render.yaml starts root server.js).
 const express = require('express');
 const session = require('express-session');
 const { Pool } = require('pg');
