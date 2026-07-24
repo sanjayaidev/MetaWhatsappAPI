@@ -5,20 +5,26 @@ const express = require('express');
 // This is the ONE place that must produce values matching what the webhook
 // mediaId comparison in automations/matcher.js expects — do not inline this
 // logic elsewhere.
-async function resolveTargetPublishedIds(pool, userId, target_published_ids) {
+async function resolveTargetPublishedIds(supabase, userId, target_published_ids) {
   if (!target_published_ids || typeof target_published_ids !== 'object' || !Object.keys(target_published_ids).length) {
     return null;
   }
   const resolved = {};
   for (const [platform, postId] of Object.entries(target_published_ids)) {
     if (!postId) continue;
-    const postCheck = await pool.query('SELECT id, published_ids FROM smc_posts WHERE id=$1 AND user_id=$2', [postId, userId]);
-    if (!postCheck.rows.length) {
+    const { data: post, error } = await supabase
+      .from('smc_posts')
+      .select('id, published_ids')
+      .eq('id', postId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!post) {
       const err = new Error(`target_published_ids.${platform} does not refer to one of your posts`);
       err.status = 400;
       throw err;
     }
-    const platformPublishedId = (postCheck.rows[0].published_ids || {})[platform];
+    const platformPublishedId = (post.published_ids || {})[platform];
     if (!platformPublishedId) {
       const err = new Error(`target_published_ids.${platform}: that post has not been published to ${platform} yet, so there is no platform id to target`);
       err.status = 400;
@@ -29,14 +35,19 @@ async function resolveTargetPublishedIds(pool, userId, target_published_ids) {
   return Object.keys(resolved).length ? resolved : null;
 }
 
-function router(pool) {
+function router(supabase) {
   const r = express.Router();
 
   r.get('/', async (req, res) => {
     try {
       const userId = req.user.id || req.user.sub;
-      const result = await pool.query('SELECT * FROM smc_automations WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
-      res.json(result.rows);
+      const { data, error } = await supabase
+        .from('smc_automations')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json(data);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -60,23 +71,29 @@ function router(pool) {
       // Handle new per-platform targeting (target_published_ids takes precedence)
       if (target_published_ids && typeof target_published_ids === 'object' && Object.keys(target_published_ids).length > 0) {
         try {
-          processedTargetPublishedIds = await resolveTargetPublishedIds(pool, userId, target_published_ids);
+          processedTargetPublishedIds = await resolveTargetPublishedIds(supabase, userId, target_published_ids);
         } catch (err) {
           return res.status(err.status || 500).json({ error: err.message });
         }
       } else if (target_post_id !== undefined && target_post_id !== null && target_post_id !== '') {
         // Legacy single-post targeting
-        const postCheck = await pool.query('SELECT id FROM smc_posts WHERE id=$1 AND user_id=$2', [target_post_id, userId]);
-        if (!postCheck.rows.length) {
+        const { data: postCheck, error: postCheckErr } = await supabase
+          .from('smc_posts')
+          .select('id')
+          .eq('id', target_post_id)
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (postCheckErr) throw postCheckErr;
+        if (!postCheck) {
           return res.status(400).json({ error: 'target_post_id does not refer to one of your posts' });
         }
-        targetPostId = postCheck.rows[0].id;
+        targetPostId = postCheck.id;
       }
-      
+
       // Process response_data to extract variations and ai_prompt for backward compatibility
       let processedVariations = variations || [];
       let processedAiPrompt = ai_prompt || null;
-      
+
       if (response_data) {
         // Extract variations from response_data if present
         if (response_data.variations && Array.isArray(response_data.variations)) {
@@ -94,27 +111,28 @@ function router(pool) {
           processedAiPrompt = response_data.comment.system_prompt;
         }
       }
-      
-      const result = await pool.query(
-        `INSERT INTO smc_automations (user_id, name, type, keywords, platforms, ai_prompt, variations, reply_location, response_type, response_data, is_active, target_post_id, target_published_ids)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-        [
-          userId,
+
+      const { data, error } = await supabase
+        .from('smc_automations')
+        .insert({
+          user_id: userId,
           name,
           type,
-          JSON.stringify(keywords || []),
-          JSON.stringify(platforms || ['instagram', 'facebook', 'threads']),
-          processedAiPrompt,
-          JSON.stringify(processedVariations),
-          reply_location || 'comment',
-          response_type || 'text',
-          JSON.stringify(response_data || {}),
-          is_active !== undefined ? is_active : false,
-          targetPostId,
-          processedTargetPublishedIds ? JSON.stringify(processedTargetPublishedIds) : null
-        ]
-      );
-      res.json(result.rows[0]);
+          keywords: keywords || [],
+          platforms: platforms || ['instagram', 'facebook', 'threads'],
+          ai_prompt: processedAiPrompt,
+          variations: processedVariations,
+          reply_location: reply_location || 'comment',
+          response_type: response_type || 'text',
+          response_data: response_data || {},
+          is_active: is_active !== undefined ? is_active : false,
+          target_post_id: targetPostId,
+          target_published_ids: processedTargetPublishedIds,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      res.json(data);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -123,11 +141,27 @@ function router(pool) {
   r.patch('/:id/toggle', async (req, res) => {
     try {
       const userId = req.user.id || req.user.sub;
-      const result = await pool.query(
-        'UPDATE smc_automations SET is_active = NOT is_active WHERE id=$1 AND user_id=$2 RETURNING *',
-        [req.params.id, userId]
-      );
-      res.json(result.rows[0]);
+      // No SQL "SET is_active = NOT is_active" equivalent over REST — read
+      // the current value first, then flip it in a second call.
+      const { data: current, error: currentErr } = await supabase
+        .from('smc_automations')
+        .select('is_active')
+        .eq('id', req.params.id)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (currentErr) throw currentErr;
+      if (!current) {
+        return res.status(404).json({ error: 'Automation not found' });
+      }
+      const { data, error } = await supabase
+        .from('smc_automations')
+        .update({ is_active: !current.is_active })
+        .eq('id', req.params.id)
+        .eq('user_id', userId)
+        .select()
+        .single();
+      if (error) throw error;
+      res.json(data);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -145,36 +179,48 @@ function router(pool) {
       if (!validTypes.includes(type)) {
         return res.status(400).json({ error: `type must be "comment", "dm", or "both", got "${type}"` });
       }
-      
+
       // Verify ownership of the automation
-      const existing = await pool.query('SELECT id FROM smc_automations WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
-      if (!existing.rows.length) {
+      const { data: existing, error: existingErr } = await supabase
+        .from('smc_automations')
+        .select('id')
+        .eq('id', req.params.id)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (existingErr) throw existingErr;
+      if (!existing) {
         return res.status(404).json({ error: 'Automation not found' });
       }
-      
+
       let targetPostId = null;
       let processedTargetPublishedIds = null;
 
       // Handle new per-platform targeting (target_published_ids takes precedence)
       if (target_published_ids && typeof target_published_ids === 'object' && Object.keys(target_published_ids).length > 0) {
         try {
-          processedTargetPublishedIds = await resolveTargetPublishedIds(pool, userId, target_published_ids);
+          processedTargetPublishedIds = await resolveTargetPublishedIds(supabase, userId, target_published_ids);
         } catch (err) {
           return res.status(err.status || 500).json({ error: err.message });
         }
       } else if (target_post_id !== undefined && target_post_id !== null && target_post_id !== '') {
         // Legacy single-post targeting
-        const postCheck = await pool.query('SELECT id FROM smc_posts WHERE id=$1 AND user_id=$2', [target_post_id, userId]);
-        if (!postCheck.rows.length) {
+        const { data: postCheck, error: postCheckErr } = await supabase
+          .from('smc_posts')
+          .select('id')
+          .eq('id', target_post_id)
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (postCheckErr) throw postCheckErr;
+        if (!postCheck) {
           return res.status(400).json({ error: 'target_post_id does not refer to one of your posts' });
         }
-        targetPostId = postCheck.rows[0].id;
+        targetPostId = postCheck.id;
       }
-      
+
       // Process response_data to extract variations and ai_prompt for backward compatibility
       let processedVariations = variations || [];
       let processedAiPrompt = ai_prompt || null;
-      
+
       if (response_data) {
         // Extract variations from response_data if present
         if (response_data.variations && Array.isArray(response_data.variations)) {
@@ -192,30 +238,29 @@ function router(pool) {
           processedAiPrompt = response_data.comment.system_prompt;
         }
       }
-      
-      const result = await pool.query(
-        `UPDATE smc_automations 
-         SET name=$1, type=$2, keywords=$3, platforms=$4, ai_prompt=$5, variations=$6, 
-             reply_location=$7, response_type=$8, response_data=$9, is_active=$10, target_post_id=$11, target_published_ids=$12
-         WHERE id=$13 AND user_id=$14 RETURNING *`,
-        [
+
+      const { data, error } = await supabase
+        .from('smc_automations')
+        .update({
           name,
           type,
-          JSON.stringify(keywords || []),
-          JSON.stringify(platforms || ['instagram', 'facebook', 'threads']),
-          processedAiPrompt,
-          JSON.stringify(processedVariations),
-          reply_location || 'comment',
-          response_type || 'text',
-          JSON.stringify(response_data || {}),
-          is_active !== undefined ? is_active : false,
-          targetPostId,
-          processedTargetPublishedIds ? JSON.stringify(processedTargetPublishedIds) : null,
-          req.params.id,
-          userId
-        ]
-      );
-      res.json(result.rows[0]);
+          keywords: keywords || [],
+          platforms: platforms || ['instagram', 'facebook', 'threads'],
+          ai_prompt: processedAiPrompt,
+          variations: processedVariations,
+          reply_location: reply_location || 'comment',
+          response_type: response_type || 'text',
+          response_data: response_data || {},
+          is_active: is_active !== undefined ? is_active : false,
+          target_post_id: targetPostId,
+          target_published_ids: processedTargetPublishedIds,
+        })
+        .eq('id', req.params.id)
+        .eq('user_id', userId)
+        .select()
+        .single();
+      if (error) throw error;
+      res.json(data);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -224,7 +269,12 @@ function router(pool) {
   r.delete('/:id', async (req, res) => {
     try {
       const userId = req.user.id || req.user.sub;
-      await pool.query('DELETE FROM smc_automations WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
+      const { error } = await supabase
+        .from('smc_automations')
+        .delete()
+        .eq('id', req.params.id)
+        .eq('user_id', userId);
+      if (error) throw error;
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: err.message });

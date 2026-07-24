@@ -10,12 +10,18 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200
 const APP_BASE_URL = (process.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 const PROXY_URL_TTL_MS = 365 * 24 * 60 * 60 * 1000; // 1 year — long enough that a scheduled post never finds it expired
 
-async function getDriveConnection(pool, userId) {
-  const res = await pool.query(
-    `SELECT * FROM smc_connections WHERE platform='google_drive' AND is_connected=true AND user_id=$1 ORDER BY updated_at DESC LIMIT 1`,
-    [userId]
-  );
-  return res.rows[0] || null;
+async function getDriveConnection(supabase, userId) {
+  const { data, error } = await supabase
+    .from('smc_connections')
+    .select('*')
+    .eq('platform', 'google_drive')
+    .eq('is_connected', true)
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
 }
 
 // Stored value is normally a refresh token (see finishGoogle in
@@ -38,7 +44,7 @@ async function getWorkingAccessToken(conn) {
 // PROTECTED router: upload a file to the user's own connected Drive.
 // Mounted behind requireAuth in server.js.
 // ===========================================================
-function router(pool) {
+function router(supabase) {
   const r = express.Router();
 
   r.post('/upload', upload.single('file'), async (req, res) => {
@@ -46,7 +52,7 @@ function router(pool) {
       const userId = req.user.id || req.user.sub;
       if (!req.file) return res.status(400).json({ error: 'No file uploaded — attach it under the "file" field' });
 
-      const conn = await getDriveConnection(pool, userId);
+      const conn = await getDriveConnection(supabase, userId);
       if (!conn) {
         return res.status(400).json({ error: 'Connect Google Drive first (Connections tab) before uploading media' });
       }
@@ -83,7 +89,7 @@ function router(pool) {
 // Mounted WITHOUT requireAuth — signature + expiry (see lib/crypto.js) is
 // what stops this being an open proxy to arbitrary files.
 // ===========================================================
-function streamRouter(pool) {
+function streamRouter(supabase) {
   const r = express.Router();
 
   r.get('/stream/:userId/:fileId', async (req, res) => {
@@ -95,7 +101,7 @@ function streamRouter(pool) {
     }
 
     try {
-      const conn = await getDriveConnection(pool, userId);
+      const conn = await getDriveConnection(supabase, userId);
       if (!conn) return res.status(404).send('Drive account no longer connected');
       const token = await getWorkingAccessToken(conn);
 

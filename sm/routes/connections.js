@@ -68,19 +68,25 @@ const OAUTH_CONFIGS = {
   },
 };
 
-async function upsertConnection(pool, userId, { platform, account_name, account_id, page_id, access_token, token_expires_at }) {
+async function upsertConnection(supabase, userId, { platform, account_name, account_id, page_id, access_token, token_expires_at }) {
   const encryptedToken = encrypt(access_token);
-  const result = await pool.query(
-    `INSERT INTO smc_connections (user_id, platform, account_name, account_id, page_id, access_token, is_connected, token_expires_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,true,$7,CURRENT_TIMESTAMP)
-     ON CONFLICT (user_id, platform, account_id) DO UPDATE SET
-       account_name=EXCLUDED.account_name, page_id=EXCLUDED.page_id,
-       access_token=EXCLUDED.access_token, is_connected=true,
-       token_expires_at=EXCLUDED.token_expires_at, updated_at=CURRENT_TIMESTAMP
-     RETURNING ${SAFE_FIELDS}`,
-    [userId, platform, account_name || null, account_id, page_id || null, encryptedToken, token_expires_at || null]
-  );
-  return result.rows[0];
+  const { data, error } = await supabase
+    .from('smc_connections')
+    .upsert({
+      user_id: userId,
+      platform,
+      account_name: account_name || null,
+      account_id,
+      page_id: page_id || null,
+      access_token: encryptedToken,
+      is_connected: true,
+      token_expires_at: token_expires_at || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,platform,account_id' })
+    .select(SAFE_FIELDS)
+    .single();
+  if (error) throw error;
+  return data;
 }
 
 // ===========================================================
@@ -94,7 +100,7 @@ async function upsertConnection(pool, userId, { platform, account_name, account_
 // (posting, comment replies, DMs) has to go through a Facebook Page, so
 // there is no personal-profile option to add here — only a choice of
 // *which* Page, when the user manages more than one.
-async function finishFacebook(pool, userId, code, redirectUri, config) {
+async function finishFacebook(supabase, userId, code, redirectUri, config) {
   const tokenRes = await axios.get(`https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token`, {
     params: { client_id: config.clientId, client_secret: config.clientSecret, redirect_uri: redirectUri, code },
   });
@@ -142,13 +148,13 @@ async function finishFacebook(pool, userId, code, redirectUri, config) {
     };
   }
 
-  return finishFacebookPage(pool, userId, pages[0], expiresAt);
+  return finishFacebookPage(supabase, userId, pages[0], expiresAt);
 }
 
 // Completes the connection for a single, already-chosen Page (used both for
 // the single-Page case above and for the picker's follow-up selection).
-async function finishFacebookPage(pool, userId, page, expiresAt) {
-  const fbConnection = await upsertConnection(pool, userId, {
+async function finishFacebookPage(supabase, userId, page, expiresAt) {
+  const fbConnection = await upsertConnection(supabase, userId, {
     platform: 'facebook',
     account_name: page.name,
     account_id: page.id,
@@ -163,7 +169,7 @@ async function finishFacebookPage(pool, userId, page, expiresAt) {
     const igRes = await axios.get(`https://graph.facebook.com/${GRAPH_VERSION}/${igId}`, {
       params: { fields: 'id,username', access_token: page.access_token },
     });
-    await upsertConnection(pool, userId, {
+    await upsertConnection(supabase, userId, {
       platform: 'instagram',
       account_name: `@${igRes.data.username}`,
       account_id: igId,
@@ -180,7 +186,7 @@ async function finishFacebookPage(pool, userId, page, expiresAt) {
 // Direct Instagram Login (graph.instagram.com)
 // (mirrors ig-login-test.js: token exchange -> instagram_business_basic)
 // ===========================================================
-async function finishInstagram(pool, userId, code, redirectUri, config) {
+async function finishInstagram(supabase, userId, code, redirectUri, config) {
   const tokenRes = await axios.post(
     'https://api.instagram.com/oauth/access_token',
     new URLSearchParams({
@@ -203,7 +209,7 @@ async function finishInstagram(pool, userId, code, redirectUri, config) {
     params: { fields: 'id,username,account_type', access_token: longToken },
   });
 
-  return upsertConnection(pool, userId, {
+  return upsertConnection(supabase, userId, {
     platform: 'instagram',
     account_name: `@${meRes.data.username}`,
     account_id: meRes.data.id,
@@ -216,7 +222,7 @@ async function finishInstagram(pool, userId, code, redirectUri, config) {
 // Threads Login
 // (mirrors threads-login-test.js: token exchange -> threads_basic)
 // ===========================================================
-async function finishThreads(pool, userId, code, redirectUri, config) {
+async function finishThreads(supabase, userId, code, redirectUri, config) {
   const tokenRes = await axios.post(
     'https://graph.threads.net/oauth/access_token',
     new URLSearchParams({
@@ -239,7 +245,7 @@ async function finishThreads(pool, userId, code, redirectUri, config) {
     params: { fields: 'id,username', access_token: longToken },
   });
 
-  return upsertConnection(pool, userId, {
+  return upsertConnection(supabase, userId, {
     platform: 'threads',
     account_name: `@${meRes.data.username}`,
     account_id: meRes.data.id,
@@ -253,7 +259,7 @@ async function finishThreads(pool, userId, code, redirectUri, config) {
 // + Share on LinkedIn for w_member_social)
 // Personal-profile only — no Company Page / Community Management access.
 // ===========================================================
-async function finishLinkedIn(pool, userId, code, redirectUri, config) {
+async function finishLinkedIn(supabase, userId, code, redirectUri, config) {
   const tokenRes = await axios.post(
     'https://www.linkedin.com/oauth/v2/accessToken',
     new URLSearchParams({
@@ -273,7 +279,7 @@ async function finishLinkedIn(pool, userId, code, redirectUri, config) {
   });
   const sub = userinfoRes.data.sub; // LinkedIn member id — used to build the author URN when posting
 
-  return upsertConnection(pool, userId, {
+  return upsertConnection(supabase, userId, {
     platform: 'linkedin',
     account_name: userinfoRes.data.name || userinfoRes.data.email,
     account_id: sub,
@@ -287,7 +293,7 @@ async function finishLinkedIn(pool, userId, code, redirectUri, config) {
 // Standard Google OAuth2 — no matching test script was provided for this
 // one, so double-check scopes/endpoints against Google's current docs.
 // ===========================================================
-async function finishGoogle(pool, userId, code, redirectUri, config, platform) {
+async function finishGoogle(supabase, userId, code, redirectUri, config, platform) {
   const tokenRes = await axios.post(
     'https://oauth2.googleapis.com/token',
     new URLSearchParams({
@@ -306,7 +312,7 @@ async function finishGoogle(pool, userId, code, redirectUri, config, platform) {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
 
-  return upsertConnection(pool, userId, {
+  return upsertConnection(supabase, userId, {
     platform,
     account_name: userinfoRes.data.email,
     account_id: userinfoRes.data.id,
@@ -323,8 +329,8 @@ const FINISHERS = {
   instagram: finishInstagram,
   threads: finishThreads,
   linkedin: finishLinkedIn,
-  google_sheets: (pool, userId, code, redirectUri, config) => finishGoogle(pool, userId, code, redirectUri, config, 'google_sheets'),
-  google_drive: (pool, userId, code, redirectUri, config) => finishGoogle(pool, userId, code, redirectUri, config, 'google_drive'),
+  google_sheets: (supabase, userId, code, redirectUri, config) => finishGoogle(supabase, userId, code, redirectUri, config, 'google_sheets'),
+  google_drive: (supabase, userId, code, redirectUri, config) => finishGoogle(supabase, userId, code, redirectUri, config, 'google_drive'),
 };
 
 // ===========================================================
@@ -334,7 +340,7 @@ const FINISHERS = {
 // resolved manually: session cookie, or a `token` query param for the
 // initial /authorize hop; the callback trusts the signed `state` instead.
 // ===========================================================
-function oauthRouter(pool) {
+function oauthRouter(supabase) {
   const r = express.Router();
 
   r.get('/:platform/authorize', (req, res) => {
@@ -388,7 +394,7 @@ function oauthRouter(pool) {
 
     const redirectUri = `${APP_BASE_URL}/api/connections/${platform}/callback`;
     try {
-      const saved = await FINISHERS[platform](pool, payload.sub, code, redirectUri, config);
+      const saved = await FINISHERS[platform](supabase, payload.sub, code, redirectUri, config);
       if (saved && saved.needsPageSelection) {
         return res.send(renderPagePickerHtml(saved.pages, saved.selectionToken));
       }
@@ -455,7 +461,7 @@ function oauthRouter(pool) {
       return res.status(400).json({ error: 'That Page was not part of the original selection.' });
     }
     try {
-      const saved = await finishFacebookPage(pool, payload.sub, page, payload.expiresAt ? new Date(payload.expiresAt) : null);
+      const saved = await finishFacebookPage(supabase, payload.sub, page, payload.expiresAt ? new Date(payload.expiresAt) : null);
       res.json({ redirect: `/dashboard.html?connected=${encodeURIComponent(saved.platform)}` });
     } catch (err) {
       res.status(500).json({ error: err.response ? JSON.stringify(err.response.data) : err.message });
@@ -469,14 +475,19 @@ function oauthRouter(pool) {
 // PROTECTED router: plain CRUD over saved connections.
 // Mounted behind requireAuth in server.js, same as before.
 // ===========================================================
-function router(pool) {
+function router(supabase) {
   const r = express.Router();
 
   r.get('/', async (req, res) => {
     try {
       const userId = req.user.id || req.user.sub;
-      const result = await pool.query(`SELECT ${SAFE_FIELDS} FROM smc_connections WHERE user_id = $1 ORDER BY created_at DESC`, [userId]);
-      res.json(result.rows);
+      const { data, error } = await supabase
+        .from('smc_connections')
+        .select(SAFE_FIELDS)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json(data);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -489,7 +500,7 @@ function router(pool) {
       if (!platform || !account_id || !access_token) {
         return res.status(400).json({ error: 'platform, account_id, and access_token are required' });
       }
-      const result = await upsertConnection(pool, userId, { platform, account_name, account_id, page_id, access_token, token_expires_at });
+      const result = await upsertConnection(supabase, userId, { platform, account_name, account_id, page_id, access_token, token_expires_at });
       res.json(result);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -499,7 +510,12 @@ function router(pool) {
   r.delete('/:id', async (req, res) => {
     try {
       const userId = req.user.id || req.user.sub;
-      await pool.query('DELETE FROM smc_connections WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
+      const { error } = await supabase
+        .from('smc_connections')
+        .delete()
+        .eq('id', req.params.id)
+        .eq('user_id', userId);
+      if (error) throw error;
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: err.message });

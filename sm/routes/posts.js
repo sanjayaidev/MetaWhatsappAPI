@@ -5,15 +5,21 @@ const instagram = require('../platforms/instagram');
 const facebook = require('../platforms/facebook');
 const threads = require('../platforms/threads');
 
-function router(pool) {
+function router(supabase) {
   const r = express.Router();
 
   async function getConnection(platform, userId) {
-    const res = await pool.query(
-      'SELECT * FROM smc_connections WHERE platform=$1 AND is_connected=true AND user_id=$2 ORDER BY updated_at DESC LIMIT 1',
-      [platform, userId]
-    );
-    return res.rows[0] || null;
+    const { data, error } = await supabase
+      .from('smc_connections')
+      .select('*')
+      .eq('platform', platform)
+      .eq('is_connected', true)
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data || null;
   }
 
   // Pulls recent posts straight from Meta for each connected platform, so the
@@ -71,13 +77,17 @@ function router(pool) {
 
       // Mark which of these are already tracked locally (imported previously,
       // or originally published through this app) so the UI doesn't duplicate them.
-      const localResult = await pool.query(
-        `SELECT id, published_ids FROM smc_posts WHERE user_id=$1 AND published_ids IS NOT NULL AND published_ids != '{}'::jsonb`,
-        [userId]
-      );
+      const { data: localRows, error: localErr } = await supabase
+        .from('smc_posts')
+        .select('id, published_ids')
+        .eq('user_id', userId)
+        .not('published_ids', 'is', null);
+      if (localErr) throw localErr;
+
       const trackedByPlatform = {};
-      for (const row of localResult.rows) {
+      for (const row of localRows || []) {
         const ids = row.published_ids || {};
+        if (!Object.keys(ids).length) continue;
         for (const [platform, id] of Object.entries(ids)) {
           trackedByPlatform[`${platform}:${id}`] = row.id;
         }
@@ -108,23 +118,33 @@ function router(pool) {
         return res.status(400).json({ error: 'platform and remote_id are required' });
       }
 
-      const existing = await pool.query(
-        `SELECT * FROM smc_posts WHERE user_id=$1 AND published_ids->>$2 = $3`,
-        [userId, platform, String(remote_id)]
-      );
-      if (existing.rows.length) {
-        return res.json(existing.rows[0]);
+      const { data: existing, error: existingErr } = await supabase
+        .from('smc_posts')
+        .select('*')
+        .eq('user_id', userId)
+        .eq(`published_ids->>${platform}`, String(remote_id));
+      if (existingErr) throw existingErr;
+      if (existing && existing.length) {
+        return res.json(existing[0]);
       }
 
       const title = (caption || '').trim().slice(0, 80) || `${platform.charAt(0).toUpperCase() + platform.slice(1)} post`;
       const publishedIds = { [platform]: remote_id };
-      const result = await pool.query(
-        `INSERT INTO smc_posts (user_id, title, caption, platforms, scheduled_date, status, published_ids)
-         VALUES ($1,$2,$3,$4,$5::timestamptz,'published',$6)
-         RETURNING *`,
-        [userId, title, caption || '', JSON.stringify([platform]), timestamp || null, JSON.stringify(publishedIds)]
-      );
-      res.json(result.rows[0]);
+      const { data: created, error } = await supabase
+        .from('smc_posts')
+        .insert({
+          user_id: userId,
+          title,
+          caption: caption || '',
+          platforms: [platform],
+          scheduled_date: timestamp || null,
+          status: 'published',
+          published_ids: publishedIds,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      res.json(created);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -133,8 +153,13 @@ function router(pool) {
   r.get('/', async (req, res) => {
     try {
       const userId = req.user.id || req.user.sub;
-      const result = await pool.query('SELECT * FROM smc_posts WHERE user_id = $1 ORDER BY scheduled_date DESC', [userId]);
-      res.json(result.rows);
+      const { data, error } = await supabase
+        .from('smc_posts')
+        .select('*')
+        .eq('user_id', userId)
+        .order('scheduled_date', { ascending: false });
+      if (error) throw error;
+      res.json(data);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -144,13 +169,23 @@ function router(pool) {
     try {
       const userId = req.user.id || req.user.sub;
       const { title, caption, hook, platforms, scheduled_date, media_url, google_drive_file_id } = req.body;
-      const result = await pool.query(
-        `INSERT INTO smc_posts (user_id, title, caption, hook, platforms, scheduled_date, media_url, google_drive_file_id, status)
-         VALUES ($1,$2,$3,$4,$5,$6::timestamptz,$7,$8, CASE WHEN $6 IS NULL THEN 'draft' ELSE 'scheduled' END)
-         RETURNING *`,
-        [userId, title, caption, hook, JSON.stringify(platforms || []), scheduled_date || null, media_url || null, google_drive_file_id || null]
-      );
-      res.json(result.rows[0]);
+      const { data, error } = await supabase
+        .from('smc_posts')
+        .insert({
+          user_id: userId,
+          title,
+          caption,
+          hook,
+          platforms: platforms || [],
+          scheduled_date: scheduled_date || null,
+          media_url: media_url || null,
+          google_drive_file_id: google_drive_file_id || null,
+          status: scheduled_date ? 'scheduled' : 'draft',
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      res.json(data);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -161,12 +196,25 @@ function router(pool) {
       const userId = req.user.id || req.user.sub;
       const { id } = req.params;
       const { title, caption, hook, platforms, scheduled_date, status, media_url, google_drive_file_id } = req.body;
-      const result = await pool.query(
-        `UPDATE smc_posts SET title=$1, caption=$2, hook=$3, platforms=$4, scheduled_date=$5::timestamptz,
-           status=$6, media_url=$7, google_drive_file_id=$8, updated_at=CURRENT_TIMESTAMP WHERE id=$9 AND user_id=$10 RETURNING *`,
-        [title, caption, hook, JSON.stringify(platforms || []), scheduled_date || null, status || 'draft', media_url || null, google_drive_file_id || null, id, userId]
-      );
-      res.json(result.rows[0]);
+      const { data, error } = await supabase
+        .from('smc_posts')
+        .update({
+          title,
+          caption,
+          hook,
+          platforms: platforms || [],
+          scheduled_date: scheduled_date || null,
+          status: status || 'draft',
+          media_url: media_url || null,
+          google_drive_file_id: google_drive_file_id || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('user_id', userId)
+        .select()
+        .single();
+      if (error) throw error;
+      res.json(data);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -175,7 +223,12 @@ function router(pool) {
   r.delete('/:id', async (req, res) => {
     try {
       const userId = req.user.id || req.user.sub;
-      await pool.query('DELETE FROM smc_posts WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
+      const { error } = await supabase
+        .from('smc_posts')
+        .delete()
+        .eq('id', req.params.id)
+        .eq('user_id', userId);
+      if (error) throw error;
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -187,13 +240,24 @@ function router(pool) {
     try {
       const userId = req.user.id || req.user.sub;
       // Verify ownership
-      const check = await pool.query('SELECT 1 FROM smc_posts WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
-      if (check.rows.length === 0) {
+      const { data: check, error: checkErr } = await supabase
+        .from('smc_posts')
+        .select('id')
+        .eq('id', req.params.id)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (checkErr) throw checkErr;
+      if (!check) {
         return res.status(404).json({ error: 'Post not found' });
       }
-      await publishDuePostById(pool, req.params.id);
-      const result = await pool.query('SELECT * FROM smc_posts WHERE id=$1', [req.params.id]);
-      res.json(result.rows[0]);
+      await publishDuePostById(supabase, req.params.id);
+      const { data, error } = await supabase
+        .from('smc_posts')
+        .select('*')
+        .eq('id', req.params.id)
+        .single();
+      if (error) throw error;
+      res.json(data);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

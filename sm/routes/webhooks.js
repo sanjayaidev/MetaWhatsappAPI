@@ -28,29 +28,24 @@ function addToDebugLog(event) {
 }
 
 // Helper to log automation events to database
-async function logAutomationEvent(pool, data) {
+async function logAutomationEvent(supabase, data) {
   try {
-    await pool.query(
-      `INSERT INTO smc_automation_logs
-       (platform, trigger_type, trigger_text, media_id, sender_id, account_id,
-        automation_id, automation_name, response_type, response_content, reply_location, success, error_message)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-      [
-        data.platform,
-        data.triggerType,
-        data.triggerText || null,
-        data.mediaId || null,
-        data.senderId || null,
-        data.accountId || null,
-        data.automationId || null,
-        data.automationName || null,
-        data.responseType || null,
-        data.responseContent || null,
-        data.replyLocation || null,
-        data.success,
-        data.errorMessage || null
-      ]
-    );
+    const { error } = await supabase.from('smc_automation_logs').insert({
+      platform: data.platform,
+      trigger_type: data.triggerType,
+      trigger_text: data.triggerText || null,
+      media_id: data.mediaId || null,
+      sender_id: data.senderId || null,
+      account_id: data.accountId || null,
+      automation_id: data.automationId || null,
+      automation_name: data.automationName || null,
+      response_type: data.responseType || null,
+      response_content: data.responseContent || null,
+      reply_location: data.replyLocation || null,
+      success: data.success,
+      error_message: data.errorMessage || null,
+    });
+    if (error) throw error;
   } catch (err) {
     console.error('Failed to log automation event:', err.message);
   }
@@ -188,7 +183,7 @@ async function getResponseForTrigger(automation, triggerType, platform, triggerT
   return null;
 }
 
-function router(pool) {
+function router(supabase) {
   const r = express.Router();
 
   // Raw body needed for signature verification — mounted with express.raw
@@ -220,12 +215,19 @@ function router(pool) {
 
   async function alreadyProcessed(eventId) {
     if (!eventId) return false;
-    const existing = await pool.query('SELECT 1 FROM smc_processed_webhook_events WHERE event_id=$1', [eventId]);
-    if (existing.rows.length) return true;
-    await pool.query(
-      'INSERT INTO smc_processed_webhook_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING',
-      [eventId]
-    );
+    const { data: existing, error: existingErr } = await supabase
+      .from('smc_processed_webhook_events')
+      .select('event_id')
+      .eq('event_id', eventId)
+      .maybeSingle();
+    if (existingErr) throw existingErr;
+    if (existing) return true;
+    // No ON CONFLICT DO NOTHING over REST — insert and swallow the unique-
+    // violation (Postgres code 23505) if two deliveries race each other.
+    const { error: insertErr } = await supabase
+      .from('smc_processed_webhook_events')
+      .insert({ event_id: eventId });
+    if (insertErr && insertErr.code !== '23505') throw insertErr;
     return false;
   }
 
@@ -235,36 +237,56 @@ function router(pool) {
     // passing a bare `undefined` straight to pg throws "could not determine
     // data type of parameter $2", so branch instead of relying on a fallback value.
     if (accountId === undefined || accountId === null) {
-      const res = await pool.query(
-        'SELECT * FROM smc_connections WHERE platform=$1 AND is_connected=true ORDER BY updated_at DESC LIMIT 1',
-        [platform]
-      );
-      return res.rows[0] || null;
+      const { data, error } = await supabase
+        .from('smc_connections')
+        .select('*')
+        .eq('platform', platform)
+        .eq('is_connected', true)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data || null;
     }
-    
+
     // Primary lookup by original accountId (handles page_id and account_id)
-    let res = await pool.query(
-      'SELECT * FROM smc_connections WHERE platform=$1 AND (account_id=$2 OR page_id=$2) AND is_connected=true ORDER BY updated_at DESC LIMIT 1',
-      [platform, accountId]
-    );
-    let connection = res.rows[0] || null;
-    
+    let { data: primaryRows, error: primaryErr } = await supabase
+      .from('smc_connections')
+      .select('*')
+      .eq('platform', platform)
+      .or(`account_id.eq.${accountId},page_id.eq.${accountId}`)
+      .eq('is_connected', true)
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (primaryErr) throw primaryErr;
+    let connection = (primaryRows && primaryRows[0]) || null;
+
     // Fallback lookup using extraLookupId (for direct IG login scenarios)
     if (!connection && extraLookupId) {
-      res = await pool.query(
-        'SELECT * FROM smc_connections WHERE platform=$1 AND account_id=$2 AND is_connected=true ORDER BY updated_at DESC LIMIT 1',
-        [platform, extraLookupId]
-      );
-      connection = res.rows[0] || null;
+      const { data: fallbackRows, error: fallbackErr } = await supabase
+        .from('smc_connections')
+        .select('*')
+        .eq('platform', platform)
+        .eq('account_id', extraLookupId)
+        .eq('is_connected', true)
+        .order('updated_at', { ascending: false })
+        .limit(1);
+      if (fallbackErr) throw fallbackErr;
+      connection = (fallbackRows && fallbackRows[0]) || null;
     }
-    
+
     // Final fallback for Instagram: return any connected account if specific lookup fails
     if (!connection && platform === 'instagram') {
-      res = await pool.query(
-        'SELECT * FROM smc_connections WHERE platform=$1 AND is_connected=true AND (account_id IS NOT NULL OR page_id IS NOT NULL) ORDER BY created_at DESC LIMIT 1',
-        [platform]
-      );
-      connection = res.rows[0] || null;
+      const { data: igRows, error: igErr } = await supabase
+        .from('smc_connections')
+        .select('*')
+        .eq('platform', platform)
+        .eq('is_connected', true)
+        .or('account_id.not.is.null,page_id.not.is.null')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (igErr) throw igErr;
+      connection = (igRows && igRows[0]) || null;
       
       // Log this fallback for debugging
       if (connection) {
@@ -283,39 +305,30 @@ function router(pool) {
   }
 
   async function getActiveAutomations() {
-    const res = await pool.query(
-      `SELECT automations.*, 
-              COALESCE(automations.target_published_ids, '{}'::jsonb) AS automation_target_published_ids,
-              posts.published_ids AS post_published_ids
-       FROM smc_automations
-       LEFT JOIN smc_posts ON posts.id = automations.target_post_id
-       WHERE automations.is_active = true`
-    );
-    return res.rows.map(row => ({
-      ...row,
-      // Ensure JSON fields are parsed properly (PostgreSQL may return them as strings)
-      response_data: typeof row.response_data === 'string'
-        ? JSON.parse(row.response_data)
-        : row.response_data || {},
-      variations: typeof row.variations === 'string'
-        ? JSON.parse(row.variations)
-        : row.variations || [],
-      keywords: typeof row.keywords === 'string'
-        ? JSON.parse(row.keywords)
-        : row.keywords || [],
-      platforms: typeof row.platforms === 'string'
-        ? JSON.parse(row.platforms)
-        : row.platforms || ['instagram', 'facebook', 'threads'],
-      // Use the new target_published_ids column from automations table if set,
-      // otherwise fall back to deriving from posts.published_ids for legacy support
-      target_published_ids: typeof row.automation_target_published_ids === 'string'
-        ? JSON.parse(row.automation_target_published_ids)
-        : (row.automation_target_published_ids && Object.keys(row.automation_target_published_ids).length > 0)
-          ? row.automation_target_published_ids
-          : (typeof row.post_published_ids === 'string'
-              ? JSON.parse(row.post_published_ids)
-              : row.post_published_ids || {})
-    }));
+    // Embedded-resource select follows the target_post_id FK to smc_posts
+    // and returns it nested (as `smc_posts`) — the REST equivalent of the
+    // old `LEFT JOIN smc_posts ON posts.id = automations.target_post_id`.
+    const { data, error } = await supabase
+      .from('smc_automations')
+      .select('*, smc_posts(published_ids)')
+      .eq('is_active', true);
+    if (error) throw error;
+    return (data || []).map(row => {
+      const automationTargetPublishedIds = row.target_published_ids || {};
+      const postPublishedIds = row.smc_posts?.published_ids || {};
+      return {
+        ...row,
+        response_data: row.response_data || {},
+        variations: row.variations || [],
+        keywords: row.keywords || [],
+        platforms: row.platforms || ['instagram', 'facebook', 'threads'],
+        // Use the new target_published_ids column from automations table if set,
+        // otherwise fall back to deriving from posts.published_ids for legacy support
+        target_published_ids: Object.keys(automationTargetPublishedIds).length > 0
+          ? automationTargetPublishedIds
+          : postPublishedIds,
+      };
+    });
   }
 
   // ===== Facebook Webhook =====
@@ -442,7 +455,7 @@ function router(pool) {
       if (!match) {
         console.log(`⚠️  No matching automation found for ${platform}/${triggerType}`);
         // Log trigger even if no automation matched
-        await logAutomationEvent(pool, {
+        await logAutomationEvent(supabase, {
           platform,
           triggerType,
           triggerText: text,
@@ -465,7 +478,7 @@ function router(pool) {
       const conn = await getConnection(platform, accountId, extraLookupId);
       if (!conn) {
         console.error(`No connected ${platform} account to reply with`);
-        await logAutomationEvent(pool, {
+        await logAutomationEvent(supabase, {
           platform,
           triggerType,
           triggerText: text,
@@ -500,7 +513,7 @@ function router(pool) {
             if (commentReply) {
               console.log(`📤 Sending ${platform} comment reply on behalf of account ${conn.account_id || conn.page_id}`);
               await facebook.replyToComment(token, replyTargetId, commentReply);
-              await logAutomationEvent(pool, {
+              await logAutomationEvent(supabase, {
                 platform, triggerType, triggerText: text, mediaId, senderId, accountId,
                 automationId: match.id, automationName: match.name,
                 responseType: commentResult.type, responseContent: commentReply,
@@ -515,7 +528,7 @@ function router(pool) {
             if (dmReply) {
               console.log(`📤 Sending ${platform} private reply (DM) for comment ${replyTargetId} on behalf of account ${conn.account_id || conn.page_id}`);
               await facebook.sendPrivateReply(token, conn.account_id || conn.page_id, replyTargetId, dmReply);
-              await logAutomationEvent(pool, {
+              await logAutomationEvent(supabase, {
                 platform, triggerType, triggerText: text, mediaId, senderId, accountId,
                 automationId: match.id, automationName: match.name,
                 responseType: dmResult.type, responseContent: dmReply,
@@ -527,7 +540,7 @@ function router(pool) {
           const responseResult = await getResponseForTrigger(match, triggerType, platform, text);
           const reply = responseResult?.text;
           if (!reply) {
-            await logAutomationEvent(pool, {
+            await logAutomationEvent(supabase, {
               platform, triggerType, triggerText: text, mediaId, senderId, accountId,
               automationId: match.id, automationName: match.name,
               responseType: null, responseContent: null, replyLocation: null,
@@ -536,7 +549,7 @@ function router(pool) {
             return;
           }
           await facebook.sendDM(token, conn.account_id || conn.page_id, senderId, reply);
-          await logAutomationEvent(pool, {
+          await logAutomationEvent(supabase, {
             platform,
             triggerType,
             triggerText: text,
@@ -555,7 +568,7 @@ function router(pool) {
       } catch (err) {
         const errorMsg = err.response?.data || err.message;
         console.error(`Auto-reply failed (${platform}/${triggerType}):`, errorMsg);
-        await logAutomationEvent(pool, {
+        await logAutomationEvent(supabase, {
           platform,
           triggerType,
           triggerText: text,
@@ -694,7 +707,7 @@ function router(pool) {
         console.log(`⚠️  No matching automation found for ${platform}/${triggerType}`);
         addToDebugLog({ platform, event: 'no_automation_match', triggerType, text, mediaId });
         // Log trigger even if no automation matched
-        await logAutomationEvent(pool, {
+        await logAutomationEvent(supabase, {
           platform,
           triggerType,
           triggerText: text,
@@ -718,7 +731,7 @@ function router(pool) {
       const conn = await getConnection(platform, accountId, extraLookupId);
       if (!conn) {
         console.error(`No connected ${platform} account to reply with`);
-        await logAutomationEvent(pool, {
+        await logAutomationEvent(supabase, {
           platform,
           triggerType,
           triggerText: text,
@@ -757,7 +770,7 @@ function router(pool) {
             if (commentReply) {
               console.log(`📤 Sending ${platform} comment reply on behalf of account ${conn.account_id || conn.page_id}`);
               await instagram.replyToComment(token, replyTargetId, commentReply, conn);
-              await logAutomationEvent(pool, {
+              await logAutomationEvent(supabase, {
                 platform, triggerType, triggerText: text, mediaId, senderId, accountId,
                 automationId: match.id, automationName: match.name,
                 responseType: commentResult.type, responseContent: commentReply,
@@ -772,7 +785,7 @@ function router(pool) {
             if (dmReply) {
               console.log(`📤 Sending ${platform} private reply (DM) for comment ${replyTargetId} on behalf of account ${conn.account_id || conn.page_id}`);
               await instagram.sendPrivateReply(token, conn.account_id || conn.page_id, replyTargetId, dmReply, conn);
-              await logAutomationEvent(pool, {
+              await logAutomationEvent(supabase, {
                 platform, triggerType, triggerText: text, mediaId, senderId, accountId,
                 automationId: match.id, automationName: match.name,
                 responseType: dmResult.type, responseContent: dmReply,
@@ -784,7 +797,7 @@ function router(pool) {
           const responseResult = await getResponseForTrigger(match, triggerType, platform, text);
           const reply = responseResult?.text;
           if (!reply) {
-            await logAutomationEvent(pool, {
+            await logAutomationEvent(supabase, {
               platform, triggerType, triggerText: text, mediaId, senderId, accountId,
               automationId: match.id, automationName: match.name,
               responseType: null, responseContent: null, replyLocation: null,
@@ -799,7 +812,7 @@ function router(pool) {
             await facebook.sendDM(token, conn.account_id || conn.page_id, senderId, reply);
           }
           // Threads has no DM API
-          await logAutomationEvent(pool, {
+          await logAutomationEvent(supabase, {
             platform,
             triggerType,
             triggerText: text,
@@ -818,7 +831,7 @@ function router(pool) {
       } catch (err) {
         const errorMsg = err.response?.data || err.message;
         console.error(`Auto-reply failed (${platform}/${triggerType}):`, errorMsg);
-        await logAutomationEvent(pool, {
+        await logAutomationEvent(supabase, {
           platform,
           triggerType,
           triggerText: text,
@@ -955,7 +968,7 @@ function router(pool) {
 
         if (!match) {
           console.log(`⚠️  No matching automation found for ${platform}/comment`);
-          await logAutomationEvent(pool, {
+          await logAutomationEvent(supabase, {
             platform,
             triggerType: 'comment',
             triggerText: text,
@@ -979,7 +992,7 @@ function router(pool) {
         const reply = responseResult?.text;
 
         if (!reply) {
-          await logAutomationEvent(pool, {
+          await logAutomationEvent(supabase, {
             platform,
             triggerType: 'comment',
             triggerText: text,
@@ -1000,7 +1013,7 @@ function router(pool) {
         const conn = await getConnection('threads', accountId, null);
         if (!conn) {
           console.error('No connected Threads account to reply with');
-          await logAutomationEvent(pool, {
+          await logAutomationEvent(supabase, {
             platform,
             triggerType: 'comment',
             triggerText: text,
@@ -1021,7 +1034,7 @@ function router(pool) {
         console.log(`📤 Sending Threads reply to comment ${replyId} on behalf of account ${conn.account_id}`);
         try {
           await threads.replyToThread(token, conn.account_id, replyId, reply);
-          await logAutomationEvent(pool, {
+          await logAutomationEvent(supabase, {
             platform,
             triggerType: 'comment',
             triggerText: text,
@@ -1039,7 +1052,7 @@ function router(pool) {
         } catch (err) {
           const errorMsg = err.response?.data || err.message;
           console.error('Threads auto-reply failed:', errorMsg);
-          await logAutomationEvent(pool, {
+          await logAutomationEvent(supabase, {
             platform,
             triggerType: 'comment',
             triggerText: text,
@@ -1066,8 +1079,12 @@ function router(pool) {
       return res.status(401).json({ error: 'Invalid or missing API key' });
     }
     try {
-      const result = await pool.query('SELECT id, title, caption, hook, platforms, scheduled_date, status, created_at FROM smc_posts ORDER BY scheduled_date DESC');
-      res.json(result.rows);
+      const { data, error } = await supabase
+        .from('smc_posts')
+        .select('id, title, caption, hook, platforms, scheduled_date, status, created_at')
+        .order('scheduled_date', { ascending: false });
+      if (error) throw error;
+      res.json(data);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1079,12 +1096,15 @@ function router(pool) {
       return res.status(401).json({ error: 'Invalid or missing API key' });
     }
     try {
-      const result = await pool.query('SELECT id, name, type, keywords, ai_prompt, variations, response_data, is_active, created_at FROM smc_automations WHERE is_active=true');
-      res.json(result.rows.map(row => ({
+      const { data, error } = await supabase
+        .from('smc_automations')
+        .select('id, name, type, keywords, ai_prompt, variations, response_data, is_active, created_at')
+        .eq('is_active', true);
+      if (error) throw error;
+      res.json((data || []).map(row => ({
         ...row,
-        // Ensure response_data and variations are parsed as JSON if they're strings
-        response_data: typeof row.response_data === 'string' ? JSON.parse(row.response_data) : row.response_data || {},
-        variations: typeof row.variations === 'string' ? JSON.parse(row.variations) : row.variations || []
+        response_data: row.response_data || {},
+        variations: row.variations || [],
       })));
     } catch (err) {
       res.status(500).json({ error: err.message });

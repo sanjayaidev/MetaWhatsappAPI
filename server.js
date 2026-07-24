@@ -47,16 +47,13 @@ const createChannelSender = require('./src/channel-send');
 
 // --- Social Manager (sm/) integration ---------------------------------
 // sm/ was originally a standalone app (SMClient) using its own raw
-// node-postgres Pool. It's mounted here under the /sm namespace, sharing
-// this process's pg pool (src/db.js) instead of opening a second one.
-// NOTE: this is the first use of the raw `pg` driver in this server (see
-// the file banner above — the rest of the app deliberately avoids pg due
-// to past IPv6/ENETUNREACH issues on Render). DATABASE_URL should point at
-// Supabase's connection *pooler* (the aws-0-<region>.pooler.supabase.com
-// host, port 6543), not the direct db.<project>.supabase.co:5432 host, to
-// avoid hitting that same problem here.
+// node-postgres Pool. It's mounted here under the /sm namespace and now
+// shares this process's Supabase REST client (`supabase`, created below)
+// instead of opening a pg connection — the same @supabase/supabase-js
+// approach the rest of this app uses, avoiding the pg/IPv6 issues on Render
+// that the file banner above describes. Schema for its smc_* tables lives
+// in migrations/004_smclient_tables_with_prefix.sql (see sm/db/schema.js).
 const session = require('express-session');
-const smcPool = require('./src/db');
 const { initDB: initSmcDB } = require('./sm/db/schema');
 const { requireAuth: smcRequireAuth } = require('./sm/lib/auth');
 const { startScheduler: startSmcScheduler } = require('./sm/scheduler');
@@ -2796,22 +2793,23 @@ app.use('/api/hooks', webhooksInboundRouter(crmDeps));
 app.use('/api/webhook-endpoints', webhooksInboundRouter.endpointsRouter(crmDeps));
 
 // ================================================================
-// SOCIAL MANAGER (sm/) — mounted under /sm, sharing smcPool (raw pg,
-// see require block above). Public/webhook routes first, then
-// session-gated ones, matching sm/server.js's original ordering.
+// SOCIAL MANAGER (sm/) — mounted under /sm, sharing the Supabase REST
+// client (`supabase`, created above) instead of a raw pg pool. Public/
+// webhook routes first, then session-gated ones, matching sm/server.js's
+// original ordering.
 // ================================================================
-app.use('/sm', smcWebhooksRouter(smcPool));
-app.use('/sm/api/auth', smcAuthRouter(smcPool));
-app.use('/sm/api/connections', smcConnectionsRouter.oauthRouter(smcPool));
-app.use('/sm/api/media', smcMediaRouter.streamRouter(smcPool));
+app.use('/sm', smcWebhooksRouter(supabase));
+app.use('/sm/api/auth', smcAuthRouter(supabase));
+app.use('/sm/api/connections', smcConnectionsRouter.oauthRouter(supabase));
+app.use('/sm/api/media', smcMediaRouter.streamRouter(supabase));
 
-app.use('/sm/api/connections', smcRequireAuth, smcConnectionsRouter(smcPool));
-app.use('/sm/api/posts', smcRequireAuth, smcPostsRouter(smcPool));
-app.use('/sm/api/automations', smcRequireAuth, smcAutomationsRouter(smcPool));
-app.use('/sm/api/comments', smcRequireAuth, smcCommentsRouter(smcPool));
-app.use('/sm/api/media', smcRequireAuth, smcMediaRouter.router(smcPool));
-app.use('/sm/api/insights', smcRequireAuth, smcInsightsRouter(smcPool));
-app.use('/sm/api/ai', smcAiRouter(smcPool));
+app.use('/sm/api/connections', smcRequireAuth, smcConnectionsRouter(supabase));
+app.use('/sm/api/posts', smcRequireAuth, smcPostsRouter(supabase));
+app.use('/sm/api/automations', smcRequireAuth, smcAutomationsRouter(supabase));
+app.use('/sm/api/comments', smcRequireAuth, smcCommentsRouter(supabase));
+app.use('/sm/api/media', smcRequireAuth, smcMediaRouter.router(supabase));
+app.use('/sm/api/insights', smcRequireAuth, smcInsightsRouter(supabase));
+app.use('/sm/api/ai', smcAiRouter(supabase));
 
 app.use('/sm', express.static(path.join(__dirname, 'sm')));
 app.get('/sm', (req, res) => res.sendFile(path.join(__dirname, 'sm', 'index.html')));
@@ -2899,18 +2897,18 @@ app.delete('/api/api-keys/:id', verifyUser, requireApiAccess, async (req, res) =
 // 17. START SERVER
 // ================================================================
 // Social Manager DB init + scheduler. Runs async so it doesn't block the
-// listen() below (matches this app's existing non-blocking startup style);
-// initDB's CREATE TABLE IF NOT EXISTS statements are idempotent, so this is
-// safe to run on every boot even if migrations/004_smclient_tables_with_prefix.sql
-// was already applied manually.
+// listen() below (matches this app's existing non-blocking startup style).
+// initSmcDB is now a no-op logger — smc_* schema is applied once via
+// migrations/004_smclient_tables_with_prefix.sql, not at runtime, since the
+// Supabase REST client has no DDL access (see sm/db/schema.js).
 (async () => {
   try {
-    await initSmcDB(smcPool);
+    await initSmcDB(supabase);
     console.log('✅ Social Manager (smc_*) tables ready');
-    startSmcScheduler(smcPool);
+    startSmcScheduler(supabase);
     console.log('✅ Social Manager scheduler started');
   } catch (err) {
-    console.error('❌ Social Manager init failed — /sm routes will error until DATABASE_URL is fixed:', err.message);
+    console.error('❌ Social Manager init failed:', err.message);
   }
 })();
 

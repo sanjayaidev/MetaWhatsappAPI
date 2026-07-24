@@ -6,16 +6,22 @@ const threads = require('./platforms/threads');
 const linkedin = require('./platforms/linkedin');
 
 // Picks the most-recently-connected account for a platform per user.
-async function getConnection(pool, platform, userId) {
-  const res = await pool.query(
-    'SELECT * FROM smc_connections WHERE platform=$1 AND is_connected=true AND user_id=$2 ORDER BY updated_at DESC LIMIT 1',
-    [platform, userId]
-  );
-  return res.rows[0] || null;
+async function getConnection(supabase, platform, userId) {
+  const { data, error } = await supabase
+    .from('smc_connections')
+    .select('*')
+    .eq('platform', platform)
+    .eq('is_connected', true)
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
 }
 
-async function publishToPlatform(pool, platform, post) {
-  const conn = await getConnection(pool, platform, post.user_id);
+async function publishToPlatform(supabase, platform, post) {
+  const conn = await getConnection(supabase, platform, post.user_id);
   if (!conn) throw new Error(`No connected ${platform} account`);
   const token = decrypt(conn.access_token);
 
@@ -35,7 +41,7 @@ async function publishToPlatform(pool, platform, post) {
   throw new Error(`Unknown platform: ${platform}`);
 }
 
-async function publishOnePost(pool, post) {
+async function publishOnePost(supabase, post) {
   const platforms = Array.isArray(post.platforms) ? post.platforms : [];
   const publishedIds = { ...(post.published_ids || {}) };
   const errors = { ...(post.publish_errors || {}) };
@@ -48,20 +54,20 @@ async function publishOnePost(pool, post) {
       console.log(`Post ${post.id} already published to ${platform}, skipping`);
       continue;
     }
-    
+
     try {
-      const id = await publishToPlatform(pool, platform, post);
+      const id = await publishToPlatform(supabase, platform, post);
       publishedIds[platform] = id;
       anySuccess = true;
     } catch (err) {
       // Check if this is a duplicate post error from LinkedIn
       const errorData = err.response?.data;
       const isDuplicateError = errorData && (
-        errorData.message?.includes('Duplicate post') || 
+        errorData.message?.includes('Duplicate post') ||
         errorData.message?.includes('DUPLICATE_POST') ||
         (errorData.errorDetails?.inputErrors?.some(e => e.code === 'DUPLICATE_POST'))
       );
-      
+
       if (isDuplicateError) {
         // For duplicate errors, extract the existing post ID and treat as success
         const existingPostId = errorData.errorDetails?.inputErrors?.[0]?.description?.match(/urn:li:share:(\d+)/)?.[1];
@@ -72,7 +78,7 @@ async function publishOnePost(pool, post) {
           continue;
         }
       }
-      
+
       errors[platform] = errorData ? JSON.stringify(errorData) : err.message;
       anyFailure = true;
       console.error(`Publish failed for post ${post.id} on ${platform}:`, errors[platform]);
@@ -92,36 +98,49 @@ async function publishOnePost(pool, post) {
     newStatus = post.status;
   }
 
-  await pool.query(
-    `UPDATE smc_posts SET status=$1, published_ids=$2, publish_errors=$3, updated_at=CURRENT_TIMESTAMP WHERE id=$4`,
-    [newStatus, JSON.stringify(publishedIds), JSON.stringify(errors), post.id]
-  );
-  
+  const { error } = await supabase
+    .from('smc_posts')
+    .update({
+      status: newStatus,
+      published_ids: publishedIds,
+      publish_errors: errors,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', post.id);
+  if (error) throw error;
+
   console.log(`Post ${post.id} status updated to '${newStatus}'`);
 }
 
-async function publishDuePosts(pool) {
-  const due = await pool.query(
-    `SELECT * FROM smc_posts WHERE status='scheduled' AND scheduled_date <= NOW()::timestamptz`
-  );
-  for (const post of due.rows) {
-    await publishOnePost(pool, post);
+async function publishDuePosts(supabase) {
+  const { data: due, error } = await supabase
+    .from('smc_posts')
+    .select('*')
+    .eq('status', 'scheduled')
+    .lte('scheduled_date', new Date().toISOString());
+  if (error) throw error;
+  for (const post of due || []) {
+    await publishOnePost(supabase, post);
   }
 }
 
 // Used by the manual "publish now" endpoint — bypasses the scheduled_date/status check.
-async function publishDuePostById(pool, id) {
-  const result = await pool.query('SELECT * FROM smc_posts WHERE id=$1', [id]);
-  const post = result.rows[0];
+async function publishDuePostById(supabase, id) {
+  const { data: post, error } = await supabase
+    .from('smc_posts')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
   if (!post) throw new Error('Post not found');
-  await publishOnePost(pool, post);
+  await publishOnePost(supabase, post);
 }
 
-function startScheduler(pool) {
+function startScheduler(supabase) {
   // Every minute — publishing isn't precise-to-the-second on any of these
   // platforms anyway, so a 1-minute poll interval is plenty.
   cron.schedule('* * * * *', () => {
-    publishDuePosts(pool).catch((err) => console.error('Scheduler tick failed:', err.message));
+    publishDuePosts(supabase).catch((err) => console.error('Scheduler tick failed:', err.message));
   });
   console.log('⏰ Scheduler started (checks every minute for due posts)');
 }

@@ -1,7 +1,7 @@
 const express = require('express');
 const { generateReply, getAvailableModels, isAllowedModel } = require('../lib/ai');
 
-function router(pool) {
+function router(supabase) {
   const r = express.Router();
 
   // GET /api/ai/models - List available AI models

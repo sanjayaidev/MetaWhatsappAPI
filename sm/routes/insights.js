@@ -114,7 +114,7 @@ function toMetricsMap(items) {
     return metrics;
 }
 
-module.exports = function insightsRouter(pool) {
+module.exports = function insightsRouter(supabase) {
     const router = express.Router();
 
     // Apply authentication to all routes
@@ -131,16 +131,19 @@ module.exports = function insightsRouter(pool) {
 
             // Get user's connections for this platform
             const userId = req.user.id || req.user.sub;
-            const connectionsResult = await pool.query(
-                "SELECT * FROM smc_connections WHERE user_id = $1 AND platform = $2 AND is_connected = true",
-                [userId, platform]
-            );
+            const { data: connections, error: connErr } = await supabase
+                .from('smc_connections')
+                .select('*')
+                .eq('user_id', userId)
+                .eq('platform', platform)
+                .eq('is_connected', true);
+            if (connErr) throw connErr;
 
-            if (connectionsResult.rows.length === 0) {
+            if (!connections || connections.length === 0) {
                 return res.status(404).json({ error: 'No connected accounts found for this platform' });
             }
 
-            const connection = connectionsResult.rows[0];
+            const connection = connections[0];
             const pageId = connection.account_id || connection.page_id;
             // access_token is stored encrypted at rest (see lib/crypto.js) — must
             // decrypt before sending to Graph, same as posts.js/media.js/comments.js.
@@ -281,16 +284,19 @@ module.exports = function insightsRouter(pool) {
             }
 
             const userId = req.user.id || req.user.sub;
-            const connectionsResult = await pool.query(
-                "SELECT * FROM smc_connections WHERE user_id = $1 AND platform = $2 AND is_connected = true",
-                [userId, platform]
-            );
+            const { data: connections, error: connErr } = await supabase
+                .from('smc_connections')
+                .select('*')
+                .eq('user_id', userId)
+                .eq('platform', platform)
+                .eq('is_connected', true);
+            if (connErr) throw connErr;
 
-            if (connectionsResult.rows.length === 0) {
+            if (!connections || connections.length === 0) {
                 return res.status(404).json({ error: 'No connected accounts found for this platform' });
             }
 
-            const connection = connectionsResult.rows[0];
+            const connection = connections[0];
             const pageId = connection.account_id || connection.page_id;
             const accessToken = decrypt(connection.access_token);
 
