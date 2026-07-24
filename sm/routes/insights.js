@@ -132,7 +132,7 @@ module.exports = function insightsRouter(pool) {
             // Get user's connections for this platform
             const userId = req.user.id || req.user.sub;
             const connectionsResult = await pool.query(
-                "SELECT * FROM connections WHERE user_id = $1 AND platform = $2 AND is_connected = true",
+                "SELECT * FROM smc_connections WHERE user_id = $1 AND platform = $2 AND is_connected = true",
                 [userId, platform]
             );
 
@@ -282,7 +282,7 @@ module.exports = function insightsRouter(pool) {
 
             const userId = req.user.id || req.user.sub;
             const connectionsResult = await pool.query(
-                "SELECT * FROM connections WHERE user_id = $1 AND platform = $2 AND is_connected = true",
+                "SELECT * FROM smc_connections WHERE user_id = $1 AND platform = $2 AND is_connected = true",
                 [userId, platform]
             );
 

@@ -8,7 +8,7 @@ const linkedin = require('./platforms/linkedin');
 // Picks the most-recently-connected account for a platform per user.
 async function getConnection(pool, platform, userId) {
   const res = await pool.query(
-    'SELECT * FROM connections WHERE platform=$1 AND is_connected=true AND user_id=$2 ORDER BY updated_at DESC LIMIT 1',
+    'SELECT * FROM smc_connections WHERE platform=$1 AND is_connected=true AND user_id=$2 ORDER BY updated_at DESC LIMIT 1',
     [platform, userId]
   );
   return res.rows[0] || null;
@@ -93,7 +93,7 @@ async function publishOnePost(pool, post) {
   }
 
   await pool.query(
-    `UPDATE posts SET status=$1, published_ids=$2, publish_errors=$3, updated_at=CURRENT_TIMESTAMP WHERE id=$4`,
+    `UPDATE smc_posts SET status=$1, published_ids=$2, publish_errors=$3, updated_at=CURRENT_TIMESTAMP WHERE id=$4`,
     [newStatus, JSON.stringify(publishedIds), JSON.stringify(errors), post.id]
   );
   
@@ -102,7 +102,7 @@ async function publishOnePost(pool, post) {
 
 async function publishDuePosts(pool) {
   const due = await pool.query(
-    `SELECT * FROM posts WHERE status='scheduled' AND scheduled_date <= NOW()::timestamptz`
+    `SELECT * FROM smc_posts WHERE status='scheduled' AND scheduled_date <= NOW()::timestamptz`
   );
   for (const post of due.rows) {
     await publishOnePost(pool, post);
@@ -111,7 +111,7 @@ async function publishDuePosts(pool) {
 
 // Used by the manual "publish now" endpoint — bypasses the scheduled_date/status check.
 async function publishDuePostById(pool, id) {
-  const result = await pool.query('SELECT * FROM posts WHERE id=$1', [id]);
+  const result = await pool.query('SELECT * FROM smc_posts WHERE id=$1', [id]);
   const post = result.rows[0];
   if (!post) throw new Error('Post not found');
   await publishOnePost(pool, post);

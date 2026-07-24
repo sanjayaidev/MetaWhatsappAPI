@@ -12,7 +12,7 @@ const PROXY_URL_TTL_MS = 365 * 24 * 60 * 60 * 1000; // 1 year — long enough th
 
 async function getDriveConnection(pool, userId) {
   const res = await pool.query(
-    `SELECT * FROM connections WHERE platform='google_drive' AND is_connected=true AND user_id=$1 ORDER BY updated_at DESC LIMIT 1`,
+    `SELECT * FROM smc_connections WHERE platform='google_drive' AND is_connected=true AND user_id=$1 ORDER BY updated_at DESC LIMIT 1`,
     [userId]
   );
   return res.rows[0] || null;

@@ -69,7 +69,7 @@ function router(pool) {
     if (!userId) {
       return res.status(401).json({ error: 'Not authenticated' });
     }
-    const result = await pool.query('SELECT id, email, name FROM users WHERE id = $1 AND is_active = true', [userId]);
+    const result = await pool.query('SELECT id, email, name FROM smc_users WHERE id = $1 AND is_active = true', [userId]);
     if (result.rows.length === 0) {
       if (req.session) req.session.destroy();
       return res.status(401).json({ error: 'User not found' });

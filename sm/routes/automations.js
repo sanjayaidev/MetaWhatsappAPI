@@ -12,7 +12,7 @@ async function resolveTargetPublishedIds(pool, userId, target_published_ids) {
   const resolved = {};
   for (const [platform, postId] of Object.entries(target_published_ids)) {
     if (!postId) continue;
-    const postCheck = await pool.query('SELECT id, published_ids FROM posts WHERE id=$1 AND user_id=$2', [postId, userId]);
+    const postCheck = await pool.query('SELECT id, published_ids FROM smc_posts WHERE id=$1 AND user_id=$2', [postId, userId]);
     if (!postCheck.rows.length) {
       const err = new Error(`target_published_ids.${platform} does not refer to one of your posts`);
       err.status = 400;
@@ -35,7 +35,7 @@ function router(pool) {
   r.get('/', async (req, res) => {
     try {
       const userId = req.user.id || req.user.sub;
-      const result = await pool.query('SELECT * FROM automations WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
+      const result = await pool.query('SELECT * FROM smc_automations WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
       res.json(result.rows);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -66,7 +66,7 @@ function router(pool) {
         }
       } else if (target_post_id !== undefined && target_post_id !== null && target_post_id !== '') {
         // Legacy single-post targeting
-        const postCheck = await pool.query('SELECT id FROM posts WHERE id=$1 AND user_id=$2', [target_post_id, userId]);
+        const postCheck = await pool.query('SELECT id FROM smc_posts WHERE id=$1 AND user_id=$2', [target_post_id, userId]);
         if (!postCheck.rows.length) {
           return res.status(400).json({ error: 'target_post_id does not refer to one of your posts' });
         }
@@ -96,7 +96,7 @@ function router(pool) {
       }
       
       const result = await pool.query(
-        `INSERT INTO automations (user_id, name, type, keywords, platforms, ai_prompt, variations, reply_location, response_type, response_data, is_active, target_post_id, target_published_ids)
+        `INSERT INTO smc_automations (user_id, name, type, keywords, platforms, ai_prompt, variations, reply_location, response_type, response_data, is_active, target_post_id, target_published_ids)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
         [
           userId,
@@ -124,7 +124,7 @@ function router(pool) {
     try {
       const userId = req.user.id || req.user.sub;
       const result = await pool.query(
-        'UPDATE automations SET is_active = NOT is_active WHERE id=$1 AND user_id=$2 RETURNING *',
+        'UPDATE smc_automations SET is_active = NOT is_active WHERE id=$1 AND user_id=$2 RETURNING *',
         [req.params.id, userId]
       );
       res.json(result.rows[0]);
@@ -147,7 +147,7 @@ function router(pool) {
       }
       
       // Verify ownership of the automation
-      const existing = await pool.query('SELECT id FROM automations WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
+      const existing = await pool.query('SELECT id FROM smc_automations WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
       if (!existing.rows.length) {
         return res.status(404).json({ error: 'Automation not found' });
       }
@@ -164,7 +164,7 @@ function router(pool) {
         }
       } else if (target_post_id !== undefined && target_post_id !== null && target_post_id !== '') {
         // Legacy single-post targeting
-        const postCheck = await pool.query('SELECT id FROM posts WHERE id=$1 AND user_id=$2', [target_post_id, userId]);
+        const postCheck = await pool.query('SELECT id FROM smc_posts WHERE id=$1 AND user_id=$2', [target_post_id, userId]);
         if (!postCheck.rows.length) {
           return res.status(400).json({ error: 'target_post_id does not refer to one of your posts' });
         }
@@ -194,7 +194,7 @@ function router(pool) {
       }
       
       const result = await pool.query(
-        `UPDATE automations 
+        `UPDATE smc_automations 
          SET name=$1, type=$2, keywords=$3, platforms=$4, ai_prompt=$5, variations=$6, 
              reply_location=$7, response_type=$8, response_data=$9, is_active=$10, target_post_id=$11, target_published_ids=$12
          WHERE id=$13 AND user_id=$14 RETURNING *`,
@@ -224,7 +224,7 @@ function router(pool) {
   r.delete('/:id', async (req, res) => {
     try {
       const userId = req.user.id || req.user.sub;
-      await pool.query('DELETE FROM automations WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
+      await pool.query('DELETE FROM smc_automations WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: err.message });

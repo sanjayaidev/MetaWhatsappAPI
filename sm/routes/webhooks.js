@@ -31,7 +31,7 @@ function addToDebugLog(event) {
 async function logAutomationEvent(pool, data) {
   try {
     await pool.query(
-      `INSERT INTO automation_logs
+      `INSERT INTO smc_automation_logs
        (platform, trigger_type, trigger_text, media_id, sender_id, account_id,
         automation_id, automation_name, response_type, response_content, reply_location, success, error_message)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
@@ -220,10 +220,10 @@ function router(pool) {
 
   async function alreadyProcessed(eventId) {
     if (!eventId) return false;
-    const existing = await pool.query('SELECT 1 FROM processed_webhook_events WHERE event_id=$1', [eventId]);
+    const existing = await pool.query('SELECT 1 FROM smc_processed_webhook_events WHERE event_id=$1', [eventId]);
     if (existing.rows.length) return true;
     await pool.query(
-      'INSERT INTO processed_webhook_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING',
+      'INSERT INTO smc_processed_webhook_events (event_id) VALUES ($1) ON CONFLICT DO NOTHING',
       [eventId]
     );
     return false;
@@ -236,7 +236,7 @@ function router(pool) {
     // data type of parameter $2", so branch instead of relying on a fallback value.
     if (accountId === undefined || accountId === null) {
       const res = await pool.query(
-        'SELECT * FROM connections WHERE platform=$1 AND is_connected=true ORDER BY updated_at DESC LIMIT 1',
+        'SELECT * FROM smc_connections WHERE platform=$1 AND is_connected=true ORDER BY updated_at DESC LIMIT 1',
         [platform]
       );
       return res.rows[0] || null;
@@ -244,7 +244,7 @@ function router(pool) {
     
     // Primary lookup by original accountId (handles page_id and account_id)
     let res = await pool.query(
-      'SELECT * FROM connections WHERE platform=$1 AND (account_id=$2 OR page_id=$2) AND is_connected=true ORDER BY updated_at DESC LIMIT 1',
+      'SELECT * FROM smc_connections WHERE platform=$1 AND (account_id=$2 OR page_id=$2) AND is_connected=true ORDER BY updated_at DESC LIMIT 1',
       [platform, accountId]
     );
     let connection = res.rows[0] || null;
@@ -252,7 +252,7 @@ function router(pool) {
     // Fallback lookup using extraLookupId (for direct IG login scenarios)
     if (!connection && extraLookupId) {
       res = await pool.query(
-        'SELECT * FROM connections WHERE platform=$1 AND account_id=$2 AND is_connected=true ORDER BY updated_at DESC LIMIT 1',
+        'SELECT * FROM smc_connections WHERE platform=$1 AND account_id=$2 AND is_connected=true ORDER BY updated_at DESC LIMIT 1',
         [platform, extraLookupId]
       );
       connection = res.rows[0] || null;
@@ -261,7 +261,7 @@ function router(pool) {
     // Final fallback for Instagram: return any connected account if specific lookup fails
     if (!connection && platform === 'instagram') {
       res = await pool.query(
-        'SELECT * FROM connections WHERE platform=$1 AND is_connected=true AND (account_id IS NOT NULL OR page_id IS NOT NULL) ORDER BY created_at DESC LIMIT 1',
+        'SELECT * FROM smc_connections WHERE platform=$1 AND is_connected=true AND (account_id IS NOT NULL OR page_id IS NOT NULL) ORDER BY created_at DESC LIMIT 1',
         [platform]
       );
       connection = res.rows[0] || null;
@@ -287,8 +287,8 @@ function router(pool) {
       `SELECT automations.*, 
               COALESCE(automations.target_published_ids, '{}'::jsonb) AS automation_target_published_ids,
               posts.published_ids AS post_published_ids
-       FROM automations
-       LEFT JOIN posts ON posts.id = automations.target_post_id
+       FROM smc_automations
+       LEFT JOIN smc_posts ON posts.id = automations.target_post_id
        WHERE automations.is_active = true`
     );
     return res.rows.map(row => ({
@@ -1066,7 +1066,7 @@ function router(pool) {
       return res.status(401).json({ error: 'Invalid or missing API key' });
     }
     try {
-      const result = await pool.query('SELECT id, title, caption, hook, platforms, scheduled_date, status, created_at FROM posts ORDER BY scheduled_date DESC');
+      const result = await pool.query('SELECT id, title, caption, hook, platforms, scheduled_date, status, created_at FROM smc_posts ORDER BY scheduled_date DESC');
       res.json(result.rows);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -1079,7 +1079,7 @@ function router(pool) {
       return res.status(401).json({ error: 'Invalid or missing API key' });
     }
     try {
-      const result = await pool.query('SELECT id, name, type, keywords, ai_prompt, variations, response_data, is_active, created_at FROM automations WHERE is_active=true');
+      const result = await pool.query('SELECT id, name, type, keywords, ai_prompt, variations, response_data, is_active, created_at FROM smc_automations WHERE is_active=true');
       res.json(result.rows.map(row => ({
         ...row,
         // Ensure response_data and variations are parsed as JSON if they're strings
