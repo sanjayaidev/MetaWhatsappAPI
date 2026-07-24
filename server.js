@@ -36,6 +36,8 @@ const billingRouter = require('./src/routes/billing');
 const webhooksInboundRouter = require('./src/routes/webhooks-inbound');
 const sheetWatchersRouter = require('./src/routes/sheet-watchers');
 const botBuilderRouter = require('./src/routes/bot-builder');
+const ecomRouter = require('./src/routes/ecom');
+const paymentsWebhookRouter = require('./src/routes/payments-webhook');
 const { matchRule } = require('./src/routes/bot-engine');
 const { startSheetPoller } = require('./src/sheet-poller');
 const createChannelSender = require('./src/channel-send');
@@ -2594,6 +2596,10 @@ app.use('/api/oauth', flowsRouter(crmDeps)); // OAuth callbacks for flow builder
 app.use('/api/meetings', meetingsRouter(crmDeps));
 app.use('/api', chatbotRouter(crmDeps)); // exposes /api/chatbot-config, /api/chatbot/*
 app.use('/api/billing', billingRouter(crmDeps));
+app.use('/api/ecom', verifyUser, ecomRouter(crmDeps));
+// Public — payment providers call this directly with no user session.
+// The order id embedded in each provider's payload is how we find the merchant.
+app.use('/api/payments/webhook', paymentsWebhookRouter(crmDeps));
 
 // /api/sheet-watchers — CRUD for polling-based sheet automations (Sheet
 // Reminders tab in the CRM). The actual polling loop is started separately
