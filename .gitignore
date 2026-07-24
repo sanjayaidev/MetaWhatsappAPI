@@ -1,4 +1,4 @@
-```gitignore
+```
 # Dependencies
 node_modules/
 
@@ -7,52 +7,50 @@ dist/
 build/
 target/
 
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+
 # Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.py.class
 .Python
-env/
 venv/
 .venv/
-.ENV
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-*.pot
-*.po
-*~
-.pytest_cache/
-.mypy_cache/
-.hypothesis/
-
-# Logs
-*.log
-
-# Environment specific
 .env
-.env.local
-.env.*
 
-# IDE
-.vscode/
-.idea/
+# Temporary files
+*.tmp
 *.swp
 *.swo
-*~
 
-# OS
+# OS generated files
 .DS_Store
 Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# MyPy
+.mypy_cache/
+
+# PyTest
+.pytest_cache/
+
+# Gradle
+.gradle/
 
 # Compressed files
 *.zip
