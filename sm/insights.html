@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Insights · Meta Scheduler</title>
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --sidebar-bg: #ffffff;
+    --card-bg: #ffffff;
+    --border: #e6e8ef;
+    --text: #1f2937;
+    --text-muted: #6b7280;
+    --primary: #4f46e5;
+    --primary-light: #eef2ff;
+    --ig: linear-gradient(135deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+    --fb: #1877f2;
+    --th: #101010;
+    --success: #10b981;
+    --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
+    --shadow-lg: 0 10px 25px rgba(0,0,0,0.06);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 240px;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--border);
+    padding: 24px 16px;
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 8px 24px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .brand-logo {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: var(--primary);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 700; font-size: 16px;
+  }
+  .brand-name { font-weight: 600; font-size: 15px; }
+
+  .nav-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    padding: 8px 12px;
+    margin-bottom: 4px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    margin-bottom: 2px;
+    border: none;
+    background: transparent;
+    width: 100%;
+    text-align: left;
+  }
+  .nav-item:hover { background: var(--bg); color: var(--text); }
+  .nav-item.active {
+    background: var(--primary-light);
+    color: var(--primary);
+  }
+  .nav-icon {
+    width: 20px; height: 20px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .nav-icon.ig { background: var(--ig); }
+  .nav-icon.fb { background: var(--fb); }
+  .nav-icon.th { background: var(--th); }
+
+  .sidebar-footer {
+    margin-top: auto;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .refresh-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--text);
+    transition: all 0.15s ease;
+  }
+  .refresh-btn:hover { background: var(--bg); }
+
+  /* Main */
+  .main {
+    flex: 1;
+    padding: 32px 40px;
+    overflow-x: auto;
+  }
+
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .page-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .page-subtitle { color: var(--text-muted); font-size: 14px; }
+  .platform-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+  }
+  .platform-badge.ig { background: var(--ig); }
+  .platform-badge.fb { background: var(--fb); }
+  .platform-badge.th { background: var(--th); }
+
+  /* Stat Cards */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .stat-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: var(--shadow);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+  }
+  .stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .stat-trend {
+    font-size: 12px;
+    color: var(--success);
+    font-weight: 500;
+  }
+  .stat-trend.neutral { color: var(--text-muted); }
+
+  /* Table */
+  .table-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .table-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .table-title { font-size: 15px; font-weight: 600; }
+  .table-count { font-size: 13px; color: var(--text-muted); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  thead th {
+    text-align: left;
+    padding: 12px 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    background: #fafbfc;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody td {
+    padding: 14px 20px;
+    font-size: 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: #fafbfc; }
+
+  .post-preview {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .post-thumb {
+    width: 36px; height: 36px;
+    border-radius: 6px;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .post-thumb-img {
+    width: 36px; height: 36px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+  .post-text {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  .empty-state {
+    padding: 48px 20px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  .empty-icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+    opacity: 0.4;
+  }
+  .empty-text { font-size: 14px; }
+
+  .insights-error {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #b91c1c;
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    line-height: 1.5;
+  }
+
+  .stat-value.is-loading {
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+  .hidden { display: none !important; }
+
+  @media (max-width: 768px) {
+    .sidebar { width: 72px; padding: 16px 8px; }
+    .brand-name, .nav-label, .sidebar-footer span:first-child { display: none; }
+    .nav-item { justify-content: center; padding: 10px; }
+    .main { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-logo">M</div>
+    <div class="brand-name">Meta Scheduler</div>
+  </div>
+
+  <div class="nav-label">Platforms</div>
+
+  <button class="nav-item active" data-platform="instagram">
+    <span class="nav-icon ig">IG</span>
+    <span>Instagram</span>
+  </button>
+  <button class="nav-item" data-platform="facebook">
+    <span class="nav-icon fb">f</span>
+    <span>Facebook</span>
+  </button>
+  <button class="nav-item" data-platform="threads">
+    <span class="nav-icon th">@</span>
+    <span>Threads</span>
+  </button>
+
+  <div class="nav-label" style="margin-top: 20px;">Menu</div>
+  <button class="nav-item" onclick="location.href='/dashboard'">
+    <span class="nav-icon" style="background:#6b7280;">≡</span>
+    <span>Dashboard</span>
+  </button>
+
+  <div class="sidebar-footer">
+    <span>Connected</span>
+    <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
+  </div>
+</aside>
+
+<main class="main">
+
+  <!-- Instagram -->
+  <section class="platform-view" data-view="instagram">
+    <div class="page-header">
+      <div>
+        <div class="page-title">
+          Instagram Insights
+          <span class="platform-badge ig">Instagram</span>
+        </div>
+        <div class="page-subtitle">Overview of your Instagram account performance</div>
+      </div>
+    </div>
+
+    <div class="insights-error" data-error="ig" style="display:none;"></div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Followers</div>
+        <div class="stat-value" data-stat="ig-followers">0</div>
+        <div class="stat-trend neutral">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Reach</div>
+        <div class="stat-value" data-stat="ig-reach">0</div>
+        <div class="stat-trend neutral">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Engagement</div>
+        <div class="stat-value" data-stat="ig-engagement">0</div>
+        <div class="stat-trend neutral">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Impressions</div>
+        <div class="stat-value" data-stat="ig-impressions">0</div>
+        <div class="stat-trend neutral">—</div>
+      </div>
+    </div>
+
+    <div class="table-card">
+      <div class="table-header">
+        <div class="table-title">Posts</div>
+        <div class="table-count" data-count="ig">0 posts</div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Post</th>
+            <th>Date</th>
+            <th>Likes</th>
+            <th>Comments</th>
+            <th>Shares</th>
+            <th>Reach</th>
+          </tr>
+        </thead>
+        <tbody id="ig-posts"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Facebook -->
+  <section class="platform-view hidden" data-view="facebook">
+    <div class="page-header">
+      <div>
+        <div class="page-title">
+          Facebook Insights
+          <span class="platform-badge fb">Facebook</span>
+        </div>
+        <div class="page-subtitle">Overview of your Facebook page performance</div>
+      </div>
+    </div>
+
+    <div class="insights-error" data-error="fb" style="display:none;"></div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Followers</div>
+        <div class="stat-value" data-stat="fb-followers">0</div>
+        <div class="stat-trend neutral">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Reach</div>
+        <div class="stat-value" data-stat="fb-reach">0</div>
+        <div class="stat-trend neutral">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Engagement</div>
+        <div class="stat-value" data-stat="fb-engagement">0</div>
+        <div class="stat-trend neutral">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Impressions</div>
+        <div class="stat-value" data-stat="fb-impressions">0</div>
+        <div class="stat-trend neutral">—</div>
+      </div>
+    </div>
+
+    <div class="table-card">
+      <div class="table-header">
+        <div class="table-title">Posts</div>
+        <div class="table-count" data-count="fb">0 posts</div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Post</th>
+            <th>Date</th>
+            <th>Likes</th>
+            <th>Comments</th>
+            <th>Shares</th>
+            <th>Reach</th>
+          </tr>
+        </thead>
+        <tbody id="fb-posts"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Threads -->
+  <section class="platform-view hidden" data-view="threads">
+    <div class="page-header">
+      <div>
+        <div class="page-title">
+          Threads Insights
+          <span class="platform-badge th">Threads</span>
+        </div>
+        <div class="page-subtitle">Overview of your Threads profile performance</div>
+      </div>
+    </div>
+
+    <div class="insights-error" data-error="th" style="display:none;"></div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Followers</div>
+        <div class="stat-value" data-stat="th-followers">0</div>
+        <div class="stat-trend neutral">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Views</div>
+        <div class="stat-value" data-stat="th-views">0</div>
+        <div class="stat-trend neutral">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Likes</div>
+        <div class="stat-value" data-stat="th-likes">0</div>
+        <div class="stat-trend neutral">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Reposts</div>
+        <div class="stat-value" data-stat="th-reposts">0</div>
+        <div class="stat-trend neutral">—</div>
+      </div>
+    </div>
+
+    <div class="table-card">
+      <div class="table-header">
+        <div class="table-title">Posts</div>
+        <div class="table-count" data-count="th">0 posts</div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Post</th>
+            <th>Date</th>
+            <th>Likes</th>
+            <th>Replies</th>
+            <th>Reposts</th>
+            <th>Quotes</th>
+          </tr>
+        </thead>
+        <tbody id="th-posts"></tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  // Live state, populated from /api/insights/* — starts empty/loading rather
+  // than hard-coded zeros so the UI can distinguish "no data yet" from
+  // "confirmed zero" from "failed to load".
+  const data = {
+    instagram: {
+      stats: { followers: 0, reach: 0, engagement: 0, impressions: 0 },
+      posts: [],
+      loading: true,
+      error: null
+    },
+    facebook: {
+      stats: { followers: 0, reach: 0, engagement: 0, impressions: 0 },
+      posts: [],
+      loading: true,
+      error: null
+    },
+    threads: {
+      stats: { followers: 0, views: 0, likes: 0, reposts: 0 },
+      posts: [],
+      loading: true,
+      error: null
+    }
+  };
+
+  const PREFIX = { instagram: 'ig', facebook: 'fb', threads: 'th' };
+
+  // Auth: this app uses a JWT stored in localStorage (see dashboard.html),
+  // sent as a Bearer token — not cookies. Every authed fetch needs this
+  // header or the API responds 401 "Missing or malformed Authorization header".
+  function authHeaders() {
+    const token = localStorage.getItem('auth_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+  }
+
+  async function apiFetch(url, options = {}) {
+    const res = await fetch(url, {
+      ...options,
+      credentials: 'include',
+      headers: { ...(options.headers || {}), ...authHeaders() }
+    });
+    if (res.status === 401) {
+      localStorage.removeItem('auth_token');
+      window.location.href = '/';
+      return null;
+    }
+    return res;
+  }
+
+  // Platform switching
+  const navItems = document.querySelectorAll('.nav-item[data-platform]');
+  const views = document.querySelectorAll('.platform-view');
+
+  navItems.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const platform = btn.dataset.platform;
+
+      navItems.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      views.forEach(v => {
+        v.classList.toggle('hidden', v.dataset.view !== platform);
+      });
+    });
+  });
+
+  // Format numbers
+  function formatNumber(n) {
+    if (n === null || n === undefined) return '0';
+    return Number(n).toLocaleString();
+  }
+
+  // Render stats
+  function renderStats() {
+    // Instagram
+    document.querySelector('[data-stat="ig-followers"]').textContent = fmtStat(data.instagram, data.instagram.stats.followers);
+    document.querySelector('[data-stat="ig-reach"]').textContent = fmtStat(data.instagram, data.instagram.stats.reach);
+    document.querySelector('[data-stat="ig-engagement"]').textContent = fmtStat(data.instagram, data.instagram.stats.engagement);
+    document.querySelector('[data-stat="ig-impressions"]').textContent = fmtStat(data.instagram, data.instagram.stats.impressions);
+
+    // Facebook
+    document.querySelector('[data-stat="fb-followers"]').textContent = fmtStat(data.facebook, data.facebook.stats.followers);
+    document.querySelector('[data-stat="fb-reach"]').textContent = fmtStat(data.facebook, data.facebook.stats.reach);
+    document.querySelector('[data-stat="fb-engagement"]').textContent = fmtStat(data.facebook, data.facebook.stats.engagement);
+    document.querySelector('[data-stat="fb-impressions"]').textContent = fmtStat(data.facebook, data.facebook.stats.impressions);
+
+    // Threads
+    document.querySelector('[data-stat="th-followers"]').textContent = fmtStat(data.threads, data.threads.stats.followers);
+    document.querySelector('[data-stat="th-views"]').textContent = fmtStat(data.threads, data.threads.stats.views);
+    document.querySelector('[data-stat="th-likes"]').textContent = fmtStat(data.threads, data.threads.stats.likes);
+    document.querySelector('[data-stat="th-reposts"]').textContent = fmtStat(data.threads, data.threads.stats.reposts);
+
+    // Error banners
+    ['instagram', 'facebook', 'threads'].forEach(platform => {
+      const prefix = PREFIX[platform];
+      const banner = document.querySelector(`[data-error="${prefix}"]`);
+      if (!banner) return;
+      if (data[platform].error) {
+        banner.textContent = data[platform].error;
+        banner.style.display = 'block';
+      } else {
+        banner.style.display = 'none';
+      }
+    });
+  }
+
+  function fmtStat(platformData, value) {
+    if (platformData.loading) return '…';
+    if (platformData.error) return '—';
+    return formatNumber(value);
+  }
+
+
+
+  // Render post rows
+  function renderPosts() {
+    renderPostList('ig', data.instagram.posts, ['likes', 'comments', 'shares', 'reach']);
+    renderPostList('fb', data.facebook.posts, ['likes', 'comments', 'shares', 'reach']);
+    renderPostList('th', data.threads.posts, ['likes', 'replies', 'reposts', 'quotes']);
+  }
+
+  function renderPostList(prefix, posts, metrics) {
+    const tbody = document.getElementById(`${prefix}-posts`);
+    const counter = document.querySelector(`[data-count="${prefix}"]`);
+    counter.textContent = `${posts.length} post${posts.length !== 1 ? 's' : ''}`;
+
+    if (posts.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="${metrics.length + 2}">
+            <div class="empty-state">
+              <div class="empty-icon">📭</div>
+              <div class="empty-text">No posts yet. Publish your first post to see insights here.</div>
+            </div>
+          </td>
+        </tr>`;
+      return;
+    }
+
+    tbody.innerHTML = posts.map(p => {
+      // Render actual image if thumbnail URL is available, otherwise show camera icon
+      let thumbHtml;
+      if (p.thumbnail) {
+        thumbHtml = `<img src="${escapeHtml(p.thumbnail)}" alt="Post thumbnail" class="post-thumb-img">`;
+      } else {
+        thumbHtml = '<div class="post-thumb">📷</div>';
+      }
+      
+      return `
+      <tr>
+        <td>
+          <div class="post-preview">
+            ${thumbHtml}
+            <span class="post-text">${escapeHtml(p.caption || 'Untitled post')}</span>
+          </div>
+        </td>
+        <td>${formatDate(p.date)}</td>
+        ${metrics.map(m => `<td>${formatNumber(p[m])}</td>`).join('')}
+      </tr>
+    `;
+    }).join('');
+  }
+
+  function formatDate(d) {
+    if (!d) return '—';
+    const date = new Date(d);
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  function escapeHtml(s) {
+    const div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  // Fetch account-level + post-level insights for one platform and update
+  // the shared `data` object in place.
+  async function loadPlatform(platform) {
+    const bucket = data[platform];
+    bucket.loading = true;
+    bucket.error = null;
+    renderStats();
+
+    try {
+      const [accountRes, postsRes] = await Promise.all([
+        apiFetch(`/api/insights/account?platform=${platform}`),
+        apiFetch(`/api/insights/posts?platform=${platform}`)
+      ]);
+
+      if (!accountRes || !postsRes) return; // apiFetch already redirected on 401
+
+      const accountBody = await accountRes.json().catch(() => ({}));
+      const postsBody = await postsRes.json().catch(() => ({}));
+
+      if (!accountRes.ok) {
+        throw new Error(accountBody.details || accountBody.error || `Request failed (${accountRes.status})`);
+      }
+      if (!postsRes.ok) {
+        throw new Error(postsBody.details || postsBody.error || `Request failed (${postsRes.status})`);
+      }
+
+      Object.assign(bucket.stats, accountBody.data || {});
+      bucket.posts = postsBody.data || [];
+    } catch (err) {
+      // Surface the real reason (no connected account, expired token, missing
+      // permission, etc.) instead of quietly leaving everything at 0.
+      bucket.error = err.message || 'Failed to load insights';
+    } finally {
+      bucket.loading = false;
+      renderStats();
+      renderPosts();
+    }
+  }
+
+  async function loadAllPlatforms() {
+    await Promise.all(['instagram', 'facebook', 'threads'].map(loadPlatform));
+  }
+
+  // Refresh handler
+  document.getElementById('refreshBtn').addEventListener('click', () => {
+    loadAllPlatforms();
+  });
+
+  // Initial render (loading state) + kick off real data fetch
+  renderStats();
+  renderPosts();
+  loadAllPlatforms();
+</script>
+
+</body>
+</html>

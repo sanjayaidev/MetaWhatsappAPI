@@ -1,0 +1,2965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes" />
+    <title>Content Planner · Meta Scheduler</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --secondary: #7c3aed;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --bg: #f4f6fa;
+            --card-bg: #ffffff;
+            --text: #1e1e2f;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --shadow: 0 8px 30px rgba(0,0,0,0.06);
+            --radius: 16px;
+            --radius-sm: 10px;
+            --sidebar-width: 220px;
+            --header-height: 60px;
+            --transition: 0.25s ease;
+            --ig: #E4405F;
+            --fb: #1877F2;
+            --threads: #000000;
+            --li: #0A66C2;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+        }
+        /* ===== SIDEBAR ===== */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: rgba(255,255,255,0.85);
+            backdrop-filter: blur(16px);
+            border-right: 1px solid var(--border);
+            height: 100vh;
+            position: sticky;
+            top: 0;
+            display: flex;
+            flex-direction: column;
+            padding: 16px 12px;
+            flex-shrink: 0;
+            transition: transform var(--transition);
+            z-index: 100;
+            overflow-y: auto;
+        }
+        .sidebar .logo {
+            font-size: 20px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .sidebar .logo i { -webkit-text-fill-color: var(--primary); font-size: 24px; }
+        .sidebar .logo span { -webkit-text-fill-color: var(--text); }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all var(--transition);
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 14px;
+            margin-bottom: 2px;
+            text-decoration: none;
+            position: relative;
+        }
+        .nav-item:hover { background: #f1f5f9; color: var(--text); }
+        .nav-item.active {
+            background: #eff6ff;
+            color: var(--primary);
+            font-weight: 600;
+        }
+        .nav-item.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 8px;
+            bottom: 8px;
+            width: 3px;
+            background: var(--primary);
+            border-radius: 0 4px 4px 0;
+        }
+        .nav-item i { width: 20px; text-align: center; font-size: 16px; }
+        .nav-item .badge {
+            margin-left: auto;
+            background: var(--border);
+            color: var(--text-muted);
+            font-size: 10px;
+            padding: 1px 10px;
+            border-radius: 30px;
+            font-weight: 600;
+            display: none;
+        }
+        .nav-item .badge.active-badge { background: var(--success); color: white; }
+        .nav-item .badge.warn-badge { background: var(--warning); color: white; }
+
+        .sidebar-footer {
+            margin-top: auto;
+            padding: 12px 8px;
+            border-top: 1px solid var(--border);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .sidebar-footer .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            margin-right: 6px;
+        }
+
+        /* ===== MAIN CONTENT ===== */
+        .main {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .header {
+            height: var(--header-height);
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            background: rgba(255,255,255,0.6);
+            backdrop-filter: blur(8px);
+            flex-shrink: 0;
+            gap: 12px;
+        }
+        .header .page-title { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+        .header .page-title i { color: var(--primary); }
+        .header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .header-actions .btn { font-size: 13px; padding: 6px 14px; }
+        .header .hamburger {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 22px;
+            cursor: pointer;
+            color: var(--text);
+        }
+
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 24px 30px;
+        }
+
+        /* ===== BUTTONS ===== */
+        .btn {
+            padding: 8px 18px;
+            border: none;
+            border-radius: 60px;
+            font-weight: 500;
+            font-size: 14px;
+            background: white;
+            color: var(--text);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            transition: all var(--transition);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: 'Inter', sans-serif;
+            white-space: nowrap;
+        }
+        .btn-primary { background: var(--primary); color: white; border: none; }
+        .btn-primary:hover { background: var(--primary-dark); transform: scale(0.97); }
+        .btn-success { background: var(--success); color: white; border: none; }
+        .btn-success:hover { opacity: 0.9; transform: scale(0.97); }
+        .btn-outline { background: transparent; border: 1px solid var(--border); }
+        .btn-outline:hover { background: #f1f5f9; }
+        .btn-danger { background: var(--error); color: white; border: none; }
+        .btn-danger:hover { opacity: 0.9; transform: scale(0.97); }
+        .btn-sm { padding: 4px 12px; font-size: 12px; }
+        .btn-xs { padding: 2px 10px; font-size: 11px; }
+        .btn-ghost { background: transparent; border: none; color: var(--text-muted); }
+        .btn-ghost:hover { background: #f1f5f9; }
+
+        /* ===== TABS ===== */
+        .tab-content { display: none; animation: fadeUp 0.3s ease; }
+        .tab-content.active { display: block; }
+
+        @keyframes fadeUp {
+            0% { opacity: 0; transform: translateY(10px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ===== CARDS ===== */
+        .card {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            padding: 18px 20px;
+            transition: all var(--transition);
+        }
+        .card:hover { border-color: #cbd5e1; }
+        .card-grid { display: grid; gap: 16px; }
+        .card-grid#connGrid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+        
+        /* Connection Cards Specific Styles */
+        .d-flex { display: flex !important; }
+        .flex-column { flex-direction: column !important; }
+        .align-items-center { align-items: center !important; }
+        .justify-content-center { justify-content: center !important; }
+        .mb-0 { margin-bottom: 0 !important; }
+        .mb-2 { margin-bottom: 8px !important; }
+        .mb-3 { margin-bottom: 12px !important; }
+        .mt-3 { margin-top: 12px !important; }
+        .me-1 { margin-right: 4px !important; }
+        .me-2 { margin-right: 8px !important; }
+        .me-3 { margin-right: 12px !important; }
+        .ms-2 { margin-left: 8px !important; }
+        .p-3 { padding: 12px !important; }
+        .w-100 { width: 100% !important; }
+        .h-100 { height: 100% !important; }
+        .text-muted { color: var(--text-muted) !important; }
+        .text-white { color: white !important; }
+        .text-success { color: var(--success) !important; }
+        .text-danger { color: var(--error) !important; }
+        .text-primary { color: var(--primary) !important; }
+        .text-dark { color: #1e1e2f !important; }
+        .bg-success { background-color: var(--success) !important; }
+        .bg-danger { background-color: var(--error) !important; }
+        .bg-primary { background-color: var(--primary) !important; }
+        .bg-dark { background-color: #1e1e2f !important; }
+        .bg-opacity-10 { opacity: 0.1 !important; }
+        .rounded-circle { border-radius: 50% !important; }
+        .shadow-sm { box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important; }
+        .border-0 { border: none !important; }
+        .flex-grow-1 { flex-grow: 1 !important; }
+        .connection-card .icon-box {
+            width: 56px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .connection-card .icon-box img {
+            width: 32px;
+            height: 32px;
+            object-fit: contain;
+        }
+        .bg-gradient-instagram {
+            background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+        }
+        .connection-status { margin-top: auto; }
+
+        /* ===== SCHEDULER ===== */
+        .calendar-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .calendar-toolbar .view-toggle {
+            display: flex;
+            gap: 4px;
+            background: #f1f5f9;
+            border-radius: 60px;
+            padding: 3px;
+        }
+        .calendar-toolbar .view-toggle .btn {
+            border: none;
+            background: transparent;
+            padding: 4px 14px;
+            font-size: 12px;
+            border-radius: 40px;
+        }
+        .calendar-toolbar .view-toggle .btn.active {
+            background: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .nav-group { display: flex; align-items: center; gap: 4px; }
+        .nav-group .btn { padding: 4px 10px; font-size: 13px; }
+        .nav-label { font-size: 14px; font-weight: 500; min-width: 100px; text-align: center; }
+
+        .weekday-header {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+        .weekday-header span {
+            text-align: center;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: #94a3b8;
+        }
+        .month-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 6px;
+        }
+        .cal-cell {
+            background: white;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            padding: 6px 8px;
+            min-height: 70px;
+            cursor: pointer;
+            transition: all var(--transition);
+            display: flex;
+            flex-direction: column;
+        }
+        .cal-cell:hover { border-color: #94a3b8; transform: translateY(-2px); box-shadow: var(--shadow); }
+        .cal-cell.outside { opacity: 0.3; }
+        .cal-cell.past-date { opacity: 0.4; cursor: not-allowed; background: #f9fafb; }
+        .cal-cell.today { border: 2px solid var(--primary); }
+        .cal-cell.selected { background: #eff6ff; border-color: var(--primary); }
+        .cal-date {
+            font-weight: 600;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .cal-platform-icons { display: flex; gap: 3px; flex-wrap: wrap; }
+        .cal-platform-icons .picon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f0f0f0;
+            overflow: hidden;
+        }
+        .cal-platform-icons .picon img { width: 16px; height: 16px; object-fit: contain; }
+        .picon-ig { background: var(--ig); }
+        .picon-fb { background: var(--fb); }
+        .picon-th { background: var(--threads); }
+        .picon-li { background: var(--li); }
+
+        /* Day Detail */
+        .day-detail-panel {
+            margin-top: 18px;
+            border-top: 1px solid var(--border);
+            padding-top: 16px;
+        }
+        .day-detail-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 14px;
+        }
+        .platform-card {
+            background: white;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            padding: 14px 16px;
+            transition: all var(--transition);
+        }
+        .platform-card:hover { border-color: #94a3b8; box-shadow: var(--shadow); }
+        .platform-card .pheader {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        .platform-card .pheader img { width: 20px; height: 20px; object-fit: contain; }
+        .platform-card .pbody { font-size: 13px; color: var(--text-muted); }
+        .platform-card .pbody .label { font-weight: 500; color: var(--text); }
+        .platform-card .pactions { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+        /* ===== CONNECTIONS ===== */
+        .conn-card {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px 20px;
+            background: white;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            transition: all var(--transition);
+            flex-wrap: wrap;
+        }
+        .conn-card:hover { border-color: #94a3b8; box-shadow: var(--shadow); }
+        .conn-card .icon-wrap {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            color: white;
+            flex-shrink: 0;
+        }
+        .conn-card .info { flex: 1; min-width: 140px; }
+        .conn-card .info .name { font-weight: 600; font-size: 15px; }
+        .conn-card .info .sub { font-size: 13px; color: var(--text-muted); }
+        .conn-card .status-badge {
+            font-size: 12px;
+            padding: 3px 12px;
+            border-radius: 30px;
+            font-weight: 500;
+        }
+        .conn-card .actions { display: flex; gap: 8px; margin-left: auto; }
+        .status-badge.connected { background: #d1fae5; color: #065f46; }
+        .status-badge.disconnected { background: #fee2e2; color: #991b1b; }
+        .status-badge.pending { background: #fef3c7; color: #92400e; }
+
+        /* ===== AUTOMATION BUILDER ===== */
+        .auto-type-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 14px;
+            margin: 16px 0;
+        }
+        .auto-type-card {
+            background: white;
+            border-radius: var(--radius);
+            border: 2px solid var(--border);
+            padding: 20px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all var(--transition);
+            position: relative;
+        }
+        .auto-type-card:hover { border-color: var(--primary); transform: translateY(-3px); box-shadow: var(--shadow); }
+        .auto-type-card.selected { border-color: var(--primary); background: #eff6ff; }
+        .auto-type-card .icon { font-size: 32px; margin-bottom: 8px; }
+        .auto-type-card h4 { font-size: 15px; margin-bottom: 4px; }
+        .auto-type-card p { font-size: 12px; color: var(--text-muted); }
+
+        .step-indicator {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+        .step-indicator .step {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+        .step-indicator .step .num {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+        .step-indicator .step.active .num { background: var(--primary); color: white; }
+        .step-indicator .step.done .num { background: var(--success); color: white; }
+        .step-indicator .step.active { color: var(--text); font-weight: 600; }
+        .step-indicator .line {
+            flex: 1;
+            height: 2px;
+            background: var(--border);
+            max-width: 40px;
+        }
+        .step-indicator .line.done { background: var(--success); }
+
+        .auto-step { display: none; animation: fadeUp 0.3s ease; }
+        .auto-step.active { display: block; }
+
+        .variation-input {
+            background: #f8fafc;
+            border-radius: var(--radius-sm);
+            padding: 10px 12px;
+            margin-bottom: 6px;
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+        .variation-input textarea {
+            flex: 1;
+            border: none;
+            background: transparent;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            resize: vertical;
+            min-height: 44px;
+            outline: none;
+        }
+        .variation-input .del-var {
+            background: none;
+            border: none;
+            color: var(--error);
+            cursor: pointer;
+            font-size: 14px;
+            padding: 4px;
+        }
+
+        .test-result {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            border-radius: var(--radius-sm);
+            padding: 14px 16px;
+            margin-top: 12px;
+        }
+        .test-result .matched { color: var(--success); font-weight: 600; }
+        .test-result .response {
+            background: white;
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            margin-top: 6px;
+            border-left: 3px solid var(--primary);
+        }
+
+        /* ===== MODAL ===== */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.35);
+            backdrop-filter: blur(4px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            padding: 16px;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: white;
+            border-radius: 24px;
+            padding: 24px 28px;
+            max-width: 640px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: fadeUp 0.25s ease;
+            box-shadow: 0 30px 80px rgba(0,0,0,0.15);
+        }
+        .modal h2 { margin-bottom: 16px; font-size: 20px; display: flex; align-items: center; gap: 10px; }
+        .modal label { font-weight: 500; font-size: 13px; display: block; margin: 12px 0 4px; }
+        .modal input, .modal textarea, .modal select {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            transition: 0.2s;
+            background: white;
+        }
+        .modal input:focus, .modal textarea:focus, .modal select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+        }
+        .modal textarea { min-height: 60px; resize: vertical; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap; }
+        .modal-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        @media (max-width: 480px) { .modal-row { grid-template-columns: 1fr; } }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 1024px) {
+            .day-detail-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 820px) {
+            .sidebar {
+                transform: translateX(-100%);
+                position: fixed;
+                width: 260px;
+                height: 100%;
+                top: 0;
+                left: 0;
+                box-shadow: 4px 0 30px rgba(0,0,0,0.1);
+                border-right: none;
+                background: white;
+            }
+            .sidebar.open { transform: translateX(0); }
+            .header .hamburger { display: block; }
+            .day-detail-grid { grid-template-columns: 1fr 1fr; }
+            .month-grid { gap: 4px; }
+            .cal-cell { min-height: 56px; padding: 4px 6px; }
+            .cal-date { font-size: 11px; }
+            .cal-platform-icons .picon { font-size: 9px; width: 16px; height: 16px; }
+        }
+        @media (max-width: 560px) {
+            .content { padding: 12px 14px; }
+            .header { padding: 0 14px; height: 54px; }
+            .header .page-title { font-size: 15px; }
+            .header-actions .btn { font-size: 11px; padding: 4px 10px; }
+            .day-detail-grid { grid-template-columns: 1fr; }
+            .month-grid { gap: 3px; }
+            .cal-cell { min-height: 44px; padding: 3px 4px; border-radius: 6px; }
+            .cal-date { font-size: 10px; }
+            .cal-platform-icons .picon { font-size: 8px; width: 14px; height: 14px; }
+            .weekday-header span { font-size: 9px; }
+            .calendar-toolbar { gap: 6px; }
+            .nav-label { font-size: 12px; min-width: 70px; }
+            .auto-type-grid { grid-template-columns: 1fr 1fr; }
+            .step-indicator { flex-wrap: wrap; gap: 4px; }
+            .step-indicator .step { font-size: 11px; }
+            .step-indicator .line { max-width: 20px; }
+            .conn-card { padding: 12px 14px; }
+            .conn-card .icon-wrap { width: 36px; height: 36px; font-size: 16px; }
+            .modal { padding: 18px; }
+        }
+        @media (max-width: 400px) {
+            .auto-type-grid { grid-template-columns: 1fr; }
+            .calendar-toolbar .view-toggle .btn { font-size: 10px; padding: 2px 10px; }
+        }
+
+        /* scrollbar */
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+        /* helpers */
+        .flex { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .flex-between { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+        .gap-1 { gap: 4px; }
+        .mt-2 { margin-top: 12px; }
+        .mb-2 { margin-bottom: 12px; }
+        .text-muted { color: var(--text-muted); font-size: 13px; }
+        .text-center { text-align: center; }
+        .w-full { width: 100%; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<!-- ===== SIDEBAR ===== -->
+<nav class="sidebar" id="sidebar">
+    <div class="logo"><i class="fas fa-calendar-alt"></i> <span>Planner</span></div>
+    <a href="/dashboard" class="nav-item active" data-tab="scheduler"><i class="fas fa-calendar-day"></i> Scheduler</a>
+    <a href="/dashboard" class="nav-item" data-tab="inbox"><i class="fas fa-inbox"></i> Inbox <span class="badge" id="inboxBadge">0</span></a>
+    <a href="/dashboard" class="nav-item" data-tab="connections"><i class="fas fa-link"></i> Connections</a>
+    <a href="/dashboard" class="nav-item" data-tab="automation"><i class="fas fa-bolt"></i> Automation</a>
+    <a href="/insights" class="nav-item"><i class="fas fa-chart-line"></i> Insights</a>
+    <a href="/dashboard" class="nav-item" data-tab="profile"><i class="fas fa-user"></i> Profile</a>
+    <a href="/dashboard" class="nav-item" data-tab="settings"><i class="fas fa-sliders-h"></i> Settings</a>
+    <div class="sidebar-footer">
+        <div class="nav-item" id="logoutBtn" style="margin-bottom:8px;"><i class="fas fa-sign-out-alt"></i> Log out</div>
+                <a href="/about" style="color:var(--text-muted);font-size:11px;text-decoration:none;margin-right:8px;">About</a>
+        <a href="/terms" style="color:var(--text-muted);font-size:11px;text-decoration:none;margin-right:8px;">Terms</a>
+        <a href="/privacy-policy" style="color:var(--text-muted);font-size:11px;text-decoration:none;margin-right:8px;">Privacy</a>
+        <a href="/data-deletion" style="color:var(--text-muted);font-size:11px;text-decoration:none;">Data</a>
+    </div>
+</nav>
+
+<!-- ===== MAIN ===== -->
+<div class="main">
+    <!-- Header -->
+    <header class="header">
+        <div class="flex">
+            <button class="hamburger" id="hamburgerBtn"><i class="fas fa-bars"></i></button>
+            <span class="page-title" id="pageTitle"><i class="fas fa-calendar-day"></i> Scheduler</span>
+        </div>
+        <div class="header-actions" id="headerActions">
+            <button class="btn btn-outline btn-sm" id="refreshBtn"><i class="fas fa-sync-alt"></i></button>
+            <button class="btn btn-primary btn-sm" id="addPostBtn"><i class="fas fa-plus"></i> Add</button>
+        </div>
+    </header>
+
+    <!-- Content -->
+    <div class="content">
+
+        <!-- ===== TAB: SCHEDULER ===== -->
+        <div class="tab-content active" id="tab-scheduler">
+            <div class="calendar-toolbar">
+                <div class="nav-group">
+                    <button class="btn btn-outline btn-sm" id="calPrev"><i class="fas fa-chevron-left"></i></button>
+                    <span class="nav-label" id="calLabel">March 2026</span>
+                    <button class="btn btn-outline btn-sm" id="calNext"><i class="fas fa-chevron-right"></i></button>
+                </div>
+                <div class="view-toggle">
+                    <button class="btn active" data-view="month">Month</button>
+                    <button class="btn" data-view="week">Week</button>
+                    <button class="btn" data-view="day">Day</button>
+                </div>
+                <div style="margin-left:auto; display:flex; gap:4px; flex-wrap:wrap;">
+                    <button class="btn btn-sm btn-outline" id="todayBtn">Today</button>
+                </div>
+            </div>
+
+            <div id="calendarGrid"></div>
+            <div class="day-detail-panel" id="dayDetailPanel">
+                <div class="text-muted text-center" style="padding:20px 0;">Click a day to see content</div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: INBOX ===== -->
+        <div class="tab-content" id="tab-inbox">
+            <!-- Inbox Tabs -->
+            <div class="card mb-2" style="padding:12px 16px;">
+                <div class="flex-between">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn btn-sm active" data-inbox-tab="fb-ig"><i class="fas fa-comments"></i> Facebook & Instagram</button>
+                        <button class="btn btn-sm" data-inbox-tab="threads"><i class="fas fa-at"></i> Threads</button>
+                    </div>
+                    <button class="btn btn-sm btn-outline" id="refreshInboxBtn"><i class="fas fa-sync-alt"></i> Refresh</button>
+                </div>
+            </div>
+
+            <!-- FB & IG Tab Content -->
+            <div id="inbox-fb-ig" class="inbox-tab-content">
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;">
+                    <!-- FB Comments -->
+                    <div class="card" style="padding:14px;">
+                        <div style="font-weight:600;font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                            <i class="fab fa-facebook" style="color:var(--fb);"></i> Comments
+                        </div>
+                        <div id="fbCommentsList" style="max-height:400px;overflow-y:auto;"></div>
+                    </div>
+                    <!-- FB DMs -->
+                    <div class="card" style="padding:14px;">
+                        <div style="font-weight:600;font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                            <i class="fab fa-facebook" style="color:var(--fb);"></i> Messages
+                        </div>
+                        <div id="fbDmsList" style="max-height:400px;overflow-y:auto;"></div>
+                    </div>
+                    <!-- IG Comments -->
+                    <div class="card" style="padding:14px;">
+                        <div style="font-weight:600;font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                            <i class="fab fa-instagram" style="color:var(--ig);"></i> Comments
+                        </div>
+                        <div id="igCommentsList" style="max-height:400px;overflow-y:auto;"></div>
+                    </div>
+                    <!-- IG DMs -->
+                    <div class="card" style="padding:14px;">
+                        <div style="font-weight:600;font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                            <i class="fab fa-instagram" style="color:var(--ig);"></i> Messages
+                        </div>
+                        <div id="igDmsList" style="max-height:400px;overflow-y:auto;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Threads Tab Content -->
+            <div id="inbox-threads" class="inbox-tab-content" style="display:none;">
+                <div class="card" style="padding:14px;">
+                    <div style="font-weight:600;font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:8px;">
+                        <i class="fas fa-at" style="color:var(--threads);"></i> Threads Comments
+                    </div>
+                    <div id="threadsCommentsList" style="max-height:500px;overflow-y:auto;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: CONNECTIONS ===== -->
+        <div class="tab-content" id="tab-connections">
+            <div class="flex-between mb-2">
+                <h3 style="font-weight:600; font-size:18px;">🔗 Platform Connections</h3>
+            </div>
+            
+            <!-- Connection Cards Grid - Static Definition (No API Load Needed for UI) -->
+            <div class="card-grid" style="gap:12px;" id="connGrid">
+                <!-- Google Sheets -->
+                <div class="card connection-card h-100 shadow-sm border-0">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="icon-box bg-success bg-opacity-10 text-success rounded-circle p-3 me-3">
+                                <img src="/assets/logos/sheets.png" alt="Google Sheets" style="width:28px;height:28px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"><i class="fas fa-file-excel fa-lg" style="display:none;"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Google Sheets</h5>
+                                <small class="text-muted">Data & Content Planning</small>
+                            </div>
+                        </div>
+                        <p class="text-muted flex-grow-1">Connect to Google Sheets to automate content planning and data synchronization.</p>
+                        
+                        <div id="conn-status-sheets" class="connection-status mt-3">
+                            <button class="btn btn-outline-success w-100" onclick="connectPlatform('google_sheets')">
+                                <i class="fas fa-link me-2"></i>Connect Account
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Google Drive -->
+                <div class="card connection-card h-100 shadow-sm border-0">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="icon-box bg-danger bg-opacity-10 text-danger rounded-circle p-3 me-3">
+                                <img src="/assets/logos/drive.webp" alt="Google Drive" style="width:28px;height:28px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"><i class="fab fa-google-drive fa-lg" style="display:none;"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Google Drive</h5>
+                                <small class="text-muted">Media Storage</small>
+                            </div>
+                        </div>
+                        <p class="text-muted flex-grow-1">Store and access media files directly from your Google Drive for posts.</p>
+                        
+                        <div id="conn-status-drive" class="connection-status mt-3">
+                            <button class="btn btn-outline-danger w-100" onclick="connectPlatform('google_drive')">
+                                <i class="fas fa-link me-2"></i>Connect Account
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Facebook -->
+                <div class="card connection-card h-100 shadow-sm border-0">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="icon-box bg-primary bg-opacity-10 text-primary rounded-circle p-3 me-3">
+                                <img src="/assets/logos/facebook.webp" alt="Facebook" style="width:28px;height:28px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"><i class="fab fa-facebook-f fa-lg" style="display:none;"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Facebook</h5>
+                                <small class="text-muted">Social Engagement</small>
+                            </div>
+                        </div>
+                        <p class="text-muted flex-grow-1">Connect your Facebook Pages to schedule posts and manage comments.</p>
+                        
+                        <div id="conn-status-facebook" class="connection-status mt-3">
+                            <button class="btn btn-outline-primary w-100" onclick="connectPlatform('facebook')">
+                                <i class="fas fa-link me-2"></i>Connect Account
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Instagram -->
+                <div class="card connection-card h-100 shadow-sm border-0">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="icon-box bg-gradient-instagram rounded-circle p-3 me-3 text-white">
+                                <img src="/assets/logos/insta.webp" alt="Instagram" style="width:28px;height:28px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"><i class="fab fa-instagram fa-lg" style="display:none;"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Instagram</h5>
+                                <small class="text-muted">Visual Storytelling</small>
+                            </div>
+                        </div>
+                        <p class="text-muted flex-grow-1">Link your Instagram Business account to schedule reels and posts.</p>
+                        
+                        <div id="conn-status-instagram" class="connection-status mt-3">
+                            <button class="btn btn-outline-dark w-100" onclick="connectPlatform('instagram')">
+                                <i class="fas fa-link me-2"></i>Connect Account
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Threads -->
+                <div class="card connection-card h-100 shadow-sm border-0">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="icon-box bg-dark bg-opacity-10 text-dark rounded-circle p-3 me-3">
+                                <img src="/assets/logos/Threads.png" alt="Threads" style="width:28px;height:28px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"><i class="fas fa-at fa-lg" style="display:none;"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Threads</h5>
+                                <small class="text-muted">Real-time Conversation</small>
+                            </div>
+                        </div>
+                        <p class="text-muted flex-grow-1">Connect to Threads to engage in real-time conversations and scheduling.</p>
+                        
+                        <div id="conn-status-threads" class="connection-status mt-3">
+                            <button class="btn btn-outline-dark w-100" onclick="connectPlatform('threads')">
+                                <i class="fas fa-link me-2"></i>Connect Account
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- LinkedIn -->
+                <div class="card connection-card h-100 shadow-sm border-0">
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="icon-box rounded-circle p-3 me-3 text-white" style="background: var(--li);">
+                                <img src="/assets/logos/linkedin.webp" alt="LinkedIn" style="width:28px;height:28px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"><i class="fab fa-linkedin-in fa-lg" style="display:none;"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">LinkedIn</h5>
+                                <small class="text-muted">Professional Network</small>
+                            </div>
+                        </div>
+                        <p class="text-muted flex-grow-1">Connect your personal LinkedIn profile to schedule posts. Comment/DM automation isn't supported by LinkedIn's API for personal profiles.</p>
+                        
+                        <div id="conn-status-linkedin" class="connection-status mt-3">
+                            <button class="btn w-100" style="border:1px solid var(--li); color:var(--li);" onclick="connectPlatform('linkedin')">
+                                <i class="fas fa-link me-2"></i>Connect Account
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: AUTOMATION ===== -->
+        <div class="tab-content" id="tab-automation">
+            <div class="flex-between mb-2">
+                <h3 style="font-weight:600; font-size:18px;">⚡ Automation Builder</h3>
+                <button class="btn btn-primary btn-sm" id="newAutoBtn"><i class="fas fa-plus"></i> New Automation</button>
+            </div>
+
+            <!-- Automation List -->
+            <div id="autoList">
+                <div class="card-grid" style="gap:10px;" id="autoGrid">
+                    <div class="text-muted" style="padding:16px;">Loading automations…</div>
+                </div>
+            </div>
+
+            <!-- Automation Builder (hidden by default) -->
+            <div id="autoBuilder" style="display:none; margin-top:16px;">
+                <div class="card">
+                    <div class="flex-between mb-2">
+                        <h4 id="builderTitle" style="font-weight:600;">New Automation</h4>
+                        <button class="btn btn-sm btn-ghost" id="closeBuilder"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="step-indicator" id="stepIndicator">
+                        <div class="step active" data-step="1"><span class="num">1</span> Platform</div>
+                        <div class="line"></div>
+                        <div class="step" data-step="2"><span class="num">2</span> Scope</div>
+                        <div class="line"></div>
+                        <div class="step" data-step="3"><span class="num">3</span> Trigger</div>
+                        <div class="line"></div>
+                        <div class="step" data-step="4"><span class="num">4</span> Response</div>
+                        <div class="line"></div>
+                        <div class="step" data-step="5"><span class="num">5</span> Confirm</div>
+                    </div>
+
+                    <!-- Step 1: Choose Platform -->
+                    <div class="auto-step active" data-step="1">
+                        <label>Automation Name</label>
+                        <input type="text" id="autoNameInput" placeholder="e.g. Price Inquiry Response" style="margin-bottom:12px;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;">
+                        <p class="text-muted mb-2">Select which platform(s) this automation will run on.</p>
+                        <div class="auto-type-grid" id="platformSelectGrid">
+                            <div class="auto-type-card selected" data-platform="instagram">
+                                <input type="checkbox" class="platform-checkbox" checked style="position:absolute;top:10px;right:10px;width:16px;height:16px;pointer-events:none;">
+                                <div class="icon"><i class="fab fa-instagram"></i></div>
+                                <h4>Instagram</h4>
+                                <p>Comments and DMs on Instagram</p>
+                            </div>
+                            <div class="auto-type-card" data-platform="facebook">
+                                <input type="checkbox" class="platform-checkbox" style="position:absolute;top:10px;right:10px;width:16px;height:16px;pointer-events:none;">
+                                <div class="icon"><i class="fab fa-facebook-f"></i></div>
+                                <h4>Facebook</h4>
+                                <p>Comments and DMs on Facebook Pages</p>
+                            </div>
+                            <div class="auto-type-card" data-platform="threads">
+                                <input type="checkbox" class="platform-checkbox" style="position:absolute;top:10px;right:10px;width:16px;height:16px;pointer-events:none;">
+                                <div class="icon"><img src="/assets/logos/Threads.png" alt="Threads" style="width:24px;height:24px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"><i class="fas fa-at" style="display:none;"></i></div>
+                                <h4>Threads</h4>
+                                <p>Replies on Threads</p>
+                            </div>
+                        </div>
+                        <div class="flex" style="justify-content:flex-end; margin-top:16px;">
+                            <button class="btn btn-primary step-next">Next: Scope <i class="fas fa-arrow-right"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Choose Post Scope -->
+                    <div class="auto-step" data-step="2">
+                        <p class="text-muted mb-2">Should this automation apply to specific posts or all future posts?</p>
+                        <div class="auto-type-grid" id="scopeSelectGrid">
+                            <div class="auto-type-card selected" data-scope="all">
+                                <div class="icon"><i class="fas fa-infinity"></i></div>
+                                <h4>All Future Posts</h4>
+                                <p>Apply to all new posts automatically</p>
+                            </div>
+                            <div class="auto-type-card" data-scope="specific">
+                                <div class="icon"><i class="fas fa-thumbtack"></i></div>
+                                <h4>Specific Posts</h4>
+                                <p>Choose individual posts to monitor</p>
+                            </div>
+                        </div>
+                        <div id="specificPostSelector" style="display:none; margin-top:16px;">
+                            <label>Select a Post</label>
+                            <div id="postSelectList" style="width:100%;max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;"></div>
+                            <small class="text-muted">Choose the single post this automation should monitor</small>
+                        </div>
+
+                        <div class="flex" style="justify-content:space-between; flex-wrap:wrap; margin-top:16px;">
+                            <button class="btn btn-outline step-prev"><i class="fas fa-arrow-left"></i> Back</button>
+                            <button class="btn btn-primary step-next">Next: Trigger <i class="fas fa-arrow-right"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Choose Trigger Keyword -->
+                    <div class="auto-step" data-step="3">
+                        <p class="text-muted mb-2">What keywords should trigger this automation?</p>
+                        <div><label>Keywords (comma separated)</label>
+                            <input type="text" placeholder="e.g. price, discount, support, how much" id="kwInput" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;">
+                        </div>
+                        <div style="margin-top:16px;">
+                            <label>Trigger Type</label>
+                            <select id="autoTrigger" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;">
+                                <option value="comment">Comment Only</option>
+                                <option value="dm">DM Only</option>
+                                <option value="both">Comment & DM</option>
+                            </select>
+                        </div>
+                        <div style="margin-top:16px;">
+                            <label>Reply Location</label>
+                            <select id="replyLocation" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;">
+                                <option value="comment">Reply in Comment</option>
+                                <option value="dm">Reply via DM</option>
+                                <option value="both">Both Comment + DM</option>
+                            </select>
+                        </div>
+                        <div class="flex" style="justify-content:space-between; flex-wrap:wrap; margin-top:16px;">
+                            <button class="btn btn-outline step-prev"><i class="fas fa-arrow-left"></i> Back</button>
+                            <button class="btn btn-primary step-next">Next: Response <i class="fas fa-arrow-right"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- Step 4: Set Response (Message, Button, Media) -->
+                    <div class="auto-step" data-step="4">
+                        <p class="text-muted mb-2">Configure your automated response.</p>
+                        
+                        <label>Response Type</label>
+                        <select id="responseType" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;margin-bottom:12px;">
+                            <option value="text">Text Message</option>
+                            <option value="button">Button with Text</option>
+                            <option value="media">Media + Text</option>
+                            <option value="ai">AI-Generated Reply</option>
+                        </select>
+
+                        <!-- Text Response -->
+                        <div id="textResponseContent">
+                            <!-- Comment reply: message + up to 3 variations, one is picked at random per comment -->
+                            <div id="commentResponseBlock">
+                                <label style="font-weight:600;">Comment Reply</label>
+                                <small class="text-muted" style="display:block;margin-bottom:6px;">Sent as a public reply under the triggering comment.</small>
+                                <label>Reply Message</label>
+                                <textarea id="replyMessage" rows="3" placeholder="Enter your comment reply message..." style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;"></textarea>
+
+                                <label style="margin-top:12px;display:block;">Reply Variations (optional, up to 3 total incl. the message above)</label>
+                                <div id="variationsContainer">
+                                    <div class="variation-input"><textarea rows="2" placeholder="Alternate comment reply..." style="font-family:inherit;font-size:14px;width:calc(100% - 40px);padding:8px;border:1px solid var(--border);border-radius:6px;"></textarea><button class="del-var" style="width:30px;height:34px;margin-left:8px;"><i class="fas fa-times"></i></button></div>
+                                </div>
+                                <button class="btn btn-sm btn-outline" id="addVariation" style="margin-top:8px;"><i class="fas fa-plus"></i> Add Variation</button>
+                            </div>
+
+                            <!-- DM reply: single fixed message, no variations -->
+                            <div id="dmResponseBlock" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);">
+                                <label style="font-weight:600;">DM Message</label>
+                                <small class="text-muted" style="display:block;margin-bottom:6px;">Sent as a direct message. DMs use a single fixed message — no variations.</small>
+                                <textarea id="dmReplyMessage" rows="3" placeholder="Enter your DM message..." style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;"></textarea>
+                            </div>
+                        </div>
+
+                        <!-- Button Response -->
+                        <div id="buttonResponseContent" style="display:none;">
+                            <label>Button Text</label>
+                            <input type="text" id="buttonText" placeholder="e.g. Learn More" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;margin-bottom:12px;">
+                            <label>Button URL</label>
+                            <input type="url" id="buttonUrl" placeholder="https://example.com" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;margin-bottom:12px;">
+                            <label>Message Above Button</label>
+                            <textarea id="buttonMessage" rows="3" placeholder="Message text above the button..." style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;"></textarea>
+                        </div>
+
+                        <!-- Media Response -->
+                        <div id="mediaResponseContent" style="display:none;">
+                            <label>Media URL</label>
+                            <input type="url" id="mediaUrl" placeholder="https://example.com/image.jpg" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;margin-bottom:12px;">
+                            <label>Caption</label>
+                            <textarea id="mediaCaption" rows="3" placeholder="Caption for the media..." style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;"></textarea>
+                        </div>
+
+                        <!-- AI Response -->
+                        <div id="aiResponseContent" style="display:none;">
+                            <div><label>AI Model</label><select id="aiModelStep3" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;margin-bottom:12px;"></select></div>
+                            <div><label>System Prompt</label><textarea rows="3" id="aiSystemPromptStep3" placeholder="You are a helpful assistant..." style="min-height:80px;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;margin-bottom:12px;"></textarea></div>
+                            <div class="modal-row">
+                                <div><label>Temperature</label><input type="range" id="aiTempStep3" min="0" max="1" step="0.1" value="0.7" style="width:100%;"></div>
+                                <div><label>Max Tokens</label><input type="number" id="aiMaxTokensStep3" value="256" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;"></div>
+                            </div>
+                        </div>
+
+                        <div class="flex" style="justify-content:space-between; flex-wrap:wrap; margin-top:16px;">
+                            <button class="btn btn-outline step-prev"><i class="fas fa-arrow-left"></i> Back</button>
+                            <button class="btn btn-primary step-next">Next: Confirm <i class="fas fa-arrow-right"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- Step 5: Confirm -->
+                    <div class="auto-step" data-step="5">
+                        <p class="text-muted mb-2">Review your automation settings before activating.</p>
+                        <div class="card" style="background:#f8fafc;border:1px solid var(--border);">
+                            <div style="margin-bottom:12px;"><strong>Name:</strong> <span id="reviewName"></span></div>
+                            <div style="margin-bottom:12px;"><strong>Platform:</strong> <span id="reviewPlatform"></span></div>
+                            <div style="margin-bottom:12px;"><strong>Scope:</strong> <span id="reviewScope"></span></div>
+                            <div style="margin-bottom:12px;"><strong>Trigger:</strong> <span id="reviewTrigger"></span></div>
+                            <div style="margin-bottom:12px;"><strong>Keywords:</strong> <span id="reviewKeywords"></span></div>
+                            <div style="margin-bottom:12px;"><strong>Response Type:</strong> <span id="reviewResponseType"></span></div>
+                            <div><strong>Reply Location:</strong> <span id="reviewReplyLocation"></span></div>
+                        </div>
+                        <div class="flex" style="justify-content:space-between; flex-wrap:wrap; margin-top:16px;">
+                            <button class="btn btn-outline step-prev"><i class="fas fa-arrow-left"></i> Back</button>
+                            <div style="display:flex;gap:8px;">
+                                <button class="btn btn-outline" id="cancelAutoBtn"><i class="fas fa-times"></i> Cancel</button>
+                                <button class="btn btn-success" id="activateAutoBtn"><i class="fas fa-check"></i> Activate Automation</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: PROFILE ===== -->
+        <div class="tab-content" id="tab-profile">
+            <div class="card" style="max-width:600px;">
+                <div class="flex" style="gap:16px; margin-bottom:16px;">
+                    <div id="profileAvatar" style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;font-size:28px;color:white;font-weight:700;flex-shrink:0;"></div>
+                    <div><h3 id="profileName" style="font-size:18px;"></h3><div id="profileEmail" class="text-muted"></div></div>
+                </div>
+                <div class="modal-row">
+                    <div><label>Full Name</label><input type="text" id="profileFullNameInput" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;"></div>
+                    <div><label>Email</label><input type="email" id="profileEmailInput" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;"></div>
+                </div>
+                <div class="modal-row">
+                    <div><label>Phone</label><input type="tel" id="profilePhoneInput" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;"></div>
+                    <div><label>Timezone</label><select id="profileTimezoneInput" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;"><option>America/New York</option><option>America/Los Angeles</option><option>Europe/London</option></select></div>
+                </div>
+                <div><label>Default Platform</label><select id="profilePlatformInput" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;"><option>Instagram</option><option>Facebook</option><option>Threads</option></select></div>
+                <hr style="margin:16px 0;border-color:var(--border);">
+                <div class="flex mt-2"><button class="btn btn-primary" id="saveProfileBtn">Save Changes</button><button class="btn btn-outline" id="changePasswordBtn">Change Password</button></div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: SETTINGS ===== -->
+        <div class="tab-content" id="tab-settings">
+            <div class="card" style="max-width:640px;">
+                <h4 style="font-weight:600; margin-bottom:12px;">🤖 AI Configuration</h4>
+                <div class="modal-row">
+                    <div><label>Default Model</label><select id="aiModelSelect" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;"></select></div>
+                    <div><label>API Key</label><input type="password" id="aiApiKeyInput" placeholder="Enter your API key" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;"></div>
+                </div>
+                <div><label>Default System Prompt</label><textarea id="aiSystemPromptInput" rows="3" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;"></textarea></div>
+                <div class="modal-row">
+                    <div><label>Temperature</label><input type="range" id="aiTemperatureInput" min="0" max="1" step="0.1" value="0.7" style="width:100%;"></div>
+                    <div><label>Max Tokens</label><input type="number" id="aiMaxTokensInput" value="2048" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;"></div>
+                </div>
+                <hr style="margin:16px 0;border-color:var(--border);">
+                <h4 style="font-weight:600; margin-bottom:8px;">📝 Default Reply Settings</h4>
+                <label><input type="checkbox" id="aiGenericCommentsCheck"> Use AI for generic comments</label><br>
+                <label><input type="checkbox" id="aiDmReplyCheck"> Send DM reply for questions</label><br>
+                <label><input type="checkbox" id="aiEmojisCheck"> Add emojis to replies</label><br>
+                <div class="mt-2"><label>Default Reply</label><textarea id="aiDefaultReplyInput" rows="2" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;"></textarea></div>
+                <hr style="margin:16px 0;border-color:var(--border);">
+                <h4 style="font-weight:600; margin-bottom:8px;">🔔 Notifications</h4>
+                <label><input type="checkbox" id="notifyEmailCheck"> Email notifications</label><br>
+                <label><input type="checkbox" id="notifyPushCheck"> Push notifications for errors</label><br>
+                <label><input type="checkbox" id="notifyWeeklyCheck"> Weekly summary reports</label><br>
+                <div class="flex mt-2"><button class="btn btn-primary" id="saveSettingsBtn">Save Settings</button><button class="btn btn-outline" id="resetSettingsBtn">Reset to Defaults</button></div>
+            </div>
+        </div>
+
+    </div><!-- /content -->
+</div><!-- /main -->
+
+<!-- ===== MODAL ===== -->
+<div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+        <h2 id="modalHeading"><i class="fas fa-plus-circle" style="color:var(--primary);"></i> Schedule Post</h2>
+        <div class="modal-row">
+            <div><label>Platform</label><select id="modalPlatform"><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="threads">Threads</option><option value="linkedin">LinkedIn</option></select></div>
+            <div><label>Date</label><input type="date" id="modalDate"></div>
+        </div>
+        <div class="modal-row">
+            <div><label>Time</label><input type="time" id="modalTime" value="14:30"></div>
+            <div><label>Timezone</label><select id="modalTimezone"><option value="+05:30" selected>IST (India)</option><option value="-05:00">EST</option><option value="-08:00">PST</option><option value="+00:00">GMT</option></select></div>
+        </div>
+        <label>Title</label><input type="text" id="modalTitle" placeholder="Post title...">
+        <label>Hook</label><input type="text" id="modalHook" placeholder="Attention-grabbing hook...">
+        <label>Caption</label><textarea rows="3" id="modalCaption" placeholder="Full caption..."></textarea>
+        <label>Hashtags</label><input type="text" id="modalHashtags" placeholder="#content #marketing #growth">
+        <label>Media (image/video)</label>
+        <input type="file" id="modalMediaFile" accept="image/*,video/*">
+        <div class="text-muted" id="modalMediaStatus" style="font-size:12px;margin-top:4px;"></div>
+        <div class="text-muted" id="modalError" style="display:none;color:var(--error);font-size:13px;margin-top:6px;"></div>
+        <div class="modal-actions">
+            <button class="btn btn-outline" id="closeModal">Cancel</button>
+            <button class="btn btn-primary" id="savePostBtn">Schedule Post</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ============================================================
+    // SIDEBAR NAV
+    // ============================================================
+    const sidebar = document.getElementById('sidebar');
+    const hamburger = document.getElementById('hamburgerBtn');
+    const navItems = document.querySelectorAll('.nav-item[data-tab]');
+    const tabContents = {
+        scheduler: document.getElementById('tab-scheduler'),
+        inbox: document.getElementById('tab-inbox'),
+        connections: document.getElementById('tab-connections'),
+        automation: document.getElementById('tab-automation'),
+        profile: document.getElementById('tab-profile'),
+        settings: document.getElementById('tab-settings')
+    };
+    const pageTitle = document.getElementById('pageTitle');
+    const titleMap = {
+        scheduler: '<i class="fas fa-calendar-day"></i> Scheduler',
+        inbox: '<i class="fas fa-inbox"></i> Inbox',
+        connections: '<i class="fas fa-link"></i> Connections',
+        automation: '<i class="fas fa-bolt"></i> Automation',
+        profile: '<i class="fas fa-user"></i> Profile',
+        settings: '<i class="fas fa-sliders-h"></i> Settings'
+    };
+
+    navItems.forEach(item => {
+        item.addEventListener('click', function(e) {
+            e.preventDefault();
+            const tab = this.dataset.tab;
+            if (!tab || !tabContents[tab]) return;
+            navItems.forEach(n => n.classList.remove('active'));
+            this.classList.add('active');
+            Object.keys(tabContents).forEach(key => {
+                tabContents[key].classList.toggle('active', key === tab);
+            });
+            pageTitle.innerHTML = titleMap[tab] || 'Scheduler';
+            document.getElementById('headerActions').style.display = tab === 'scheduler' ? 'flex' : 'none';
+            if (window.innerWidth <= 820) sidebar.classList.remove('open');
+        });
+    });
+
+    hamburger.addEventListener('click', () => sidebar.classList.toggle('open'));
+    document.addEventListener('click', (e) => {
+        if (window.innerWidth <= 820 && !sidebar.contains(e.target) && e.target !== hamburger) {
+            sidebar.classList.remove('open');
+        }
+    });
+
+    // ============================================================
+    // CALENDAR (simplified but functional)
+    // ============================================================
+    let calDate = new Date();
+    let currentView = 'month';
+    let selectedDay = null;
+
+    const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const PLATFORM_ICONS = { 
+        ig: '<img src="/assets/logos/insta.webp" alt="Instagram" style="width:16px;height:16px;object-fit:contain;">', 
+        fb: '<img src="/assets/logos/facebook.webp" alt="Facebook" style="width:16px;height:16px;object-fit:contain;">', 
+        th: '<img src="/assets/logos/Threads.png" alt="Threads" style="width:16px;height:16px;object-fit:contain;">', 
+        li: '<img src="/assets/logos/linkedin.webp" alt="LinkedIn" style="width:16px;height:16px;object-fit:contain;">' 
+    };
+    const PLATFORM_CLASS = { ig: 'picon-ig', fb: 'picon-fb', th: 'picon-th', li: 'picon-li' };
+
+    // ============================================================
+    // APP STATE & API HELPERS
+    // ============================================================
+    let posts = [];
+    let automations = [];
+    let connections = [];
+    let editingPostId = null;
+    let editingAutomationId = null;
+
+    const SHORT_TO_FULL = { ig: 'instagram', fb: 'facebook', th: 'threads', li: 'linkedin' };
+    const FULL_TO_SHORT = { instagram: 'ig', facebook: 'fb', threads: 'th', linkedin: 'li' };
+
+    function authHeaders() {
+        const token = localStorage.getItem('auth_token');
+        return token ? { 'Authorization': `Bearer ${token}` } : {};
+    }
+
+    async function apiFetch(url, options = {}) {
+        const res = await fetch(url, {
+            ...options,
+            credentials: 'include',
+            headers: { ...(options.headers || {}), ...authHeaders() }
+        });
+        if (res.status === 401) {
+            localStorage.removeItem('auth_token');
+            window.location.href = '/';
+            return null;
+        }
+        return res;
+    }
+
+    function getDayPlatforms(day) {
+        const year = calDate.getFullYear();
+        const month = calDate.getMonth();
+        const short = new Set();
+        posts.forEach(p => {
+            if (!p.scheduled_date) return;
+            const d = new Date(p.scheduled_date);
+            if (d.getFullYear() === year && d.getMonth() === month && d.getDate() === day) {
+                (p.platforms || []).forEach(full => { if (FULL_TO_SHORT[full]) short.add(FULL_TO_SHORT[full]); });
+            }
+        });
+        return Array.from(short);
+    }
+
+    function getPostsForDay(day) {
+        const year = calDate.getFullYear();
+        const month = calDate.getMonth();
+        return posts.filter(p => {
+            if (!p.scheduled_date) return false;
+            const d = new Date(p.scheduled_date);
+            return d.getFullYear() === year && d.getMonth() === month && d.getDate() === day;
+        });
+    }
+
+    function getDayContent(day, platform) {
+        const full = SHORT_TO_FULL[platform];
+        const match = getPostsForDay(day).find(p => (p.platforms || []).includes(full));
+        return match || null;
+    }
+
+    async function loadPosts() {
+        const res = await apiFetch('/api/posts');
+        if (res && res.ok) {
+            posts = await res.json();
+            renderCalendar();
+        }
+    }
+
+    function renderCalendar() {
+        const grid = document.getElementById('calendarGrid');
+        const panel = document.getElementById('dayDetailPanel');
+        const year = calDate.getFullYear();
+        const month = calDate.getMonth();
+        const label = document.getElementById('calLabel');
+        label.textContent = `${MONTHS[month]} ${year}`;
+
+        if (currentView === 'month') {
+            grid.innerHTML = '';
+            const header = document.createElement('div');
+            header.className = 'weekday-header';
+            DAYS.forEach(d => { const s = document.createElement('span'); s.textContent = d; header.appendChild(s); });
+            grid.appendChild(header);
+
+            const cells = document.createElement('div');
+            cells.className = 'month-grid';
+            const totalDays = new Date(year, month + 1, 0).getDate();
+            const start = new Date(year, month, 1).getDay();
+            const today = new Date();
+            const totalCells = Math.ceil((start + totalDays) / 7) * 7;
+
+            for (let i = 0; i < totalCells; i++) {
+                const cell = document.createElement('div');
+                let dayNum, isOutside = false, isPast = false;
+                if (i < start) {
+                    const prevMonth = new Date(year, month, 0).getDate();
+                    dayNum = prevMonth - start + i + 1;
+                    isOutside = true;
+                } else if (i >= start + totalDays) {
+                    dayNum = i - start - totalDays + 1;
+                    isOutside = true;
+                } else {
+                    dayNum = i - start + 1;
+                    const cellDate = new Date(year, month, dayNum);
+                    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                    if (cellDate < todayStart) isPast = true;
+                }
+                cell.className = 'cal-cell' + (isOutside ? ' outside' : '') + (isPast ? ' past-date' : '');
+                if (!isOutside && !isPast && today.getFullYear() === year && today.getMonth() === month && today.getDate() === dayNum) {
+                    cell.classList.add('today');
+                }
+                if (!isOutside && !isPast && selectedDay === dayNum) cell.classList.add('selected');
+
+                const dateDiv = document.createElement('div');
+                dateDiv.className = 'cal-date';
+                dateDiv.innerHTML = `<span>${dayNum}</span>`;
+                cell.appendChild(dateDiv);
+
+                if (!isOutside && !isPast) {
+                    const platforms = getDayPlatforms(dayNum);
+                    const icons = document.createElement('div');
+                    icons.className = 'cal-platform-icons';
+                    platforms.forEach(p => {
+                        const span = document.createElement('span');
+                        span.className = `picon ${PLATFORM_CLASS[p] || ''}`;
+                        span.innerHTML = PLATFORM_ICONS[p] || p;
+                        icons.appendChild(span);
+                    });
+                    cell.appendChild(icons);
+                    cell.dataset.day = dayNum;
+                    cell.addEventListener('click', () => {
+                        selectedDay = dayNum;
+                        renderCalendar();
+                    });
+                } else {
+                    cell.addEventListener('click', () => {
+                        // navigate to prev/next month
+                        if (i < start) calDate.setMonth(month - 1);
+                        else calDate.setMonth(month + 1);
+                        selectedDay = null;
+                        renderCalendar();
+                    });
+                }
+                cells.appendChild(cell);
+            }
+            grid.appendChild(cells);
+            renderDayDetail(panel);
+        } else if (currentView === 'week') {
+            // simplified week view
+            const startOfWeek = new Date(calDate);
+            startOfWeek.setDate(calDate.getDate() - calDate.getDay());
+            grid.innerHTML = `<div class="text-muted" style="padding:20px;text-align:center;">Week of ${startOfWeek.toDateString()}</div>`;
+            const weekGrid = document.createElement('div');
+            weekGrid.className = 'month-grid';
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(startOfWeek);
+                d.setDate(d.getDate() + i);
+                const cell = document.createElement('div');
+                cell.className = 'cal-cell';
+                const iconsHtml = getDayPlatforms(d.getDate()).map(p => `<span class="picon ${PLATFORM_CLASS[p]||''}">${PLATFORM_ICONS[p]||p}</span>`).join('');
+                cell.innerHTML = `<div class="cal-date"><span>${d.getDate()}</span></div><div class="cal-platform-icons">${iconsHtml}</div>`;
+                weekGrid.appendChild(cell);
+            }
+            grid.appendChild(weekGrid);
+            panel.innerHTML = '<div class="text-muted text-center" style="padding:16px 0;">Week view — click a day for details</div>';
+        } else {
+            // day view
+            grid.innerHTML = `<div class="text-muted" style="padding:20px;text-align:center;">${DAYS[calDate.getDay()]}, ${MONTHS[calDate.getMonth()]} ${calDate.getDate()}, ${calDate.getFullYear()}</div>`;
+            const dayGrid = document.createElement('div');
+            dayGrid.className = 'month-grid';
+            const cell = document.createElement('div');
+            cell.className = 'cal-cell';
+            const iconsHtml = getDayPlatforms(calDate.getDate()).map(p => `<span class="picon ${PLATFORM_CLASS[p]||''}">${PLATFORM_ICONS[p]||p}</span>`).join('');
+            cell.innerHTML = `<div class="cal-date"><span>${calDate.getDate()}</span></div><div class="cal-platform-icons">${iconsHtml}</div>`;
+            dayGrid.appendChild(cell);
+            grid.appendChild(dayGrid);
+            renderDayDetail(panel);
+        }
+    }
+
+    function renderDayDetail(panel) {
+        const day = selectedDay || calDate.getDate();
+        const platforms = getDayPlatforms(day);
+        if (platforms.length === 0 && selectedDay === null) {
+            panel.innerHTML = '<div class="text-muted text-center" style="padding:20px 0;">Click a day to see content</div>';
+            return;
+        }
+        const month = calDate.getMonth() + 1;
+        panel.innerHTML = `<div class="flex-between mb-2"><span style="font-weight:600;">${MONTHS[calDate.getMonth()]} ${day}, ${calDate.getFullYear()} — ${platforms.length} items</span><button class="btn btn-sm btn-primary" onclick="openModal(${day})"><i class="fas fa-plus"></i> Add</button></div>`;
+
+        if (platforms.length === 0) {
+            panel.innerHTML += '<div class="text-muted text-center" style="padding:16px 0;">No content scheduled for this day.</div>';
+            return;
+        }
+
+        const grid = document.createElement('div');
+        grid.className = 'day-detail-grid';
+        const platformNames = { ig: 'Instagram', fb: 'Facebook', th: 'Threads', li: 'LinkedIn' };
+        const platformIcons = { 
+            ig: '<img src="/assets/logos/insta.webp" alt="Instagram" style="width:18px;height:18px;object-fit:contain;">',
+            fb: '<img src="/assets/logos/facebook.webp" alt="Facebook" style="width:18px;height:18px;object-fit:contain;">',
+            th: '<img src="/assets/logos/Threads.png" alt="Threads" style="width:18px;height:18px;object-fit:contain;">',
+            li: '<img src="/assets/logos/linkedin.webp" alt="LinkedIn" style="width:18px;height:18px;object-fit:contain;">'
+        };
+        const platformColors = { ig: 'var(--ig)', fb: 'var(--fb)', th: 'var(--threads)', li: 'var(--li)' };
+
+        platforms.forEach(p => {
+            const card = document.createElement('div');
+            card.className = 'platform-card';
+            const content = getDayContent(day, p);
+            const caption = content && content.caption ? content.caption : '';
+            card.innerHTML = `
+                <div class="pheader">${platformIcons[p]} ${platformNames[p]}</div>
+                <div class="pbody">
+                    ${content ? `<div><span class="label">Title:</span> ${content.title || ''}</div><div><span class="label">Hook:</span> ${content.hook || ''}</div><div class="text-muted" style="font-size:12px;">${caption.substring(0,60)}${caption.length>60?'...':''}</div><div class="text-muted" style="font-size:11px;margin-top:2px;">Status: ${content.status || 'draft'}</div>` : '<span class="text-muted">No content set</span>'}
+                </div>
+                <div class="pactions">
+                    <button class="btn btn-sm btn-outline post-edit-btn"><i class="fas fa-edit"></i></button>
+                    <button class="btn btn-sm btn-ghost post-delete-btn" style="color:var(--error);"><i class="fas fa-trash"></i></button>
+                    <button class="btn btn-sm btn-success post-now-btn">Post Now</button>
+                </div>
+            `;
+            if (content) {
+                card.querySelector('.post-edit-btn').addEventListener('click', () => openModal(day, content));
+                card.querySelector('.post-delete-btn').addEventListener('click', () => deletePost(content.id));
+                card.querySelector('.post-now-btn').addEventListener('click', () => publishPostNow(content.id));
+            } else {
+                card.querySelector('.post-edit-btn').style.display = 'none';
+                card.querySelector('.post-delete-btn').style.display = 'none';
+                card.querySelector('.post-now-btn').addEventListener('click', () => openModal(day));
+            }
+            grid.appendChild(card);
+        });
+        panel.appendChild(grid);
+    }
+
+    async function deletePost(id) {
+        if (!confirm('Delete this post?')) return;
+        const res = await apiFetch(`/api/posts/${id}`, { method: 'DELETE' });
+        if (res && res.ok) await loadPosts();
+    }
+
+    async function publishPostNow(id) {
+        if (!confirm('Publish this post now?')) return;
+        const res = await apiFetch(`/api/posts/${id}/publish-now`, { method: 'POST' });
+        if (res && res.ok) {
+            await loadPosts();
+        } else if (res) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.error || 'Failed to publish post');
+        }
+    }
+
+    // Navigation
+    document.getElementById('calPrev').addEventListener('click', () => { calDate.setMonth(calDate.getMonth() - 1); selectedDay = null; renderCalendar(); });
+    document.getElementById('calNext').addEventListener('click', () => { calDate.setMonth(calDate.getMonth() + 1); selectedDay = null; renderCalendar(); });
+    document.getElementById('todayBtn').addEventListener('click', () => { calDate = new Date(); selectedDay = null; renderCalendar(); });
+
+    document.querySelectorAll('.view-toggle .btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.view-toggle .btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentView = this.dataset.view;
+            renderCalendar();
+        });
+    });
+
+    // ============================================================
+    // MODAL
+    // ============================================================
+    const modalOverlay = document.getElementById('modalOverlay');
+    document.getElementById('addPostBtn').addEventListener('click', () => openModal());
+    document.getElementById('closeModal').addEventListener('click', () => modalOverlay.classList.remove('show'));
+    modalOverlay.addEventListener('click', (e) => { if (e.target === modalOverlay) modalOverlay.classList.remove('show'); });
+
+    let currentMediaUrl = null;
+    let currentDriveFileId = null;
+
+    function openModal(day, existingPost) {
+        modalOverlay.classList.add('show');
+        const modalError = document.getElementById('modalError');
+        modalError.style.display = 'none';
+        document.getElementById('modalMediaFile').value = '';
+        const mediaStatus = document.getElementById('modalMediaStatus');
+        
+        // Always default to IST timezone for scheduling
+        document.getElementById('modalTimezone').value = '+05:30';
+        
+        if (existingPost) {
+            editingPostId = existingPost.id;
+            currentMediaUrl = existingPost.media_url || null;
+            currentDriveFileId = existingPost.google_drive_file_id || null;
+            mediaStatus.textContent = currentMediaUrl ? '✓ Media already attached — pick a new file only to replace it.' : '';
+            document.getElementById('modalHeading').innerHTML = '<i class="fas fa-edit" style="color:var(--primary);"></i> Edit Post';
+            document.getElementById('savePostBtn').textContent = 'Save Changes';
+            const d = new Date(existingPost.scheduled_date);
+            document.getElementById('modalDate').value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            document.getElementById('modalTime').value = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+            document.getElementById('modalPlatform').value = (existingPost.platforms || [])[0] || 'instagram';
+            document.getElementById('modalTitle').value = existingPost.title || '';
+            document.getElementById('modalHook').value = existingPost.hook || '';
+            document.getElementById('modalCaption').value = existingPost.caption || '';
+        } else {
+            editingPostId = null;
+            currentMediaUrl = null;
+            currentDriveFileId = null;
+            mediaStatus.textContent = '';
+            document.getElementById('modalHeading').innerHTML = '<i class="fas fa-plus-circle" style="color:var(--primary);"></i> Schedule Post';
+            document.getElementById('savePostBtn').textContent = 'Schedule Post';
+            const now = new Date();
+            const d = day || now.getDate();
+            const month = day ? calDate.getMonth() : now.getMonth();
+            const year = day ? calDate.getFullYear() : now.getFullYear();
+            document.getElementById('modalDate').value = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+            document.getElementById('modalDate').min = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+            document.getElementById('modalTime').value = '14:30';
+            document.getElementById('modalPlatform').value = 'instagram';
+            document.getElementById('modalTitle').value = '';
+            document.getElementById('modalHook').value = '';
+            document.getElementById('modalCaption').value = '';
+            document.getElementById('modalHashtags').value = '';
+        }
+    }
+    window.openModal = openModal;
+
+    document.getElementById('savePostBtn').addEventListener('click', async () => {
+        const modalError = document.getElementById('modalError');
+        const mediaStatus = document.getElementById('modalMediaStatus');
+        modalError.style.display = 'none';
+        const title = document.getElementById('modalTitle').value.trim();
+        const date = document.getElementById('modalDate').value;
+        const time = document.getElementById('modalTime').value || '00:00';
+        const timezoneOffset = document.getElementById('modalTimezone').value || '+05:30';
+        const platform = document.getElementById('modalPlatform').value;
+        if (!title || !date) {
+            modalError.textContent = 'Title and date are required.';
+            modalError.style.display = 'block';
+            return;
+        }
+
+        // If a new file was picked, upload it to the user's own Google Drive
+        // first and use the returned proxy URL as this post's media_url.
+        const fileInput = document.getElementById('modalMediaFile');
+        const saveBtn = document.getElementById('savePostBtn');
+        if (fileInput.files && fileInput.files[0]) {
+            const originalLabel = saveBtn.textContent;
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Uploading media…';
+            mediaStatus.textContent = 'Uploading to your Google Drive…';
+            try {
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+                const uploadRes = await apiFetch('/api/media/upload', { method: 'POST', body: formData });
+                if (uploadRes && uploadRes.ok) {
+                    const uploaded = await uploadRes.json();
+                    currentMediaUrl = uploaded.media_url;
+                    currentDriveFileId = uploaded.google_drive_file_id;
+                    mediaStatus.textContent = `✓ Uploaded "${uploaded.filename}" to Drive`;
+                } else {
+                    const data = uploadRes ? await uploadRes.json().catch(() => ({})) : {};
+                    modalError.textContent = data.error || 'Media upload failed';
+                    modalError.style.display = 'block';
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = originalLabel;
+                    return;
+                }
+            } catch (err) {
+                modalError.textContent = 'Media upload failed: ' + err.message;
+                modalError.style.display = 'block';
+                saveBtn.disabled = false;
+                saveBtn.textContent = originalLabel;
+                return;
+            }
+            saveBtn.disabled = false;
+            saveBtn.textContent = originalLabel;
+        }
+
+        const body = {
+            title,
+            hook: document.getElementById('modalHook').value,
+            caption: document.getElementById('modalCaption').value,
+            platforms: [platform],
+            scheduled_date: new Date(`${date}T${time}:00${timezoneOffset}`).toISOString(),
+            status: 'scheduled',
+            media_url: currentMediaUrl,
+            google_drive_file_id: currentDriveFileId
+        };
+        const url = editingPostId ? `/api/posts/${editingPostId}` : '/api/posts';
+        const method = editingPostId ? 'PUT' : 'POST';
+        const res = await apiFetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (res && res.ok) {
+            modalOverlay.classList.remove('show');
+            await loadPosts();
+        } else if (res) {
+            const data = await res.json().catch(() => ({}));
+            modalError.textContent = data.error || 'Failed to save post';
+            modalError.style.display = 'block';
+        }
+    });
+
+    // ============================================================
+    // AUTOMATION BUILDER
+    // ============================================================
+    let currentStep = 1;
+    const builder = document.getElementById('autoBuilder');
+    const autoList = document.getElementById('autoList');
+    const newAutoBtn = document.getElementById('newAutoBtn');
+    const closeBuilder = document.getElementById('closeBuilder');
+
+    newAutoBtn.addEventListener('click', () => {
+        autoList.style.display = 'none';
+        builder.style.display = 'block';
+        document.getElementById('builderTitle').textContent = 'New Automation';
+        editingAutomationId = null;
+        document.getElementById('autoNameInput').value = '';
+        document.getElementById('kwInput').value = '';
+        document.querySelectorAll('.variation-input textarea').forEach((ta, i) => { if (i > 0) ta.closest('.variation-input').remove(); else ta.value = ''; });
+        // Select ALL platforms by default for new automations
+        document.querySelectorAll('#platformSelectGrid .auto-type-card').forEach(c => {
+            c.classList.add('selected');
+            const checkbox = c.querySelector('.platform-checkbox');
+            if (checkbox) checkbox.checked = true;
+        });
+        document.querySelectorAll('#scopeSelectGrid .auto-type-card').forEach(c => c.classList.remove('selected'));
+        document.querySelector('#scopeSelectGrid .auto-type-card[data-scope="all"]').classList.add('selected');
+        document.getElementById('specificPostSelector').style.display = 'none';
+        selectedAutomationPostId = null;
+        document.getElementById('postSelectList').innerHTML = '';
+        currentStep = 1;
+        showStep(1);
+    });
+
+    closeBuilder.addEventListener('click', () => {
+        builder.style.display = 'none';
+        autoList.style.display = 'block';
+    });
+    
+    // Cancel button - same behavior as close
+    document.getElementById('cancelAutoBtn').addEventListener('click', () => {
+        builder.style.display = 'none';
+        autoList.style.display = 'block';
+    });
+
+    // ============================================================
+    // EDIT AUTOMATION FUNCTION
+    // ============================================================
+    async function editAutomation(a) {
+        editingAutomationId = a.id;
+        autoList.style.display = 'none';
+        builder.style.display = 'block';
+        document.getElementById('builderTitle').textContent = 'Edit Automation: ' + a.name;
+        
+        // Step 1: Populate name and platforms
+        document.getElementById('autoNameInput').value = a.name || '';
+        
+        // Reset platform selection
+        document.querySelectorAll('#platformSelectGrid .auto-type-card').forEach(c => {
+            c.classList.remove('selected');
+            const checkbox = c.querySelector('.platform-checkbox');
+            if (checkbox) checkbox.checked = false;
+        });
+        
+        // Select platforms from automation
+        const autoPlatforms = a.platforms || ['instagram', 'facebook', 'threads'];
+        autoPlatforms.forEach(plat => {
+            const card = document.querySelector(`#platformSelectGrid .auto-type-card[data-platform="${plat}"]`);
+            if (card) {
+                card.classList.add('selected');
+                const checkbox = card.querySelector('.platform-checkbox');
+                if (checkbox) checkbox.checked = true;
+            }
+        });
+        
+        // Step 2: Set scope - check for target_published_ids first (new multi-platform), then legacy target_post_id
+        const hasTargetPublishedIds = a.target_published_ids && Object.keys(a.target_published_ids).length > 0;
+        const hasTargetPostId = a.target_post_id;
+        const isSpecificScope = hasTargetPublishedIds || hasTargetPostId;
+        
+        document.querySelectorAll('#scopeSelectGrid .auto-type-card').forEach(c => c.classList.remove('selected'));
+        const scopeCard = document.querySelector(`#scopeSelectGrid .auto-type-card[data-scope="${isSpecificScope ? 'specific' : 'all'}"]`);
+        if (scopeCard) scopeCard.classList.add('selected');
+        
+        document.getElementById('specificPostSelector').style.display = isSpecificScope ? 'block' : 'none';
+        
+        // Load posts if specific post is selected
+        if (isSpecificScope) {
+            await ensurePostsLoadedForAutomation();
+            // Populate selectedAutomationPostIdsByPlatform from target_published_ids or legacy target_post_id
+            selectedAutomationPostIdsByPlatform = {};
+            if (hasTargetPublishedIds) {
+                // New per-platform targeting
+                Object.keys(a.target_published_ids).forEach(plat => {
+                    selectedAutomationPostIdsByPlatform[plat] = String(a.target_published_ids[plat]);
+                });
+            } else if (hasTargetPostId) {
+                // Legacy single-post targeting - apply to all selected platforms
+                autoPlatforms.forEach(plat => {
+                    selectedAutomationPostIdsByPlatform[plat] = String(a.target_post_id);
+                });
+            }
+        } else {
+            selectedAutomationPostIdsByPlatform = {};
+        }
+        
+        // Step 3: Set trigger and keywords
+        document.getElementById('autoTrigger').value = a.type || 'comment';
+        updateResponseBlocksForTrigger();
+        document.getElementById('kwInput').value = (a.keywords || []).join(', ');
+        
+        // Step 4: Set response type and data
+        document.getElementById('responseType').value = a.response_type || 'text';
+        document.getElementById('replyLocation').value = a.reply_location || 'comment';
+        
+        // Populate AI model dropdown before triggering change event
+        const aiModelSelect = document.getElementById('aiModelStep3');
+        if (aiModelSelect.options.length === 0) {
+            aiModels.forEach(model => {
+                const opt = document.createElement('option');
+                if (typeof model === 'string') {
+                    opt.value = model;
+                    opt.textContent = model;
+                } else {
+                    opt.value = model.id || model.model || model.name;
+                    opt.textContent = model.name || model.model || model.id;
+                }
+                aiModelSelect.appendChild(opt);
+            });
+        }
+        
+        // Trigger change event to show correct response content
+        document.getElementById('responseType').dispatchEvent(new Event('change'));
+        
+        // Populate response data based on type
+        const responseData = a.response_data || {};
+        if (a.response_type === 'text') {
+            // Read from the nested comment/dm configs (falling back to legacy
+            // flat fields or `general`, in case this automation predates the
+            // comment/DM split).
+            const commentCfg = responseData.comment || responseData.general || responseData;
+            const dmCfg = responseData.dm || {};
+
+            document.getElementById('replyMessage').value = commentCfg.message || '';
+            document.getElementById('dmReplyMessage').value = dmCfg.message || '';
+
+            // Clear variations container and add saved comment variations
+            // (capped at 3 total: the base message + up to 2 extra).
+            const varContainer = document.getElementById('variationsContainer');
+            varContainer.innerHTML = '';
+            const variations = (commentCfg.variations || []).slice(0, MAX_COMMENT_VARIATIONS - 1);
+            if (variations.length === 0) {
+                varContainer.innerHTML = `<div class="variation-input"><textarea rows="2" placeholder="Alternate comment reply..." style="font-family:inherit;font-size:14px;width:calc(100% - 40px);padding:8px;border:1px solid var(--border);border-radius:6px;"></textarea><button class="del-var" style="width:30px;height:34px;margin-left:8px;"><i class="fas fa-times"></i></button></div>`;
+            } else {
+                variations.forEach((v, idx) => {
+                    const div = document.createElement('div');
+                    div.className = 'variation-input';
+                    div.innerHTML = `<textarea rows="2" placeholder="Alternate comment reply..." style="font-family:inherit;font-size:14px;width:calc(100% - 40px);padding:8px;border:1px solid var(--border);border-radius:6px;">${v.replace(/"/g, '&quot;')}</textarea><button class="del-var" style="width:30px;height:34px;margin-left:8px;"><i class="fas fa-times"></i></button>`;
+                    varContainer.appendChild(div);
+                });
+            }
+            document.querySelectorAll('.del-var').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    if (document.querySelectorAll('.variation-input').length > 1) {
+                        this.closest('.variation-input').remove();
+                    }
+                });
+            });
+        } else if (a.response_type === 'button') {
+            document.getElementById('buttonText').value = responseData.button_text || '';
+            document.getElementById('buttonUrl').value = responseData.button_url || '';
+            document.getElementById('buttonMessage').value = responseData.message || '';
+        } else if (a.response_type === 'media') {
+            document.getElementById('mediaUrl').value = responseData.media_url || '';
+            document.getElementById('mediaCaption').value = responseData.caption || '';
+        } else if (a.response_type === 'ai') {
+            // Populate the AI model dropdown in the modal with available models
+            const aiModelSelect = document.getElementById('aiModelStep3');
+            aiModelSelect.innerHTML = '';
+            aiModels.forEach(model => {
+                const opt = document.createElement('option');
+                if (typeof model === 'string') {
+                    opt.value = model;
+                    opt.textContent = model;
+                } else {
+                    opt.value = model.id || model.model || model.name;
+                    opt.textContent = model.name || model.model || model.id;
+                }
+                aiModelSelect.appendChild(opt);
+            });
+            // Set the saved model value
+            document.getElementById('aiModelStep3').value = responseData.model || 'mistralai/mistral-small-4-119b-2603';
+            document.getElementById('aiSystemPromptStep3').value = responseData.system_prompt || '';
+            document.getElementById('aiTempStep3').value = responseData.temperature || 0.7;
+            document.getElementById('aiMaxTokensStep3').value = responseData.max_tokens || 256;
+        }
+        
+        // Go to step 1
+        currentStep = 1;
+        showStep(1);
+    }
+
+    // Platform selection — multi-select (checkbox behavior): clicking toggles
+    // a card on/off rather than exclusively selecting one. At least one
+    // platform must stay selected at all times.
+    function getSelectedPlatforms() {
+        return Array.from(document.querySelectorAll('#platformSelectGrid .auto-type-card.selected'))
+            .map(c => c.dataset.platform);
+    }
+    document.querySelectorAll('#platformSelectGrid .auto-type-card').forEach(card => {
+        card.addEventListener('click', function() {
+            const willBeSelected = !this.classList.contains('selected');
+            if (!willBeSelected && getSelectedPlatforms().length === 1) {
+                // Don't allow deselecting the last remaining platform
+                return;
+            }
+            this.classList.toggle('selected');
+            const checkbox = this.querySelector('.platform-checkbox');
+            if (checkbox) checkbox.checked = this.classList.contains('selected');
+            // If the post picker (step 2) is already showing, its list of
+            // candidate posts depends on which platforms are selected here —
+            // re-filter it so it stays in sync.
+            if (postsLoadedForAutomation) renderPostCheckboxOptions();
+        });
+    });
+
+    // Scope selection
+    let postsLoadedForAutomation = false;
+    let remotePostsForAutomation = []; // posts that exist on Meta but aren't tracked as a local `posts` row yet
+
+    // Stores selected post IDs per platform when using "Specific Posts" scope
+    // Format: { instagram: '123', facebook: 'remote:facebook:abc', threads: '456' }
+    let selectedAutomationPostIdsByPlatform = {};
+
+    function renderPostCheckboxOptions() {
+        const list = document.getElementById('postSelectList');
+        const selectedPlatforms = getSelectedPlatforms();
+
+        // Local posts (created/published through this app) plus remote posts
+        // (published directly on Instagram/Facebook/Threads) that aren't
+        // already tracked locally — those get a "remote:" prefixed value.
+        // Both are filtered down to whichever platform(s) are checked in step 1 —
+        // a post only counts if it went out on at least one of those platforms.
+        const filteredLocal = posts.filter(p => (p.platforms || []).some(pl => selectedPlatforms.includes(pl)));
+        const untrackedRemote = remotePostsForAutomation
+            .filter(rp => !rp.local_post_id)
+            .filter(rp => selectedPlatforms.includes(rp.platform));
+
+        // Clean up any selected posts for platforms that are no longer selected
+        selectedPlatforms.forEach(plat => {
+            if (!selectedAutomationPostIdsByPlatform.hasOwnProperty(plat)) {
+                selectedAutomationPostIdsByPlatform[plat] = null;
+            }
+        });
+        Object.keys(selectedAutomationPostIdsByPlatform).forEach(plat => {
+            if (!selectedPlatforms.includes(plat)) {
+                delete selectedAutomationPostIdsByPlatform[plat];
+            }
+        });
+
+        if (!filteredLocal.length && !untrackedRemote.length) {
+            const platformNames = selectedPlatforms.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('/');
+            list.innerHTML = `<div class="text-muted" style="padding:8px;">No posts found on ${platformNames} yet. Create or publish a post there first, then come back here to target it.</div>`;
+            return;
+        }
+
+        // Group local posts by platform for three-column layout
+        const postsByPlatform = { facebook: [], instagram: [], threads: [] };
+        filteredLocal.forEach(p => {
+            (p.platforms || []).forEach(plat => {
+                if (postsByPlatform[plat]) postsByPlatform[plat].push(p);
+            });
+        });
+        
+        // Group remote posts by platform
+        const remoteByPlatform = { facebook: [], instagram: [], threads: [] };
+        untrackedRemote.forEach(rp => {
+            if (remoteByPlatform[rp.platform]) remoteByPlatform[rp.platform].push(rp);
+        });
+
+        // Check if any platform has posts
+        const hasAnyPosts = selectedPlatforms.some(plat => 
+            (postsByPlatform[plat] && postsByPlatform[plat].length > 0) || 
+            (remoteByPlatform[plat] && remoteByPlatform[plat].length > 0)
+        );
+
+        if (!hasAnyPosts) {
+            const platformNames = selectedPlatforms.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('/');
+            list.innerHTML = `<div class="text-muted" style="padding:8px;">No posts found on ${platformNames} yet. Create or publish a post there first, then come back here to target it.</div>`;
+            return;
+        }
+
+        let html = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-height:400px;overflow-y:auto;padding:8px;">';
+        
+        selectedPlatforms.forEach(platform => {
+            const platformLabel = platform.charAt(0).toUpperCase() + platform.slice(1);
+            const platformIcon = platform === 'facebook' ? '/assets/logos/facebook.webp' : platform === 'instagram' ? '/assets/logos/insta.webp' : '/assets/logos/Threads.png';
+            const localPosts = (postsByPlatform[platform] || []).sort((a, b) => new Date(b.scheduled_date || 0) - new Date(a.scheduled_date || 0));
+            const remotePosts = (remoteByPlatform[platform] || []).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+            
+            html += `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:#fafbfc;">
+                <div style="font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                    <img src="${platformIcon}" alt="${platformLabel}" style="width:20px;height:20px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-block';"><i class="fab ${platform === 'facebook' ? 'fa-facebook-f' : platform === 'instagram' ? 'fa-instagram' : 'fa-at'}" style="display:none;color:var(--${platform === 'facebook' ? 'fb' : platform === 'instagram' ? 'ig' : 'threads'});"></i>
+                    ${platformLabel} Posts <span style="font-size:10px;color:var(--text-muted);">(select one)</span>
+                </div>
+                <div style="max-height:200px;overflow-y:auto;">`;
+            
+            if (localPosts.length === 0 && remotePosts.length === 0) {
+                html += `<div class="text-muted" style="font-size:12px;padding:8px;">No ${platformLabel} posts</div>`;
+            } else {
+                localPosts.forEach(p => {
+                    const dateLabel = p.scheduled_date ? new Date(p.scheduled_date).toLocaleDateString() : 'Unscheduled';
+                    const currentValue = selectedAutomationPostIdsByPlatform[platform] || '';
+                    const isChecked = String(p.id) === String(currentValue) ? 'checked' : '';
+                    html += `
+                        <label style="display:flex;align-items:flex-start;gap:8px;padding:6px;border-radius:6px;cursor:pointer;font-size:12px;">
+                            <input type="radio" name="automationPost_${platform}" value="${p.id}" data-platform="${platform}" ${isChecked} style="margin-top:2px;">
+                            <span>
+                                <strong>${(p.title || 'Untitled').replace(/</g, '&lt;')}</strong><br>
+                                <span class="text-muted" style="font-size:11px;">${dateLabel}</span>
+                            </span>
+                        </label>`;
+                });
+                remotePosts.forEach(rp => {
+                    const value = `remote:${rp.platform}:${rp.remote_id}`;
+                    const dateLabel = rp.timestamp ? new Date(rp.timestamp).toLocaleDateString() : 'Unknown date';
+                    const titleText = (rp.caption || `${platformLabel} post`).slice(0, 50).replace(/</g, '&lt;');
+                    const currentValue = selectedAutomationPostIdsByPlatform[platform] || '';
+                    const isChecked = value === String(currentValue) ? 'checked' : '';
+                    html += `
+                        <label style="display:flex;align-items:flex-start;gap:8px;padding:6px;border-radius:6px;cursor:pointer;font-size:12px;">
+                            <input type="radio" name="automationPost_${platform}" value="${value}" data-platform="${platform}" ${isChecked} style="margin-top:2px;">
+                            <span>
+                                <strong>${titleText}</strong><br>
+                                <span class="text-muted" style="font-size:11px;">${dateLabel}</span>
+                            </span>
+                        </label>`;
+                });
+            }
+            
+            html += '</div></div>';
+        });
+        
+        html += '</div>';
+        list.innerHTML = html;
+        list.querySelectorAll('input[name^="automationPost_"]').forEach(input => {
+            input.addEventListener('change', () => {
+                const platform = input.dataset.platform;
+                selectedAutomationPostIdsByPlatform[platform] = input.value;
+            });
+        });
+    }
+
+    async function ensurePostsLoadedForAutomation() {
+        const list = document.getElementById('postSelectList');
+        list.innerHTML = '<div class="text-muted" style="padding:8px;"><i class="fas fa-spinner fa-spin"></i> Loading posts...</div>';
+        try {
+            const [localRes, remoteRes] = await Promise.all([
+                apiFetch('/api/posts'),
+                apiFetch('/api/posts/remote')
+            ]);
+            if (localRes && localRes.ok) {
+                posts = await localRes.json();
+                postsLoadedForAutomation = true;
+            }
+            if (remoteRes && remoteRes.ok) {
+                remotePostsForAutomation = await remoteRes.json();
+            } else {
+                remotePostsForAutomation = [];
+            }
+        } catch (err) {
+            console.error('Failed to load posts for automation builder:', err);
+        }
+        renderPostCheckboxOptions();
+    }
+
+    document.querySelectorAll('#scopeSelectGrid .auto-type-card').forEach(card => {
+        card.addEventListener('click', function() {
+            document.querySelectorAll('#scopeSelectGrid .auto-type-card').forEach(c => c.classList.remove('selected'));
+            this.classList.add('selected');
+            const scope = this.dataset.scope;
+            document.getElementById('specificPostSelector').style.display = scope === 'specific' ? 'block' : 'none';
+            if (scope === 'specific') {
+                ensurePostsLoadedForAutomation();
+            }
+        });
+    });
+
+    // Response type selection
+    document.getElementById('responseType').addEventListener('change', function() {
+        const type = this.value;
+        document.getElementById('textResponseContent').style.display = type === 'text' ? 'block' : 'none';
+        document.getElementById('buttonResponseContent').style.display = type === 'button' ? 'block' : 'none';
+        document.getElementById('mediaResponseContent').style.display = type === 'media' ? 'block' : 'none';
+        document.getElementById('aiResponseContent').style.display = type === 'ai' ? 'block' : 'none';
+        
+        // Populate AI model dropdown when AI response type is selected
+        if (type === 'ai') {
+            const aiModelSelect = document.getElementById('aiModelStep3');
+            // Only populate if empty
+            if (aiModelSelect.options.length === 0) {
+                aiModels.forEach(model => {
+                    const opt = document.createElement('option');
+                    if (typeof model === 'string') {
+                        opt.value = model;
+                        opt.textContent = model;
+                    } else {
+                        opt.value = model.id || model.model || model.name;
+                        opt.textContent = model.name || model.model || model.id;
+                    }
+                    aiModelSelect.appendChild(opt);
+                });
+                // Set default model
+                aiModelSelect.value = 'mistralai/mistral-small-4-119b-2603';
+            }
+        }
+    });
+
+    // Step navigation
+    function showStep(step) {
+        document.querySelectorAll('.auto-step').forEach(el => el.classList.remove('active'));
+        document.querySelector(`.auto-step[data-step="${step}"]`).classList.add('active');
+        document.querySelectorAll('.step-indicator .step').forEach(el => {
+            const s = parseInt(el.dataset.step);
+            el.classList.toggle('active', s === step);
+            el.classList.toggle('done', s < step);
+        });
+        document.querySelectorAll('.step-indicator .line').forEach((el, idx) => {
+            el.classList.toggle('done', idx < step - 1);
+        });
+        
+        // Populate AI model dropdown when showing step 3 (Response)
+        if (step === 3) {
+            const responseType = document.querySelector('input[name="responseType"]:checked');
+            if (responseType && responseType.value === 'ai') {
+                const aiModelSelect = document.getElementById('aiModelStep3');
+                // Only populate if empty
+                if (aiModelSelect.options.length === 0) {
+                    aiModels.forEach(model => {
+                        const opt = document.createElement('option');
+                        if (typeof model === 'string') {
+                            opt.value = model;
+                            opt.textContent = model;
+                        } else {
+                            opt.value = model.id || model.model || model.name;
+                            opt.textContent = model.name || model.model || model.id;
+                        }
+                        aiModelSelect.appendChild(opt);
+                    });
+                    // Set default model
+                    aiModelSelect.value = 'mistralai/mistral-small-4-119b-2603';
+                }
+            }
+        }
+        
+        // Update review on step 5
+        if (step === 5) updateReview();
+        
+        currentStep = step;
+    }
+
+    document.querySelectorAll('.step-next').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const next = currentStep + 1;
+            if (next <= 5) showStep(next);
+        });
+    });
+    document.querySelectorAll('.step-prev').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const prev = currentStep - 1;
+            if (prev >= 1) showStep(prev);
+        });
+    });
+
+    // Add variation — capped at 3 total (the base Reply Message counts as the
+    // first one, so at most 2 extra variation boxes here).
+    const MAX_COMMENT_VARIATIONS = 3;
+    document.getElementById('addVariation').addEventListener('click', () => {
+        const container = document.getElementById('variationsContainer');
+        if (container.querySelectorAll('.variation-input').length >= MAX_COMMENT_VARIATIONS - 1) {
+            return; // already at cap (base message + 2 variations = 3)
+        }
+        const div = document.createElement('div');
+        div.className = 'variation-input';
+        div.innerHTML = `<textarea rows="2" placeholder="Alternate comment reply..." style="font-family:inherit;font-size:14px;width:calc(100% - 40px);padding:8px;border:1px solid var(--border);border-radius:6px;"></textarea><button class="del-var" style="width:30px;height:34px;margin-left:8px;"><i class="fas fa-times"></i></button>`;
+        container.appendChild(div);
+        div.querySelector('.del-var').addEventListener('click', () => div.remove());
+    });
+    document.querySelectorAll('.del-var').forEach(btn => {
+        btn.addEventListener('click', function() {
+            if (document.querySelectorAll('.variation-input').length > 1) {
+                this.closest('.variation-input').remove();
+            }
+        });
+    });
+
+    // Show/hide the Comment vs DM response blocks depending on trigger type —
+    // no point asking for a DM message on a comment-only automation, or vice versa.
+    function updateResponseBlocksForTrigger() {
+        const trigger = document.getElementById('autoTrigger').value;
+        const commentBlock = document.getElementById('commentResponseBlock');
+        const dmBlock = document.getElementById('dmResponseBlock');
+        if (!commentBlock || !dmBlock) return;
+        commentBlock.style.display = (trigger === 'comment' || trigger === 'both') ? '' : 'none';
+        dmBlock.style.display = (trigger === 'dm' || trigger === 'both') ? '' : 'none';
+    }
+    document.getElementById('autoTrigger').addEventListener('change', updateResponseBlocksForTrigger);
+    updateResponseBlocksForTrigger();
+
+    // Update review summary
+    function updateReview() {
+        const name = document.getElementById('autoNameInput').value || '(not set)';
+        const selectedPlatformsForReview = getSelectedPlatforms();
+        const scopeCard = document.querySelector('#scopeSelectGrid .auto-type-card.selected');
+        const scope = scopeCard ? scopeCard.dataset.scope : 'all';
+        const trigger = document.getElementById('autoTrigger').value;
+        const keywords = document.getElementById('kwInput').value || '(none)';
+        const responseType = document.getElementById('responseType').value;
+        const replyLocation = document.getElementById('replyLocation').value;
+
+        document.getElementById('reviewName').textContent = name;
+        document.getElementById('reviewPlatform').textContent = selectedPlatformsForReview
+            .map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ') || '(none selected)';
+        if (scope === 'all') {
+            document.getElementById('reviewScope').textContent = 'All Future Posts';
+        } else {
+            // For specific scope, show per-platform post selections
+            const platformLabels = selectedPlatformsForReview.map(p => {
+                const selectedValue = selectedAutomationPostIdsByPlatform[p];
+                if (!selectedValue) return `${p}: (no post selected)`;
+                if (typeof selectedValue === 'string' && selectedValue.startsWith('remote:')) {
+                    const [, rPlatform, rId] = selectedValue.split(':');
+                    const remotePost = remotePostsForAutomation.find(rp => rp.platform === rPlatform && String(rp.remote_id) === rId);
+                    const label = remotePost ? (remotePost.caption || `${rPlatform} post`).slice(0, 40) : `${rPlatform} post`;
+                    return `${p}: "${label}"`;
+                } else {
+                    const targetPost = posts.find(post => String(post.id) === String(selectedValue));
+                    return `${p}: "${targetPost ? targetPost.title : 'Unknown'}"`;
+                }
+            });
+            document.getElementById('reviewScope').textContent = platformLabels.join(' | ');
+        }
+        document.getElementById('reviewTrigger').textContent = trigger.charAt(0).toUpperCase() + trigger.slice(1);
+        document.getElementById('reviewKeywords').textContent = keywords;
+        document.getElementById('reviewResponseType').textContent = responseType.charAt(0).toUpperCase() + responseType.slice(1);
+        document.getElementById('reviewReplyLocation').textContent = replyLocation.charAt(0).toUpperCase() + replyLocation.slice(1);
+    }
+
+    document.getElementById('activateAutoBtn').addEventListener('click', async () => {
+        const name = document.getElementById('autoNameInput').value.trim();
+        if (!name) { alert('Please give this automation a name.'); showStep(1); return; }
+        
+        const platforms = getSelectedPlatforms();
+        if (!platforms.length) {
+            alert('Please select at least one platform.');
+            showStep(1);
+            return;
+        }
+
+        const scopeCardForSubmit = document.querySelector('#scopeSelectGrid .auto-type-card.selected');
+        const scopeForSubmit = scopeCardForSubmit ? scopeCardForSubmit.dataset.scope : 'all';
+        
+        // For "specific posts" scope, validate that each selected platform has a post selected
+        if (scopeForSubmit === 'specific') {
+            const platformsWithoutPost = platforms.filter(p => !selectedAutomationPostIdsByPlatform[p]);
+            if (platformsWithoutPost.length > 0) {
+                alert('Please select a post for each platform: ' + platformsWithoutPost.join(', '));
+                showStep(2);
+                return;
+            }
+        }
+
+        // Build target_published_ids object for per-platform post targeting
+        let target_published_ids = {};
+        if (scopeForSubmit === 'specific') {
+            for (const platform of platforms) {
+                const selectedValue = selectedAutomationPostIdsByPlatform[platform];
+                if (selectedValue) {
+                    if (typeof selectedValue === 'string' && selectedValue.startsWith('remote:')) {
+                        // This post was published directly on the platform, not through this app,
+                        // so it has no local `posts` row yet — create one now so we can reference it.
+                        const [, rPlatform, rId] = selectedValue.split(':');
+                        const remotePost = remotePostsForAutomation.find(rp => rp.platform === rPlatform && String(rp.remote_id) === rId);
+                        const importRes = await apiFetch('/api/posts/import', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                platform: rPlatform,
+                                remote_id: rId,
+                                caption: remotePost ? remotePost.caption : '',
+                                timestamp: remotePost ? remotePost.timestamp : null
+                            })
+                        });
+                        if (!importRes || !importRes.ok) {
+                            alert('Could not import the selected post from ' + rPlatform + '. Please try again.');
+                            return;
+                        }
+                        const importedPost = await importRes.json();
+                        target_published_ids[platform] = String(importedPost.id);
+                    } else {
+                        target_published_ids[platform] = String(selectedValue);
+                    }
+                }
+            }
+        }
+
+        const triggerRaw = document.getElementById('autoTrigger').value;
+        // Keep 'both' as is - backend now supports it
+        const type = triggerRaw;
+        
+        const keywords = document.getElementById('kwInput').value.split(',').map(k => k.trim()).filter(Boolean);
+        // Comment replies: message + up to 2 extra variations (3 total), one
+        // is picked at random per matching comment.
+        const commentVariations = Array.from(document.querySelectorAll('#variationsContainer textarea')).map(t => t.value.trim()).filter(Boolean);
+        // DM replies: a single fixed message, independent from the comment message/variations.
+        const dmMessage = document.getElementById('dmReplyMessage').value.trim();
+        
+        const responseType = document.getElementById('responseType').value;
+        const replyLocation = document.getElementById('replyLocation').value;
+        
+        let response_data = {};
+        const triggerType = document.getElementById('autoTrigger').value;
+        
+        if (responseType === 'text') {
+            // Comment and DM each get their own independent config — comment
+            // supports variations, DM is always a single fixed message.
+            const commentConfig = {
+                type: 'text',
+                message: document.getElementById('replyMessage').value.trim(),
+                variations: commentVariations,
+                system_prompt: document.getElementById('aiSystemPromptStep3')?.value?.trim() || null
+            };
+            const dmConfig = {
+                type: 'text',
+                message: dmMessage,
+                variations: [], // DMs never use variations
+                system_prompt: document.getElementById('aiSystemPromptStep3')?.value?.trim() || null
+            };
+
+            response_data = { type: 'text' };
+            if (triggerType === 'comment' || triggerType === 'both') {
+                response_data.comment = commentConfig;
+            }
+            if (triggerType === 'dm' || triggerType === 'both') {
+                response_data.dm = dmConfig;
+            }
+            // Fallback used by any legacy/general lookups
+            response_data.general = triggerType === 'dm' ? dmConfig : commentConfig;
+        } else if (responseType === 'button') {
+            const buttonConfig = {
+                type: 'button',
+                button_text: document.getElementById('buttonText').value.trim(),
+                button_url: document.getElementById('buttonUrl').value.trim(),
+                message: document.getElementById('buttonMessage').value.trim()
+            };
+            
+            if (triggerType === 'both') {
+                response_data = {
+                    type: 'button',
+                    comment: { ...buttonConfig },
+                    dm: { ...buttonConfig }
+                };
+            } else {
+                response_data = {
+                    type: 'button',
+                    [triggerType]: { ...buttonConfig },
+                    general: { ...buttonConfig }
+                };
+            }
+        } else if (responseType === 'media') {
+            const mediaConfig = {
+                type: 'media',
+                media_url: document.getElementById('mediaUrl').value.trim(),
+                caption: document.getElementById('mediaCaption').value.trim()
+            };
+            
+            if (triggerType === 'both') {
+                response_data = {
+                    type: 'media',
+                    comment: { ...mediaConfig },
+                    dm: { ...mediaConfig }
+                };
+            } else {
+                response_data = {
+                    type: 'media',
+                    [triggerType]: { ...mediaConfig },
+                    general: { ...mediaConfig }
+                };
+            }
+        } else if (responseType === 'ai') {
+            const aiConfig = {
+                type: 'ai',
+                model: document.getElementById('aiModelStep3').value,
+                system_prompt: document.getElementById('aiSystemPromptStep3').value.trim(),
+                temperature: parseFloat(document.getElementById('aiTempStep3').value),
+                max_tokens: parseInt(document.getElementById('aiMaxTokensStep3').value)
+            };
+            
+            if (triggerType === 'both') {
+                response_data = {
+                    type: 'ai',
+                    comment: { ...aiConfig },
+                    dm: { ...aiConfig }
+                };
+            } else {
+                response_data = {
+                    type: 'ai',
+                    [triggerType]: { ...aiConfig },
+                    general: { ...aiConfig }
+                };
+            }
+        }
+
+        const body = {
+            name,
+            type,
+            keywords,
+            platforms,
+            reply_location: replyLocation,
+            response_type: responseType,
+            response_data,
+            target_published_ids: scopeForSubmit === 'specific' ? target_published_ids : null,
+            is_active: true
+        };
+        
+        // If editing an existing automation, use PUT; otherwise use POST
+        const url = editingAutomationId ? `/api/automations/${editingAutomationId}` : '/api/automations';
+        const method = editingAutomationId ? 'PUT' : 'POST';
+        
+        const res = await apiFetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (res && res.ok) {
+            await loadAutomations();
+            closeBuilder.click();
+        } else if (res) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.error || 'Failed to save automation');
+        }
+    });
+
+    // ============================================================
+    // AUTOMATIONS: LOAD & RENDER
+    // ============================================================
+    async function loadAutomations() {
+        const res = await apiFetch('/api/automations');
+        if (res && res.ok) {
+            automations = await res.json();
+            renderAutomations();
+        }
+    }
+
+    function renderAutomations() {
+        const grid = document.getElementById('autoGrid');
+        grid.innerHTML = '';
+        if (automations.length === 0) {
+            grid.innerHTML = '<div class="text-muted" style="padding:16px;">No automations yet — click "New Automation" to create one.</div>';
+            return;
+        }
+        automations.forEach(a => {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.style.padding = '14px 18px';
+            const kwSummary = (a.keywords && a.keywords.length) ? `Keywords: ${a.keywords.join(', ')}` : '';
+            const varSummary = (a.variations && a.variations.length) ? ` · ${a.variations.length} reply variations` : '';
+            const aiSummary = a.ai_prompt ? 'AI reply configured' : '';
+            const platforms = (a.platforms || ['instagram', 'facebook', 'threads']).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ');
+            card.innerHTML = `
+                <div class="flex-between">
+                    <div><span style="font-weight:600;">${a.name}</span> <span class="badge ${a.is_active ? 'active-badge' : ''}" style="margin-left:8px;${a.is_active ? '' : 'background:#fef3c7;color:#92400e;'}">${a.is_active ? 'Active' : 'Paused'}</span></div>
+                    <span class="text-muted" style="font-size:12px;">${(a.type || '').toUpperCase()} · ${platforms}</span>
+                </div>
+                <div class="text-muted" style="font-size:13px;">${[kwSummary, aiSummary].filter(Boolean).join(' · ')}${varSummary}</div>
+                <div class="flex mt-2">
+                    <button class="btn btn-sm btn-outline auto-edit-btn">Edit</button>
+                    <button class="btn btn-sm btn-outline auto-dup-btn">Duplicate</button>
+                    <button class="btn btn-sm btn-ghost auto-toggle-btn">${a.is_active ? 'Pause' : 'Resume'}</button>
+                    <button class="btn btn-sm btn-ghost auto-delete-btn" style="color:var(--error);"><i class="fas fa-trash"></i></button>
+                </div>
+            `;
+            card.querySelector('.auto-toggle-btn').addEventListener('click', () => toggleAutomation(a.id));
+            card.querySelector('.auto-delete-btn').addEventListener('click', () => deleteAutomation(a.id));
+            card.querySelector('.auto-edit-btn').addEventListener('click', () => editAutomation(a));
+            card.querySelector('.auto-dup-btn').addEventListener('click', () => {
+                autoList.style.display = 'none';
+                builder.style.display = 'block';
+                document.getElementById('builderTitle').textContent = 'Duplicate: ' + a.name;
+                document.getElementById('autoNameInput').value = a.name + ' (copy)';
+                document.getElementById('kwInput').value = (a.keywords || []).join(', ');
+                currentStep = 1;
+                showStep(1);
+            });
+            grid.appendChild(card);
+        });
+    }
+
+    async function toggleAutomation(id) {
+        const res = await apiFetch(`/api/automations/${id}/toggle`, { method: 'PATCH' });
+        if (res && res.ok) await loadAutomations();
+    }
+
+    async function deleteAutomation(id) {
+        if (!confirm('Delete this automation?')) return;
+        const res = await apiFetch(`/api/automations/${id}`, { method: 'DELETE' });
+        if (res && res.ok) await loadAutomations();
+    }
+
+    // ============================================================
+    // CONNECTIONS: LOAD & RENDER
+    // ============================================================
+    const PLATFORM_META = {
+        google_sheets: { name: 'Google Sheets', icon: '/assets/logos/sheets.png', color: '#0f9d58' },
+        google_drive: { name: 'Google Drive', icon: '/assets/logos/drive.webp', color: '#4285f4' },
+        facebook: { name: 'Facebook', icon: '/assets/logos/facebook.webp', color: 'var(--fb)' },
+        instagram: { name: 'Instagram', icon: '/assets/logos/insta.webp', color: 'var(--ig)' },
+        threads: { name: 'Threads', icon: '/assets/logos/Threads.png', color: 'var(--threads)' },
+        linkedin: { name: 'LinkedIn', icon: '/assets/logos/linkedin.webp', color: 'var(--li)' }
+    };
+
+    async function loadConnections() {
+        // Only update the status of existing static cards based on connection state
+        const res = await apiFetch('/api/connections').catch(() => null);
+        if (res && res.ok) {
+            connections = await res.json();
+        } else {
+            connections = [];
+        }
+        
+        // Update each card's status based on connection state
+        Object.keys(PLATFORM_META).forEach(platform => {
+            const conn = connections.find(c => c.platform === platform && c.is_connected);
+            const statusDiv = document.getElementById(`conn-status-${platform === 'google_sheets' ? 'sheets' : platform === 'google_drive' ? 'drive' : platform}`);
+            if (!statusDiv) return;
+            
+            if (conn) {
+                statusDiv.innerHTML = `
+                    <div class="alert alert-success mb-2" style="padding:8px 12px;border-radius:8px;font-size:13px;">
+                        <i class="fas fa-check-circle me-1"></i> Connected
+                        ${conn.account_name ? `<br><small>${conn.account_name}</small>` : ''}
+                    </div>
+                    <button class="btn btn-sm btn-outline-danger w-100" onclick="disconnectPlatform('${conn.id}')">
+                        <i class="fas fa-unlink me-2"></i>Disconnect
+                    </button>
+                `;
+            } else {
+                const meta = PLATFORM_META[platform];
+                const btnColor = platform === 'google_sheets' ? 'success' : 
+                                platform === 'google_drive' ? 'danger' : 
+                                platform === 'facebook' ? 'primary' : 'dark';
+                statusDiv.innerHTML = `
+                    <button class="btn btn-outline-${btnColor} w-100" onclick="connectPlatform('${platform}')">
+                        <i class="fas fa-link me-2"></i>Connect Account
+                    </button>
+                `;
+            }
+        });
+    }
+
+    // renderConnections is no longer needed since cards are static
+    function renderConnections() {
+        // Cards are now statically defined in HTML
+        loadConnections(); // Just update their status
+    }
+
+    // Real OAuth connect: this is a full-page redirect (not a fetch), so the
+    // browser lands on Facebook/Google/etc.'s own login+consent screen, using
+    // that platform's own App ID/Secret configured server-side, then bounces
+    // back to /api/connections/:platform/callback which saves the connection
+    // and redirects here again with ?connected=<platform> or ?conn_error=...
+    function connectPlatform(platform) {
+        const token = localStorage.getItem('auth_token') || '';
+        const url = `/api/connections/${platform}/authorize` + (token ? `?token=${encodeURIComponent(token)}` : '');
+        window.location.href = url;
+    }
+
+    async function disconnectPlatform(id) {
+        if (!confirm('Disconnect this account?')) return;
+        const res = await apiFetch(`/api/connections/${id}`, { method: 'DELETE' });
+        if (res && res.ok) await loadConnections();
+    }
+
+    // After bouncing back from an OAuth callback, show the result and clean the URL.
+    function handleConnectionRedirectResult() {
+        const params = new URLSearchParams(window.location.search);
+        const connected = params.get('connected');
+        const connError = params.get('conn_error');
+        if (connected) {
+            alert(`${PLATFORM_META[connected] ? PLATFORM_META[connected].name : connected} connected successfully!`);
+        } else if (connError) {
+            alert(`Connection failed: ${connError}`);
+        }
+        if (connected || connError) {
+            params.delete('connected');
+            params.delete('conn_error');
+            const rest = params.toString();
+            window.history.replaceState({}, '', rest ? `/dashboard.html?${rest}` : '/dashboard.html');
+            document.querySelector('.nav-item[data-tab="connections"]').click();
+        }
+    }
+
+    // ============================================================
+    // AUTH GUARD, LOGOUT & INIT
+    // ============================================================
+    
+    // AI Models list - fetched from chat endpoint
+    let aiModels = [];
+    
+    async function loadAiModels() {
+        try {
+            const res = await apiFetch('/api/ai/models');
+            if (res && res.ok) {
+                const data = await res.json();
+                // Handle both array response and object with models property
+                aiModels = Array.isArray(data) ? data : (data.models || []);
+                const select = document.getElementById('aiModelSelect');
+                select.innerHTML = '';
+                aiModels.forEach(model => {
+                    const opt = document.createElement('option');
+                    // Handle string model names or objects with id/name
+                    if (typeof model === 'string') {
+                        opt.value = model;
+                        opt.textContent = model;
+                    } else {
+                        opt.value = model.id || model.model || model.name;
+                        opt.textContent = model.name || model.model || model.id;
+                    }
+                    select.appendChild(opt);
+                });
+            }
+        } catch (err) {
+            console.error('Failed to load AI models:', err);
+            // Fallback to default MistralAI models if API fails
+            aiModels = [
+                'mistralai/mistral-small-4-119b-2603',
+                'mistralai/mistral-large-3-675b-instruct-2512',
+                'mistralai/mistral-medium-3.5-128b',
+                'mistralai/ministral-14b-instruct-2512',
+                'mistralai/mixtral-8x7b-instruct-v0.1'
+            ];
+            const select = document.getElementById('aiModelSelect');
+            select.innerHTML = '';
+            aiModels.forEach(model => {
+                const opt = document.createElement('option');
+                opt.value = model;
+                opt.textContent = model;
+                select.appendChild(opt);
+            });
+        }
+    }
+    
+    async function loadUserProfile() {
+        try {
+            const res = await apiFetch('/api/auth/me');
+            if (res && res.ok) {
+                const data = await res.json();
+                const user = data.user;
+                const nameEl = document.getElementById('profileName');
+                const emailEl = document.getElementById('profileEmail');
+                const avatarEl = document.getElementById('profileAvatar');
+                const fullNameInput = document.getElementById('profileFullNameInput');
+                const emailInput = document.getElementById('profileEmailInput');
+                
+                if (nameEl) nameEl.textContent = user.name || user.email;
+                if (emailEl) emailEl.textContent = `${user.name || ''} · ${user.email}`.replace(/^ · /, '');
+                if (avatarEl && user.name) {
+                    const initials = user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+                    avatarEl.textContent = initials || 'U';
+                }
+                if (fullNameInput) fullNameInput.value = user.name || '';
+                if (emailInput) emailInput.value = user.email || '';
+            }
+        } catch (err) {
+            console.error('Failed to load user profile:', err);
+        }
+    }
+
+    async function checkAuthAndInit() {
+        const token = localStorage.getItem('auth_token');
+        const res = await fetch('/api/auth/me', { credentials: 'include', headers: authHeaders() });
+        if (!res.ok) {
+            localStorage.removeItem('auth_token');
+            window.location.href = '/';
+            return;
+        }
+        const data = await res.json();
+        loadPosts();
+        loadAutomations();
+        loadConnections();
+        loadAiModels();
+        loadUserProfile();
+        handleConnectionRedirectResult();
+    }
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+        await apiFetch('/api/auth/logout', { method: 'POST' });
+        localStorage.removeItem('auth_token');
+        window.location.href = '/';
+    });
+
+    // ============================================================
+    // INBOX FUNCTIONALITY
+    // ============================================================
+    
+    // Inbox tab switching (FB/IG vs Threads)
+    const inboxTabButtons = document.querySelectorAll('[data-inbox-tab]');
+    const inboxTabContents = document.querySelectorAll('.inbox-tab-content');
+    
+    inboxTabButtons.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const tabId = this.dataset.inboxTab;
+            inboxTabButtons.forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            inboxTabContents.forEach(content => {
+                content.style.display = content.id === `inbox-${tabId}` ? 'block' : 'none';
+            });
+            loadInboxData(tabId);
+        });
+    });
+
+    // Refresh inbox button
+    document.getElementById('refreshInboxBtn').addEventListener('click', () => {
+        const activeTab = document.querySelector('[data-inbox-tab].active')?.dataset.inboxTab || 'fb-ig';
+        loadInboxData(activeTab);
+    });
+
+    // Load inbox data from API
+    async function loadInboxData(tab = 'fb-ig') {
+        try {
+            if (tab === 'fb-ig') {
+                await Promise.all([
+                    loadFbComments(),
+                    loadFbDms(),
+                    loadIgComments(),
+                    loadIgDms()
+                ]);
+            } else if (tab === 'threads') {
+                await loadThreadsComments();
+            }
+            updateInboxBadge();
+        } catch (err) {
+            console.error('Failed to load inbox data:', err);
+        }
+    }
+
+    // Create a message/comment card with reply option
+    function createMessageCard(item, platform, type) {
+        const card = document.createElement('div');
+        card.style.cssText = 'padding:10px;border-bottom:1px solid var(--border);margin-bottom:8px;';
+        
+        const iconClass = platform === 'facebook' ? 'fa-facebook' : (platform === 'instagram' ? 'fa-instagram' : 'fa-at');
+        const iconColor = platform === 'facebook' ? 'var(--fb)' : (platform === 'instagram' ? 'var(--ig)' : 'var(--threads)');
+        
+        const triggerText = item.trigger_text || '';
+        const truncatedText = triggerText.length > 80 ? triggerText.substring(0, 80) + '...' : triggerText;
+        
+        // For DMs/messages, we may want to reply to the specific message
+        // The sender_id can be used as PSID/IGSID for replying
+        const isDM = type === 'DM';
+        
+        card.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                <div style="font-size:11px;color:var(--text-muted);">
+                    <i class="fab ${iconClass}" style="color:${iconColor};"></i> 
+                    ${type} · ${new Date(item.created_at).toLocaleDateString()}
+                </div>
+            </div>
+            <div style="font-size:13px;margin-bottom:8px;line-height:1.4;">${escapeHtml(truncatedText)}</div>
+            <div style="display:flex;gap:6px;">
+                <button class="btn btn-sm btn-outline" onclick="showReplyModal('${item.id}', '${platform}', '${type}', ${isDM ? `'${item.sender_id}'` : 'null'})">
+                    <i class="fas fa-reply"></i> Reply
+                </button>
+            </div>
+        `;
+        return card;
+    }
+
+    // Load Facebook Comments
+    async function loadFbComments() {
+        const container = document.getElementById('fbCommentsList');
+        if (!container) return;
+        try {
+            const res = await apiFetch('/api/comments?platform=facebook&limit=20');
+            const comments = await res.json();
+            container.innerHTML = '';
+            if (comments.length === 0) {
+                container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;">No comments</div>';
+                return;
+            }
+            comments.forEach(c => container.appendChild(createMessageCard(c, 'facebook', 'Comment')));
+        } catch (err) {
+            container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;color:var(--error);">Failed to load</div>';
+        }
+    }
+
+    // Load Facebook DMs
+    async function loadFbDms() {
+        const container = document.getElementById('fbDmsList');
+        if (!container) return;
+        try {
+            const res = await apiFetch('/api/comments?platform=facebook&limit=20');
+            const messages = await res.json();
+            const dms = messages.filter(m => m.trigger_type === 'dm' || m.trigger_type === 'message');
+            container.innerHTML = '';
+            if (dms.length === 0) {
+                container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;">No messages</div>';
+                return;
+            }
+            dms.forEach(m => container.appendChild(createMessageCard(m, 'facebook', 'DM')));
+        } catch (err) {
+            container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;color:var(--error);">Failed to load</div>';
+        }
+    }
+
+    // Load Instagram Comments
+    async function loadIgComments() {
+        const container = document.getElementById('igCommentsList');
+        if (!container) return;
+        try {
+            const res = await apiFetch('/api/comments?platform=instagram&limit=20');
+            const comments = await res.json();
+            container.innerHTML = '';
+            if (comments.length === 0) {
+                container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;">No comments</div>';
+                return;
+            }
+            comments.forEach(c => container.appendChild(createMessageCard(c, 'instagram', 'Comment')));
+        } catch (err) {
+            container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;color:var(--error);">Failed to load</div>';
+        }
+    }
+
+    // Load Instagram DMs
+    async function loadIgDms() {
+        const container = document.getElementById('igDmsList');
+        if (!container) return;
+        try {
+            const res = await apiFetch('/api/comments?platform=instagram&limit=20');
+            const messages = await res.json();
+            const dms = messages.filter(m => m.trigger_type === 'dm' || m.trigger_type === 'message');
+            container.innerHTML = '';
+            if (dms.length === 0) {
+                container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;">No messages</div>';
+                return;
+            }
+            dms.forEach(m => container.appendChild(createMessageCard(m, 'instagram', 'DM')));
+        } catch (err) {
+            container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;color:var(--error);">Failed to load</div>';
+        }
+    }
+
+    // Load Threads Comments
+    async function loadThreadsComments() {
+        const container = document.getElementById('threadsCommentsList');
+        if (!container) return;
+        try {
+            const res = await apiFetch('/api/comments?platform=threads&limit=50');
+            const comments = await res.json();
+            container.innerHTML = '';
+            if (comments.length === 0) {
+                container.innerHTML = '<div class="text-muted" style="padding:20px;text-align:center;">No threads comments</div>';
+                return;
+            }
+            // Full-width cards for threads
+            comments.forEach(c => {
+                const card = createMessageCard(c, 'threads', 'Thread Reply');
+                card.style.cssText += 'max-width:700px;margin-left:auto;margin-right:auto;';
+                container.appendChild(card);
+            });
+        } catch (err) {
+            container.innerHTML = '<div class="text-muted" style="padding:20px;text-align:center;color:var(--error);">Failed to load</div>';
+        }
+    }
+
+    // Update inbox badge count
+    async function updateInboxBadge() {
+        try {
+            const [fbRes, igRes, thRes] = await Promise.all([
+                apiFetch('/api/comments?platform=facebook&limit=100'),
+                apiFetch('/api/comments?platform=instagram&limit=100'),
+                apiFetch('/api/comments?platform=threads&limit=100')
+            ]);
+            const [fb, ig, th] = await Promise.all([fbRes.json(), igRes.json(), thRes.json()]);
+            const total = fb.length + ig.length + th.length;
+            const badge = document.getElementById('inboxBadge');
+            if (badge) {
+                badge.textContent = total > 99 ? '99+' : total;
+                badge.style.display = total > 0 ? 'inline-block' : 'none';
+                if (total > 0) badge.classList.add('active-badge');
+            }
+        } catch (err) {
+            console.error('Failed to update inbox badge:', err);
+        }
+    }
+
+    // Show reply modal
+    window.showReplyModal = function(logId, platform, type, senderId = null) {
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.cssText = 'display:flex;align-items:center;justify-content:center;z-index:10001;';
+        
+        const isDM = type === 'DM';
+        const modalTitle = isDM ? `Reply to ${platform.charAt(0).toUpperCase() + platform.slice(1)} Message` : `Reply to ${type}`;
+        
+        modal.innerHTML = `
+            <div class="modal" style="max-width:480px;width:90%;">
+                <h2><i class="fas fa-reply" style="color:var(--primary);"></i> ${modalTitle}</h2>
+                <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Platform: ${platform.charAt(0).toUpperCase() + platform.slice(1)}</p>
+                ${isDM && senderId ? `<p style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">Replying to user ID: ${senderId}</p>` : ''}
+                <textarea id="replyTextInput" rows="4" placeholder="Type your reply..." style="width:100%;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;resize:vertical;"></textarea>
+                <div class="text-muted" id="replyError" style="display:none;color:var(--error);font-size:13px;margin-top:8px;"></div>
+                <div class="modal-actions" style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;">
+                    <button class="btn btn-outline" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+                    <button class="btn btn-primary" id="sendReplyBtn"><i class="fas fa-paper-plane"></i> Send Reply</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        document.getElementById('sendReplyBtn').addEventListener('click', async () => {
+            const text = document.getElementById('replyTextInput').value.trim();
+            const errorEl = document.getElementById('replyError');
+            if (!text) {
+                errorEl.textContent = 'Please enter a reply message';
+                errorEl.style.display = 'block';
+                return;
+            }
+            errorEl.style.display = 'none';
+            const btn = document.getElementById('sendReplyBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+            
+            try {
+                // For DMs, we may want to include reply_to context if available
+                // The API will handle routing based on trigger_type in the log
+                const requestBody = { message: text };
+                
+                const res = await apiFetch(`/api/comments/${logId}/reply`, {
+                    method: 'POST',
+                    body: JSON.stringify(requestBody)
+                });
+                if (res.ok) {
+                    modal.remove();
+                    // Refresh the inbox
+                    const activeTab = document.querySelector('[data-inbox-tab].active')?.dataset.inboxTab || 'fb-ig';
+                    loadInboxData(activeTab);
+                } else {
+                    const err = await res.json();
+                    throw new Error(err.error || 'Failed to send reply');
+                }
+            } catch (err) {
+                errorEl.textContent = err.message;
+                errorEl.style.display = 'block';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-paper-plane"></i> Send Reply';
+            }
+        });
+    };
+
+    // HTML escape helper
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    checkAuthAndInit();
+
+    // ============================================================
+    // REFRESH
+    // ============================================================
+    document.getElementById('refreshBtn').addEventListener('click', () => {
+        const btn = document.getElementById('refreshBtn');
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        Promise.all([loadPosts(), loadAutomations(), loadConnections()]).finally(() => {
+            btn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+        });
+    });
+
+    // ============================================================
+    // INIT
+    // ============================================================
+    renderCalendar();
+
+    // Set default date in modal
+    const now = new Date();
+    document.getElementById('modalDate').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+
+    console.log('🚀 Content Planner ready!');
+</script>
+</body>
+</html>

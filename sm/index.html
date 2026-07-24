@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Content Planner · Meta Scheduler</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #f4f6fa;
+            color: #1e1e2f;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 480px;
+            width: 100%;
+            background: white;
+            border-radius: 24px;
+            padding: 48px 52px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.06);
+            border: 1px solid #e2e8f0;
+            text-align: center;
+        }
+        .logo {
+            font-size: 32px;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            background: linear-gradient(135deg, #2563eb, #7c3aed);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 16px;
+        }
+        .logo i { -webkit-text-fill-color: #2563eb; font-size: 36px; }
+        .subtitle {
+            color: #64748b;
+            font-size: 16px;
+            margin-bottom: 32px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 8px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            font-size: 15px;
+            font-family: 'Inter', sans-serif;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: linear-gradient(135deg, #2563eb, #7c3aed);
+            color: white;
+            padding: 14px 32px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 15px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(37, 99, 235, 0.3);
+        }
+        .btn i { font-size: 16px; }
+        .toggle-link {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #64748b;
+        }
+        .toggle-link a {
+            color: #2563eb;
+            text-decoration: none;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .toggle-link a:hover { text-decoration: underline; }
+        .error-message {
+            background: #fef2f2;
+            color: #dc2626;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .success-message {
+            background: #f0fdf4;
+            color: #16a34a;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .features {
+            margin-top: 40px;
+            text-align: left;
+        }
+        .feature-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 16px;
+            font-size: 15px;
+            color: #334155;
+        }
+        .feature-item i {
+            color: #2563eb;
+            font-size: 18px;
+            margin-top: 2px;
+        }
+        .nav-links {
+            margin-top: 32px;
+            padding-top: 24px;
+            border-top: 1px solid #e2e8f0;
+        }
+        .nav-links a {
+            color: #64748b;
+            text-decoration: none;
+            font-size: 14px;
+            margin: 0 12px;
+            transition: color 0.2s;
+        }
+        .nav-links a:hover { color: #2563eb; }
+        .hidden { display: none; }
+        @media (max-width: 600px) {
+            .container { padding: 32px 24px; }
+            .logo { font-size: 26px; }
+            .logo i { font-size: 28px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="logo"><i class="fas fa-calendar-alt"></i> Content Planner</div>
+    <p class="subtitle">Smart social media scheduling for Instagram, Facebook & Threads</p>
+
+    <div id="error-message" class="error-message"></div>
+    <div id="success-message" class="success-message"></div>
+
+    <!-- Login Form -->
+    <div id="login-form">
+        <form onsubmit="handleLogin(event)">
+            <div class="form-group">
+                <label for="login-email">Email</label>
+                <input type="email" id="login-email" required placeholder="you@example.com" />
+            </div>
+            <div class="form-group">
+                <label for="login-password">Password</label>
+                <input type="password" id="login-password" required placeholder="Enter your password" />
+            </div>
+            <button type="submit" class="btn">
+                <i class="fas fa-sign-in-alt"></i> Sign In
+            </button>
+        </form>
+        <div class="toggle-link">
+            Don't have an account? <a onclick="showRegister()">Sign Up</a>
+        </div>
+    </div>
+
+    <!-- Register Form -->
+    <div id="register-form" class="hidden">
+        <form onsubmit="handleRegister(event)">
+            <div class="form-group">
+                <label for="register-name">Name (optional)</label>
+                <input type="text" id="register-name" placeholder="Your name" />
+            </div>
+            <div class="form-group">
+                <label for="register-email">Email</label>
+                <input type="email" id="register-email" required placeholder="you@example.com" />
+            </div>
+            <div class="form-group">
+                <label for="register-password">Password</label>
+                <input type="password" id="register-password" required placeholder="Create a password" minlength="6" />
+            </div>
+            <button type="submit" class="btn">
+                <i class="fas fa-user-plus"></i> Create Account
+            </button>
+        </form>
+        <div class="toggle-link">
+            Already have an account? <a onclick="showLogin()">Sign In</a>
+        </div>
+    </div>
+
+    <div class="features">
+        <div class="feature-item">
+            <i class="fas fa-check-circle"></i>
+            <span>Schedule posts across multiple platforms</span>
+        </div>
+        <div class="feature-item">
+            <i class="fas fa-check-circle"></i>
+            <span>AI-powered comment replies and automation</span>
+        </div>
+        <div class="feature-item">
+            <i class="fas fa-check-circle"></i>
+            <span>Unified calendar view for all your content</span>
+        </div>
+        <div class="feature-item">
+            <i class="fas fa-check-circle"></i>
+            <span>Analytics and performance tracking</span>
+        </div>
+    </div>
+
+    <div class="nav-links">
+        <a href="about.html">About</a>
+        <a href="terms.html">Terms</a>
+        <a href="privacy-policy.html">Privacy</a>
+        <a href="data-deletion.html">Data Deletion</a>
+    </div>
+</div>
+
+<script>
+    const API_BASE = '/api/auth';
+
+    function showError(msg) {
+        const el = document.getElementById('error-message');
+        el.textContent = msg;
+        el.style.display = 'block';
+        setTimeout(() => el.style.display = 'none', 5000);
+    }
+
+    function showSuccess(msg) {
+        const el = document.getElementById('success-message');
+        el.textContent = msg;
+        el.style.display = 'block';
+        setTimeout(() => el.style.display = 'none', 5000);
+    }
+
+    function showLogin() {
+        document.getElementById('login-form').classList.remove('hidden');
+        document.getElementById('register-form').classList.add('hidden');
+    }
+
+    function showRegister() {
+        document.getElementById('login-form').classList.add('hidden');
+        document.getElementById('register-form').classList.remove('hidden');
+    }
+
+    async function handleLogin(e) {
+        e.preventDefault();
+        const email = document.getElementById('login-email').value;
+        const password = document.getElementById('login-password').value;
+
+        try {
+            const res = await fetch(`${API_BASE}/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ email, password })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showSuccess('Login successful! Redirecting...');
+                // Store token for API calls
+                if (data.token) {
+                    localStorage.setItem('auth_token', data.token);
+                }
+                setTimeout(() => {
+                    window.location.href = '/dashboard.html';
+                }, 1000);
+            } else {
+                showError(data.error || 'Login failed');
+            }
+        } catch (err) {
+            showError('Network error. Please try again.');
+        }
+    }
+
+    async function handleRegister(e) {
+        e.preventDefault();
+        const email = document.getElementById('register-email').value;
+        const password = document.getElementById('register-password').value;
+        const name = document.getElementById('register-name').value;
+
+        try {
+            const res = await fetch(`${API_BASE}/register`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ email, password, name })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showSuccess('Account created! Redirecting...');
+                if (data.token) {
+                    localStorage.setItem('auth_token', data.token);
+                }
+                setTimeout(() => {
+                    window.location.href = '/dashboard.html';
+                }, 1000);
+            } else {
+                showError(data.error || 'Registration failed');
+            }
+        } catch (err) {
+            showError('Network error. Please try again.');
+        }
+    }
+
+    // Check if already logged in
+    window.addEventListener('DOMContentLoaded', async () => {
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+            // Validate token before redirecting
+            try {
+                const res = await fetch(`${API_BASE}/me`, {
+                    credentials: 'include',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    window.location.href = '/dashboard.html';
+                } else {
+                    // Token invalid, clear it
+                    localStorage.removeItem('auth_token');
+                }
+            } catch (err) {
+                console.error('Token validation error:', err);
+                localStorage.removeItem('auth_token');
+            }
+        }
+    });
+</script>
+
+</body>
+</html>

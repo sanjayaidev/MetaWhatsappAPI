@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>About · Graphicy Media</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #f4f6fa;
+            color: #1e1e2f;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 820px;
+            width: 100%;
+            background: white;
+            border-radius: 24px;
+            padding: 48px 52px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.06);
+            border: 1px solid #e2e8f0;
+        }
+        .logo {
+            font-size: 28px;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: linear-gradient(135deg, #2563eb, #7c3aed);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 4px;
+        }
+        .logo i { -webkit-text-fill-color: #2563eb; font-size: 30px; }
+        .back-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #2563eb;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 24px;
+            transition: 0.2s;
+        }
+        .back-link:hover { gap: 10px; }
+        h1 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 4px;
+            color: #0f172a;
+        }
+        .subtitle {
+            color: #64748b;
+            font-size: 16px;
+            margin-bottom: 28px;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 20px;
+        }
+        .contact-card {
+            background: #f1f5f9;
+            border-radius: 12px;
+            padding: 18px 24px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 24px;
+            margin-bottom: 28px;
+        }
+        .contact-card .item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            color: #1e293b;
+        }
+        .contact-card .item i { color: #2563eb; width: 18px; font-size: 16px; }
+        h2 {
+            font-size: 20px;
+            font-weight: 600;
+            margin: 28px 0 10px;
+            color: #0f172a;
+        }
+        p {
+            font-size: 15px;
+            line-height: 1.8;
+            color: #334155;
+            margin-bottom: 14px;
+        }
+        ul {
+            font-size: 15px;
+            line-height: 1.8;
+            color: #334155;
+            padding-left: 24px;
+            margin-bottom: 14px;
+        }
+        ul li { margin-bottom: 4px; }
+        ul li strong { color: #0f172a; }
+        .highlight-box {
+            background: #eff6ff;
+            border-left: 4px solid #2563eb;
+            padding: 16px 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .highlight-box strong { color: #0f172a; }
+        .highlight-box a { color: #2563eb; text-decoration: none; }
+        .highlight-box a:hover { text-decoration: underline; }
+        .last-updated {
+            font-size: 13px;
+            color: #94a3b8;
+            margin-top: 28px;
+            padding-top: 16px;
+            border-top: 1px solid #e2e8f0;
+            font-style: italic;
+        }
+        .footer {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        .footer a { color: #2563eb; text-decoration: none; }
+        .footer a:hover { text-decoration: underline; }
+
+        @media (max-width: 600px) {
+            .container { padding: 28px 20px; }
+            h1 { font-size: 24px; }
+            .contact-card { flex-direction: column; gap: 10px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <a href="index.html" class="back-link"><i class="fas fa-arrow-left"></i> Back to App</a>
+
+    <div class="logo"><i class="fas fa-calendar-alt"></i> Graphicy Media</div>
+    <h1>About Us</h1>
+    <p class="subtitle">Empowering creators and businesses with intelligent social media management</p>
+
+    <div class="contact-card">
+        <div class="item"><i class="fas fa-building"></i> Graphicy Media</div>
+        <div class="item"><i class="fas fa-envelope"></i> graphicyin@gmail.com</div>
+        <div class="item"><i class="fas fa-phone"></i> +91 7504704502</div>
+    </div>
+
+    <p>Welcome to <strong>Graphicy Media</strong>, your all-in-one scheduling and automation platform for Meta's ecosystem — Instagram, Facebook, and Threads. We're on a mission to help creators, marketers, and businesses save time, grow their audience, and engage meaningfully with their community.</p>
+
+    <h2>Our Story</h2>
+    <p>Founded in 2024, Graphicy Media was born from a simple observation: managing multiple social media platforms is overwhelming. Between scheduling posts, replying to comments, and analyzing performance, creators spend more time on logistics than on creating. We built Content Planner to change that.</p>
+
+    <h2>What We Offer</h2>
+    <ul>
+        <li><strong>Smart Scheduling</strong> — Plan and schedule posts across Instagram, Facebook, and Threads from one unified calendar.</li>
+        <li><strong>AI-Powered Automation</strong> — Build custom reply workflows with keyword triggers, AI responses, and intelligent fallbacks.</li>
+        <li><strong>Multi-Platform Management</strong> — Connect all your Meta accounts and manage them seamlessly.</li>
+        <li><strong>Content Optimization</strong> — Schedule posts at the right time, track performance, and refine your strategy.</li>
+    </ul>
+
+    <h2>Our Values</h2>
+    <ul>
+        <li><strong>💡 Innovation</strong> — We embrace cutting-edge AI to make social media management effortless.</li>
+        <li><strong>🤝 Community</strong> — We're here to empower creators and businesses, not replace them.</li>
+        <li><strong>🔒 Trust &amp; Privacy</strong> — Your data is yours. We prioritize security and transparency in everything we do.</li>
+        <li><strong>🌍 Accessibility</strong> — We believe powerful tools should be simple and available to everyone.</li>
+    </ul>
+
+    <div class="highlight-box">
+        <strong>📍 Reach Out</strong><br>
+        Have questions, feedback, or ideas? We'd love to hear from you at <a href="mailto:graphicyin@gmail.com">graphicyin@gmail.com</a> or call us at +91 7504704502.
+    </div>
+
+    <p class="last-updated">Last updated: July 17, 2026</p>
+</div>
+
+<div class="footer">
+    &copy; 2026 Graphicy Media. All rights reserved. &bull; <a href="terms.html">Terms</a> &bull; <a href="privacy-policy.html">Privacy</a> &bull; <a href="data-deletion.html">Data Deletion</a>
+</div>
+
+</body>
+</html>
