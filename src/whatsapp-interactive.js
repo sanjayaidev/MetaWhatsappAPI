@@ -226,6 +226,134 @@ function buildMessagePayload(kind, cfg, to, vars = {}) {
   };
 }
 
+// ------------------------------------------------------------------------
+// Bot-builder templates (wb_bot_templates.payload, saved by chatbot-builder.
+// html's computeTemplateJSON()) are stored in a flat, home-grown shape —
+// NOT the actual WhatsApp Graph API `interactive` object shape:
+//
+//   { template_id, type: 'interactive', interactive_type, header: {type, text|url},
+//     body: '...', footer: '...', action: {...} }
+//
+// e.g. a button's action is `{ buttons: [{ id, title }] }`, not Graph's
+// `{ buttons: [{ type: 'reply', reply: { id, title } }] }`; a list's rows
+// live flat under `action.options`, not nested under `action.sections[].rows`;
+// and there's no `messaging_product`/`to`/`interactive` wrapper at all.
+//
+// bot-engine.js used to spread this payload directly into the send body
+// (`{ messaging_product, to, ...tpl.payload }`), which Meta rejects with
+// "(#100) Invalid parameter" since the shape doesn't match the Graph API's
+// interactive-message spec. This function does the actual conversion.
+//
+// `rowType` is wb_bot_templates.type ('plaintext' | 'buttons' | 'list' | 'cta' | 'product') —
+// more reliable than payload.type, which computeTemplateJSON always sets to
+// 'interactive' regardless of the template's real kind (a UI-side quirk,
+// not something to rely on here).
+function toGraphHeader(header) {
+  if (!header || header.type === 'none') return null;
+  if (header.type === 'image') return header.url ? { type: 'image', image: { link: header.url } } : null;
+  return header.text ? { type: 'text', text: header.text } : null;
+}
+
+function toGraphFooter(footerText) {
+  return footerText && footerText.trim() ? { text: footerText } : null;
+}
+
+function buildBotBuilderTemplatePayload(rowType, payload, to) {
+  validateRecipient(to);
+  payload = payload || {};
+
+  if (rowType === 'plaintext') {
+    if (!payload.body || !payload.body.trim()) throw new WhatsAppValidationError('Plaintext bot template has no body text.');
+    return { messaging_product: 'whatsapp', to, type: 'text', text: { body: payload.body } };
+  }
+
+  if (rowType === 'buttons') {
+    const interactive = {
+      type: 'button',
+      body: { text: payload.body || '' },
+      action: {
+        buttons: (payload.action?.buttons || []).map((b) => ({ type: 'reply', reply: { id: b.id, title: b.title } })),
+      },
+    };
+    const header = toGraphHeader(payload.header);
+    const footer = toGraphFooter(payload.footer);
+    if (header) interactive.header = header;
+    if (footer) interactive.footer = footer;
+    validateInteractiveObject(interactive);
+    return { messaging_product: 'whatsapp', to, type: 'interactive', interactive };
+  }
+
+  if (rowType === 'list') {
+    const interactive = {
+      type: 'list',
+      body: { text: payload.body || '' },
+      action: {
+        button: payload.action?.button || 'Options',
+        sections: [{
+          title: (payload.action?.button || 'Options').slice(0, 24),
+          rows: (payload.action?.options || []).map((o) => ({
+            id: o.id,
+            title: o.title,
+            ...(o.description ? { description: o.description } : {}),
+          })),
+        }],
+      },
+    };
+    const header = toGraphHeader(payload.header);
+    const footer = toGraphFooter(payload.footer);
+    if (header) interactive.header = header;
+    if (footer) interactive.footer = footer;
+    validateInteractiveObject(interactive);
+    return { messaging_product: 'whatsapp', to, type: 'interactive', interactive };
+  }
+
+  if (rowType === 'cta') {
+    // The builder also allows a "Call number" CTA (kind: 'phone'), but WhatsApp's
+    // cta_url interactive type only supports opening a URL — there's no native
+    // "tap to call" interactive button in the Cloud API. Fall back to a plain
+    // text message with the number included rather than sending an invalid payload.
+    if (payload.action?.kind === 'phone') {
+      const number = payload.action?.value || '';
+      return {
+        messaging_product: 'whatsapp', to, type: 'text',
+        text: { body: `${payload.body || ''}${number ? `\n\n📞 ${number}` : ''}`.trim() },
+      };
+    }
+    const interactive = {
+      type: 'cta_url',
+      body: { text: payload.body || '' },
+      action: {
+        name: 'cta_url',
+        parameters: {
+          display_text: payload.action?.button_label || 'Open',
+          url: payload.action?.value || '',
+        },
+      },
+    };
+    const header = toGraphHeader(payload.header);
+    const footer = toGraphFooter(payload.footer);
+    if (header) interactive.header = header;
+    if (footer) interactive.footer = footer;
+    validateInteractiveObject(interactive);
+    return { messaging_product: 'whatsapp', to, type: 'interactive', interactive };
+  }
+
+  if (rowType === 'product') {
+    // A real Graph API product message needs catalog_id + product_retailer_id
+    // from a connected Facebook catalog — this builder only stores a title/
+    // price/image URL, not catalog data, so a valid product message can't be
+    // built from it. Degrade gracefully to an image (or text) message instead
+    // of sending something Meta will reject.
+    const caption = [payload.product?.title, payload.product?.price].filter(Boolean).join(' — ') + (payload.body ? `\n\n${payload.body}` : '');
+    if (payload.header?.url) {
+      return { messaging_product: 'whatsapp', to, type: 'image', image: { link: payload.header.url, caption } };
+    }
+    return { messaging_product: 'whatsapp', to, type: 'text', text: { body: caption || '[Product]' } };
+  }
+
+  throw new WhatsAppValidationError(`Unsupported bot template type "${rowType}".`);
+}
+
 module.exports = {
   WhatsAppValidationError,
   renderTemplate,
@@ -233,4 +361,5 @@ module.exports = {
   validateTemplateConfig,
   validateInteractiveObject,
   buildMessagePayload,
+  buildBotBuilderTemplatePayload,
 };

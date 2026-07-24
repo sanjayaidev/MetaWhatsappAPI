@@ -20,7 +20,7 @@ const { encryptToken, decryptToken } = require('./src/crypto');
 const apiKeys = require('./src/api-keys');
 const { verifyApiKey, requirePermission, requireScopedAccount } = require('./src/middleware/api-auth');
 const interactiveTemplates = require('./src/interactive-templates');
-const { buildMessagePayload, WhatsAppValidationError } = require('./src/whatsapp-interactive');
+const { buildMessagePayload, buildBotBuilderTemplatePayload, WhatsAppValidationError } = require('./src/whatsapp-interactive');
 
 // CRM module route factories — each exports a function that takes a shared
 // `deps` object (supabase client, crypto helpers, verifyUser, etc.) so none
@@ -2067,13 +2067,24 @@ async function handleIncomingMessage(value, msg) {
       if (match.actionType === 'template' && match.templateId) {
         try {
           const { data: tpl } = await supabase
-            .from('wb_bot_templates').select('payload').eq('id', match.templateId).single();
+            .from('wb_bot_templates').select('type, payload').eq('id', match.templateId).single();
           if (tpl) {
+            // wb_bot_templates.payload is saved in a flat, non-Graph-API shape
+            // by chatbot-builder.html — spreading it straight into the send
+            // body (as this used to do) is exactly what Meta was rejecting
+            // with "(#100) Invalid parameter". Convert it to a real payload first.
+            let payload;
+            try {
+              payload = buildBotBuilderTemplatePayload(tpl.type, tpl.payload, msg.from);
+            } catch (convErr) {
+              console.error('[webhook] bot-engine template payload invalid:', convErr.message);
+              return;
+            }
             const plainToken = decryptToken(waAccount.access_token);
             const result = await fetch(`https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${plainToken}` },
-              body: JSON.stringify({ messaging_product: 'whatsapp', to: msg.from, ...tpl.payload })
+              body: JSON.stringify(payload)
             });
             const responseData = await result.json().catch(() => ({}));
             if (result.ok) {

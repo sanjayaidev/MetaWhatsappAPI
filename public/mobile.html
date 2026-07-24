@@ -1179,11 +1179,13 @@ function doLogout() {
 const API = {
   // --- Messages / Chats ---
   getMessages: async () => {
-    // Matches dashboard's /api/messages/received response shape: each row has
-    // phone, contact_name, message_body, message_type, created_at, is_read.
-    // This endpoint only returns inbound (received) messages, so every row
-    // here is an incoming message — outbound replies are appended locally
-    // to the thread when sent (see sendMessage / sendTemplateMessage).
+    // As of the outbound-logging fix, /api/messages/received returns BOTH
+    // inbound and outbound rows merged into one thread, each tagged with
+    // `direction: 'in' | 'out'`. This used to only return inbound rows, so
+    // everything below was hardcoded as 'in' and sent replies were only
+    // ever shown via a local, non-persisted append in sendMessage() /
+    // sendTemplateMessage() — never actually reflecting AI/bot-builder
+    // replies sent by the webhook. Now we trust the server's direction.
     const res = await apiCall('/api/messages/received?limit=50');
     if (res.success) {
       const conversations = {};
@@ -1192,9 +1194,8 @@ const API = {
       // `messages` array is built in true chronological order, matching real
       // WhatsApp thread display, and (b) unconditionally overwriting
       // lastBody/lastAt as we go naturally lands on that contact's MOST
-      // RECENT inbound message (not their first-ever one), which is also
-      // what the 22h reply-window check needs to key off of — same message
-      // dashboard.html's per-row window check already uses correctly.
+      // RECENT message (in or out), which is also what the 22h reply-window
+      // check needs (that check is keyed off inbound specifically elsewhere).
       const chronological = [...(res.messages || [])].reverse();
       chronological.forEach(msg => {
         const phone = msg.phone;
@@ -1208,11 +1209,15 @@ const API = {
             messages: []
           };
         }
-        if (!msg.is_read) conversations[phone].unread += 1;
+        // Only inbound messages carry is_read / count toward the unread
+        // badge — outbound rows don't have that column, and `!undefined`
+        // is truthy, which used to inflate the unread count with every
+        // sent reply once outbound rows started showing up here.
+        if (msg.direction !== 'out' && !msg.is_read) conversations[phone].unread += 1;
         conversations[phone].lastBody = msg.message_body || '';
         conversations[phone].lastAt = msg.created_at;
         conversations[phone].messages.push({
-          dir: 'in',
+          dir: msg.direction === 'out' ? 'out' : 'in',
           body: msg.message_body || '',
           type: msg.message_type || 'text',
           at: msg.created_at
@@ -1470,14 +1475,14 @@ function renderChatList() {
     const avatar = getAvatar(c.phone);
     return `
       <div class="chat-item" onclick="openThread('${c.phone}')">
-        <div class="avatar">${avatar ? `<img src="${avatar}" alt="avatar" />` : c.name.charAt(0).toUpperCase()}</div>
+        <div class="avatar">${avatar ? `<img src="${avatar}" alt="avatar" />` : escapeHtml(c.name.charAt(0).toUpperCase())}</div>
         <div class="info">
           <div class="name">
-            ${c.name}
+            ${escapeHtml(c.name)}
             <span class="time ${isUnread ? 'unread' : ''}">${formatTime(lastMsg?.at || c.lastAt)}</span>
           </div>
           <div class="preview">
-            <span>${lastMsg?.body || c.lastBody || 'No messages'}</span>
+            <span>${previewText(lastMsg?.body || c.lastBody) || 'No messages'}</span>
             ${isUnread ? `<span class="unread-badge">${c.unread}</span>` : ''}
           </div>
         </div>
@@ -1493,7 +1498,7 @@ function renderThread() {
   if (!c) return;
 
   const avatar = getAvatar(c.phone);
-  document.getElementById('threadAvatar').innerHTML = avatar ? `<img src="${avatar}" alt="avatar" />` : c.name.charAt(0).toUpperCase();
+  document.getElementById('threadAvatar').innerHTML = avatar ? `<img src="${avatar}" alt="avatar" />` : escapeHtml(c.name.charAt(0).toUpperCase());
   document.getElementById('threadName').textContent = c.name;
   // c.name falls back to the phone number itself when the server has no
   // saved name for this sender (see API.getMessages), so that's the
@@ -1516,7 +1521,7 @@ function renderThread() {
     const ticks = m.dir === 'out' ? `<span class="tick read">✓✓</span>` : '';
     html += `<div class="bubble-row ${m.dir}">
       <div class="bubble ${m.dir}">
-        ${m.body}
+        ${renderMessageBody(m.body)}
         <div class="meta"><span>${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span> ${ticks}</div>
       </div>
     </div>`;
@@ -1674,6 +1679,37 @@ function renderBilling() {
 // ====================================================================
 //  HELPERS
 // ====================================================================
+
+// Message bodies (and contact names) come from the other side of a WhatsApp
+// conversation — i.e. untrusted input — and were previously interpolated
+// straight into innerHTML with no escaping at all (a stored-XSS hole: any
+// inbound message containing HTML/script would render as markup). Escape
+// first, always, before any formatting is applied.
+function escapeHtml(str) {
+  return String(str == null ? '' : str).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// Renders WhatsApp's own markdown subset — *bold*, _italic_, ~strikethrough~,
+// and ```monospace``` — safely: escapes HTML first, then only ever inserts
+// tags we generate ourselves, so user-supplied text can't smuggle markup in
+// via the formatting step.
+function renderMessageBody(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/```([\s\S]+?)```/g, '<code>$1</code>');
+  html = html.replace(/(?<!\*)\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)/g, '<strong>$1</strong>');
+  html = html.replace(/(?<!_)_(?!\s)([^_\n]+?)(?<!\s)_(?!_)/g, '<em>$1</em>');
+  html = html.replace(/(?<!~)~(?!\s)([^~\n]+?)(?<!\s)~(?!~)/g, '<del>$1</del>');
+  return html.replace(/\n/g, '<br>');
+}
+
+// One-line chat-list preview: escaped, but without markdown tags (a bold/
+// italic snippet mid-sentence in a compact preview line reads as noise) and
+// with newlines collapsed so a multi-line message doesn't break the layout.
+function previewText(text) {
+  return escapeHtml(String(text == null ? '' : text).replace(/\s+/g, ' ').trim());
+}
 
 function formatTime(iso) {
   if (!iso) return '';
