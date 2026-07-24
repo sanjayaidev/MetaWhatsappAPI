@@ -1483,12 +1483,14 @@ app.post('/api/messages/reply-interactive', verifyUser, async (req, res) => {
     if (!result.ok || !responseData.messages?.[0]?.id) {
       return res.status(502).json({ error: responseData.error?.message || `Meta API ${result.status}` });
     }
-    logOutboundMessage({
-      userId: req.user.id, waAccountId: waAccount.id, phone,
-      messageType: raw_interactive ? (raw_interactive.type || 'interactive') : (kind || 'interactive'),
-      messageBody: '[interactive reply]',
-      waMessageId: responseData.messages[0].id, source: 'manual'
-    });
+    {
+      const { message_type, message_body } = extractOutboundPreview(payload);
+      logOutboundMessage({
+        userId: req.user.id, waAccountId: waAccount.id, phone,
+        messageType: message_type, messageBody: message_body,
+        waMessageId: responseData.messages[0].id, source: 'manual'
+      });
+    }
     res.json({ success: true, wa_message_id: responseData.messages[0].id });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1960,6 +1962,45 @@ function extractMessagePreview(msg) {
   }
 }
 
+// Same idea as extractMessagePreview above, but for a payload WE are about
+// to send (the Graph API request body), not one we received. Used so the
+// conversation thread shows the actual sent text/interactive body instead
+// of a generic placeholder like "[template auto-reply]" or "[bot rule
+// <uuid>] template reply" — those placeholders were never meant to be the
+// final content, they were left in as a stand-in when outbound logging was
+// first wired up and never replaced with the real text.
+function extractOutboundPreview(payload) {
+  if (!payload) return { message_type: 'text', message_body: '' };
+  switch (payload.type) {
+    case 'text':
+      return { message_type: 'text', message_body: payload.text?.body || '' };
+    case 'image':
+      return { message_type: 'image', message_body: payload.image?.caption || '📷 Image' };
+    case 'interactive': {
+      const interactive = payload.interactive || {};
+      const bodyText = interactive.body?.text || '';
+      switch (interactive.type) {
+        case 'button': {
+          const labels = (interactive.action?.buttons || []).map(b => b.reply?.title).filter(Boolean).join(' / ');
+          return { message_type: 'button', message_body: labels ? `${bodyText}\n[${labels}]` : bodyText };
+        }
+        case 'list': {
+          const label = interactive.action?.button || '';
+          return { message_type: 'list', message_body: label ? `${bodyText}\n[${label}]` : bodyText };
+        }
+        case 'cta_url': {
+          const label = interactive.action?.parameters?.display_text || '';
+          return { message_type: 'cta_url', message_body: label ? `${bodyText}\n[${label}]` : bodyText };
+        }
+        default:
+          return { message_type: interactive.type || 'interactive', message_body: bodyText || '[interactive message]' };
+      }
+    }
+    default:
+      return { message_type: payload.type || 'unknown', message_body: `[${payload.type || 'unsupported'} message]` };
+  }
+}
+
 // Persists a message WE sent (AI auto-reply, bot-builder rule, template
 // auto-reply, or a human agent's manual reply) so it shows up in the
 // conversation thread alongside inbound messages. Previously nothing sent
@@ -2088,10 +2129,10 @@ async function handleIncomingMessage(value, msg) {
             });
             const responseData = await result.json().catch(() => ({}));
             if (result.ok) {
+              const { message_type, message_body } = extractOutboundPreview(payload);
               logOutboundMessage({
                 userId: waAccount.user_id, waAccountId: waAccount.id, phone: msg.from,
-                contactName, messageType: 'bot_template',
-                messageBody: `[bot rule ${match.ruleId}] template reply`,
+                contactName, messageType: message_type, messageBody: message_body,
                 waMessageId: responseData?.messages?.[0]?.id || null, source: 'bot_builder'
               });
             } else {
@@ -2173,9 +2214,10 @@ async function handleIncomingMessage(value, msg) {
       );
       const responseData = await result.json().catch(() => ({}));
       if (result.ok) {
+        const { message_type, message_body } = extractOutboundPreview(payload);
         logOutboundMessage({
           userId: waAccount.user_id, waAccountId: waAccount.id, phone: msg.from,
-          contactName, messageType: tpl.kind || 'interactive', messageBody: '[template auto-reply]',
+          contactName, messageType: message_type, messageBody: message_body,
           waMessageId: responseData?.messages?.[0]?.id || null, source: 'template_auto_reply'
         });
       } else {
