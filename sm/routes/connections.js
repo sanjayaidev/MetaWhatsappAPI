@@ -71,7 +71,7 @@ const OAUTH_CONFIGS = {
 async function upsertConnection(pool, userId, { platform, account_name, account_id, page_id, access_token, token_expires_at }) {
   const encryptedToken = encrypt(access_token);
   const result = await pool.query(
-    `INSERT INTO connections (user_id, platform, account_name, account_id, page_id, access_token, is_connected, token_expires_at, updated_at)
+    `INSERT INTO smc_connections (user_id, platform, account_name, account_id, page_id, access_token, is_connected, token_expires_at, updated_at)
      VALUES ($1,$2,$3,$4,$5,$6,true,$7,CURRENT_TIMESTAMP)
      ON CONFLICT (user_id, platform, account_id) DO UPDATE SET
        account_name=EXCLUDED.account_name, page_id=EXCLUDED.page_id,
@@ -475,7 +475,7 @@ function router(pool) {
   r.get('/', async (req, res) => {
     try {
       const userId = req.user.id || req.user.sub;
-      const result = await pool.query(`SELECT ${SAFE_FIELDS} FROM connections WHERE user_id = $1 ORDER BY created_at DESC`, [userId]);
+      const result = await pool.query(`SELECT ${SAFE_FIELDS} FROM smc_connections WHERE user_id = $1 ORDER BY created_at DESC`, [userId]);
       res.json(result.rows);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -499,7 +499,7 @@ function router(pool) {
   r.delete('/:id', async (req, res) => {
     try {
       const userId = req.user.id || req.user.sub;
-      await pool.query('DELETE FROM connections WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
+      await pool.query('DELETE FROM smc_connections WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: err.message });

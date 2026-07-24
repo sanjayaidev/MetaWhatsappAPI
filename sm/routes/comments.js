@@ -11,7 +11,7 @@ function router(pool) {
       const platform = req.query.platform; // Optional filter by platform
       
       // Get connections for this user to filter by their accounts
-      let connectionsQuery = 'SELECT account_id, page_id, platform FROM connections WHERE user_id = $1 AND is_connected = true';
+      let connectionsQuery = 'SELECT account_id, page_id, platform FROM smc_connections WHERE user_id = $1 AND is_connected = true';
       const queryParams = [userId];
       
       if (platform) {
@@ -31,7 +31,7 @@ function router(pool) {
         SELECT id, platform, trigger_type, trigger_text, media_id, sender_id, account_id, 
                automation_id, automation_name, response_type, response_content, reply_location, 
                success, error_message, created_at
-        FROM automation_logs
+        FROM smc_automation_logs
         WHERE account_id = ANY($1) AND (trigger_type = 'comment' OR trigger_type = 'dm' OR trigger_type = 'message' OR trigger_type = 'manual_reply')
       `;
       
@@ -61,7 +61,7 @@ function router(pool) {
 
       // Get the original log to find platform, account, and trigger type
       const logRes = await pool.query(
-        'SELECT platform, account_id, trigger_type, sender_id FROM automation_logs WHERE id = $1',
+        'SELECT platform, account_id, trigger_type, sender_id FROM smc_automation_logs WHERE id = $1',
         [logId]
       );
       
@@ -73,7 +73,7 @@ function router(pool) {
       
       // Get the connection with all necessary fields
       const connRes = await pool.query(
-        'SELECT access_token, page_id, account_id as conn_account_id FROM connections WHERE user_id = $1 AND (account_id = $2 OR page_id = $2) AND is_connected = true',
+        'SELECT access_token, page_id, account_id as conn_account_id FROM smc_connections WHERE user_id = $1 AND (account_id = $2 OR page_id = $2) AND is_connected = true',
         [userId, account_id]
       );
       
@@ -109,7 +109,7 @@ function router(pool) {
         const threads = require('../platforms/threads');
         // For Threads, we need the threads user ID from the connection
         const connDetailsRes = await pool.query(
-          'SELECT account_id FROM connections WHERE user_id = $1 AND platform = \'threads\' AND is_connected = true LIMIT 1',
+          'SELECT account_id FROM smc_connections WHERE user_id = $1 AND platform = \'threads\' AND is_connected = true LIMIT 1',
           [userId]
         );
         if (connDetailsRes.rows.length === 0) {
@@ -124,7 +124,7 @@ function router(pool) {
       
       // Log the manual reply
       await pool.query(
-        `INSERT INTO automation_logs 
+        `INSERT INTO smc_automation_logs 
          (platform, trigger_type, trigger_text, media_id, sender_id, account_id, 
           automation_id, automation_name, response_type, response_content, reply_location, success)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
