@@ -197,7 +197,7 @@ function router(supabase) {
       addToDebugLog({ event: 'signature_check_failed', reason: 'missing_header', header });
       return false;
     }
-    const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(req.body).digest('hex');
+    const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex');
     let isValid = false;
     try {
       isValid = crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
@@ -344,7 +344,7 @@ function router(supabase) {
 
   r.post('/webhooks/facebook', express.raw({ type: 'application/json' }), async (req, res) => {
     // Log raw payload for debugging BEFORE signature check
-    const rawBody = req.body.toString('utf8');
+    const rawBody = req.rawBody.toString('utf8');
     console.log('📥 Facebook webhook received - Raw payload:', rawBody.substring(0, 500));
     addToDebugLog({ 
       platform: 'facebook', 
@@ -600,7 +600,7 @@ function router(supabase) {
 
   r.post('/webhooks/instagram', express.raw({ type: 'application/json' }), async (req, res) => {
     // Log raw payload for debugging BEFORE signature check
-    const rawBody = req.body.toString('utf8');
+    const rawBody = req.rawBody.toString('utf8');
     console.log('📥 Instagram webhook received - Raw payload:', rawBody.substring(0, 500));
     addToDebugLog({
       platform: 'instagram',
@@ -866,7 +866,7 @@ function router(supabase) {
 
   r.post('/webhooks/threads', express.raw({ type: 'application/json' }), async (req, res) => {
     // Log raw payload for debugging BEFORE signature check
-    const rawBody = req.body.toString('utf8');
+    const rawBody = req.rawBody.toString('utf8');
     console.log('📥 Threads webhook received - Raw payload:', rawBody.substring(0, 500));
     addToDebugLog({
       platform: 'threads',
@@ -901,7 +901,7 @@ function router(supabase) {
     res.sendStatus(200);
 
     let payload;
-    try { payload = JSON.parse(req.body.toString('utf8')); } catch { return; }
+    try { payload = JSON.parse(req.rawBody.toString('utf8')); } catch { return; }
 
     const platform = 'threads';
 
