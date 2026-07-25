@@ -30,7 +30,17 @@ function addToDebugLog(event) {
 // Helper to log automation events to database
 async function logAutomationEvent(supabase, data) {
   try {
-    const { error } = await supabase.from('smc_automation_logs').insert({
+    // Upsert, not insert: smc_automation_logs has a unique index on
+    // (platform, trigger_type, external_id) — see migrations/006. A plain
+    // insert() throws a duplicate-key error whenever a row with that same
+    // key already exists (e.g. a 'both' reply_location automation logging
+    // its private-reply event right after its public-reply event for the
+    // same comment, or an automation firing on a comment the live /api/comments
+    // poller already wrote a placeholder row for). Upserting means the most
+    // recent event for that key wins instead of silently failing to log at
+    // all. NULL external_id rows never collide (Postgres treats NULL <> NULL
+    // for uniqueness), so the no-external-id log calls below are unaffected.
+    const { error } = await supabase.from('smc_automation_logs').upsert({
       platform: data.platform,
       trigger_type: data.triggerType,
       trigger_text: data.triggerText || null,
@@ -49,7 +59,7 @@ async function logAutomationEvent(supabase, data) {
       // row's own local serial id. Needed so POST /api/comments/:id/reply
       // can target the right object; see migrations/006_add_external_id_to_automation_logs.sql.
       external_id: data.externalId || null,
-    });
+    }, { onConflict: 'platform,trigger_type,external_id' });
     if (error) throw error;
   } catch (err) {
     console.error('Failed to log automation event:', err.message);
@@ -538,7 +548,14 @@ function router(supabase) {
               console.log(`📤 Sending ${platform} private reply (DM) for comment ${replyTargetId} on behalf of account ${conn.account_id || conn.page_id}`);
               await facebook.sendPrivateReply(token, conn.account_id || conn.page_id, replyTargetId, dmReply);
               await logAutomationEvent(supabase, {
-                platform, triggerType, triggerText: text, mediaId, senderId, accountId, externalId,
+                platform, triggerType, triggerText: text, mediaId, senderId, accountId,
+                // Suffixed so this row's (platform, trigger_type, external_id) key
+                // doesn't collide with the public comment-reply log entry above,
+                // which is logged under the bare comment id — both share the same
+                // trigger_type ('comment'), so without this suffix the upsert in
+                // logAutomationEvent would overwrite one event with the other
+                // instead of keeping both.
+                externalId: externalId ? `${externalId}:private-reply` : null,
                 automationId: match.id, automationName: match.name,
                 responseType: dmResult.type, responseContent: dmReply,
                 replyLocation: 'dm', success: true, errorMessage: null
@@ -801,7 +818,11 @@ function router(supabase) {
               console.log(`📤 Sending ${platform} private reply (DM) for comment ${replyTargetId} on behalf of account ${conn.account_id || conn.page_id}`);
               await instagram.sendPrivateReply(token, conn.account_id || conn.page_id, replyTargetId, dmReply, conn);
               await logAutomationEvent(supabase, {
-                platform, triggerType, triggerText: text, mediaId, senderId, accountId, externalId,
+                platform, triggerType, triggerText: text, mediaId, senderId, accountId,
+                // See matching comment in the Facebook handler above: suffixed
+                // to avoid colliding with the public comment-reply log row for
+                // the same comment (same platform/trigger_type/external_id key).
+                externalId: externalId ? `${externalId}:private-reply` : null,
                 automationId: match.id, automationName: match.name,
                 responseType: dmResult.type, responseContent: dmReply,
                 replyLocation: 'dm', success: true, errorMessage: null
