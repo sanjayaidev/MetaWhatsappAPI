@@ -232,11 +232,102 @@ module.exports = function createPaymentsModule({ supabase }) {
     }
   }
 
+  // ─── Cashfree ────────────────────────────────────────────────────────────
+  const CASHFREE_API_VERSION = '2023-08-01';
+
+  function cashfreeBase() {
+    return isTestMode ? 'https://sandbox.cashfree.com/pg' : 'https://api.cashfree.com/pg';
+  }
+
+  // Unlike Razorpay/Stripe/PayPal, Cashfree requires the merchant to assign
+  // the order_id up front rather than returning one — so we reuse our own
+  // wb_orders row id as Cashfree's order_id. That means no separate
+  // provider_order_id needs to be minted or looked up: verification and
+  // webhook matching both just use order.id directly.
+  async function createCashfreeOrder({ order, successUrl }) {
+    const get = creds('cashfree');
+    const appId = get('APP_ID');
+    const secretKey = get('SECRET_KEY');
+    if (!appId || !secretKey) throw new Error(`Cashfree credentials not set for ${isTestMode ? 'TEST' : 'PRODUCTION'} mode`);
+
+    const res = await fetch(`${cashfreeBase()}/orders`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-version': CASHFREE_API_VERSION,
+        'x-client-id': appId,
+        'x-client-secret': secretKey,
+      },
+      body: JSON.stringify({
+        order_id: order.id,
+        order_amount: Number(Number(order.amount).toFixed(2)), // max 2 decimals
+        order_currency: order.currency || 'INR',
+        customer_details: {
+          customer_id: `cust_${order.id}`,
+          customer_name: order.contact_name || 'Customer',
+          customer_email: order.contact_email || 'no-reply@example.com',
+          customer_phone: order.contact_phone || '9999999999', // required by CF; may not have a real one on file
+        },
+        // {order_id} is a REQUIRED literal placeholder — Cashfree substitutes
+        // it on redirect. Only used for the post-payment redirect-back;
+        // client_fields.cashfree_payment_session_id is what actually mounts
+        // the checkout drop-in on our own /ecom-pay.html.
+        order_meta: { return_url: successUrl || null },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || `Cashfree order creation failed (${res.status})`);
+    if (!data.payment_session_id) throw new Error('No payment_session_id returned by Cashfree');
+    return {
+      provider_order_id: order.id, // = Cashfree's order_id, set above
+      checkout_url: null, // Cashfree Checkout JS mounts client-side via payment_session_id, same pattern as Razorpay
+      client_fields: {
+        cashfree_payment_session_id: data.payment_session_id,
+        cashfree_order_id: order.id,
+        cashfree_mode: isTestMode ? 'sandbox' : 'production',
+      },
+    };
+  }
+
+  async function verifyCashfreeOrder({ order }) {
+    const get = creds('cashfree');
+    const appId = get('APP_ID');
+    const secretKey = get('SECRET_KEY');
+    const res = await fetch(`${cashfreeBase()}/orders/${order.provider_order_id}`, {
+      headers: {
+        'x-api-version': CASHFREE_API_VERSION,
+        'x-client-id': appId,
+        'x-client-secret': secretKey,
+      },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Cashfree order lookup failed');
+    if (data.order_status === 'PAID') return 'paid';
+    if (data.order_status === 'EXPIRED' || data.order_status === 'TERMINATED') return 'failed';
+    return 'pending'; // ACTIVE / PENDING / etc.
+  }
+
+  // Cashfree webhooks are signed with the same client secret used for API
+  // calls (there's no separate webhook signing secret to generate, unlike
+  // Stripe/Razorpay): base64(HMAC-SHA256(timestamp + rawBody, secretKey)),
+  // compared against the x-webhook-signature header.
+  function verifyCashfreeWebhookSignature(rawBody, headers) {
+    const crypto = require('crypto');
+    const get = creds('cashfree');
+    const secretKey = get('SECRET_KEY');
+    const signature = headers['x-webhook-signature'];
+    const timestamp = headers['x-webhook-timestamp'];
+    if (!secretKey || !signature || !timestamp) return false;
+    const expected = crypto.createHmac('sha256', secretKey).update(timestamp + rawBody).digest('base64');
+    return expected === signature;
+  }
+
   // ─── Unified interface ───────────────────────────────────────────────────
   async function createCheckout({ provider, order, items, successUrl, cancelUrl }) {
     if (provider === 'razorpay') return createRazorpayOrder({ order, successUrl });
     if (provider === 'stripe') return createStripeSession({ order, items, successUrl, cancelUrl });
     if (provider === 'paypal') return createPaypalOrder({ order, items, successUrl, cancelUrl });
+    if (provider === 'cashfree') return createCashfreeOrder({ order, successUrl });
     throw new Error(`Unsupported payment provider: ${provider}`);
   }
 
@@ -244,6 +335,7 @@ module.exports = function createPaymentsModule({ supabase }) {
     if (order.provider === 'razorpay') return verifyRazorpayOrder({ order });
     if (order.provider === 'stripe') return verifyStripeSession({ order });
     if (order.provider === 'paypal') return verifyPaypalOrder({ order });
+    if (order.provider === 'cashfree') return verifyCashfreeOrder({ order });
     throw new Error(`Unsupported payment provider: ${order.provider}`);
   }
 
@@ -251,6 +343,7 @@ module.exports = function createPaymentsModule({ supabase }) {
     if (provider === 'razorpay') return verifyRazorpayWebhookSignature(rawBody, headers['x-razorpay-signature']);
     if (provider === 'stripe') return verifyStripeWebhookSignature(rawBody, headers['stripe-signature']);
     if (provider === 'paypal') return verifyPaypalWebhookSignature(rawBody, headers);
+    if (provider === 'cashfree') return verifyCashfreeWebhookSignature(rawBody, headers);
     return false;
   }
 

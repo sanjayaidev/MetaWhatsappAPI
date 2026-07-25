@@ -100,5 +100,23 @@ module.exports = function paymentsWebhookRouter(deps) {
     res.status(200).json({ ok: true });
   });
 
+  // Cashfree: unlike the other three, order_id in the payload IS our own
+  // wb_orders id directly (see createCashfreeOrder in payments.js), so no
+  // provider_order_id lookup is needed — order_id doubles as both.
+  router.post('/cashfree', async (req, res) => {
+    const valid = payments.verifyWebhookSignature('cashfree', req.rawBody, req.headers);
+    if (!valid) return res.status(400).json({ error: 'Invalid signature' });
+    const event = req.body;
+    const orderId = event.data?.order?.order_id;
+    if (!orderId) return res.status(200).json({ ok: true });
+
+    if (event.type === 'PAYMENT_SUCCESS_WEBHOOK') await handleEvent('cashfree', orderId, 'paid');
+    else if (event.type === 'PAYMENT_FAILED_WEBHOOK') await handleEvent('cashfree', orderId, 'failed');
+    // PAYMENT_USER_DROPPED_WEBHOOK deliberately left as 'pending' — the
+    // customer may still complete payment, and the fallback poller
+    // (src/payment-poller.js) will pick up the true final state either way.
+    res.status(200).json({ ok: true });
+  });
+
   return router;
 };

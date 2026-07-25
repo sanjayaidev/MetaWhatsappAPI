@@ -62,6 +62,8 @@ async function loadOrder() {
 
     if (data.order.provider === 'razorpay' && data.client_fields?.razorpay_order_id) {
       mountRazorpay(data);
+    } else if (data.order.provider === 'cashfree' && data.client_fields?.cashfree_payment_session_id) {
+      mountCashfree(data);
     } else if (returnedStatus) {
       // Came back from a Stripe/PayPal redirect — poll our own backend
       // (which itself verifies with the provider) rather than trusting the
@@ -90,6 +92,26 @@ function mountRazorpay(data) {
         modal: { ondismiss: () => {} },
       });
       rzp.open();
+    };
+  };
+  document.head.appendChild(script);
+}
+
+function mountCashfree(data) {
+  const script = document.createElement('script');
+  script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+  script.onload = () => {
+    const btn = document.getElementById('payBtn');
+    btn.style.display = 'block';
+    btn.onclick = () => {
+      const cashfree = Cashfree({ mode: data.client_fields.cashfree_mode === 'production' ? 'production' : 'sandbox' });
+      // redirectTarget "_modal" keeps the customer on this page in an overlay;
+      // Cashfree calls back into this same page's polling once it closes,
+      // rather than a full-page redirect like Razorpay's handler callback.
+      cashfree.checkout({
+        paymentSessionId: data.client_fields.cashfree_payment_session_id,
+        redirectTarget: '_modal',
+      }).then(() => { pollStatus(); });
     };
   };
   document.head.appendChild(script);

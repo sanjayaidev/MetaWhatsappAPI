@@ -21,7 +21,7 @@ module.exports = function billingRouter(deps) {
 
   router.post('/subscribe', verifyUser, async (req, res) => {
     const { provider, plan = 'crm_monthly' } = req.body || {};
-    if (!['razorpay', 'stripe', 'paypal'].includes(provider)) return res.status(400).json({ error: 'provider must be razorpay, stripe, or paypal' });
+    if (!['razorpay', 'stripe', 'paypal', 'cashfree'].includes(provider)) return res.status(400).json({ error: 'provider must be razorpay, stripe, paypal, or cashfree' });
     if (!PLANS[plan]) return res.status(400).json({ error: `Unknown plan: ${plan}` });
 
     const { data: pendingSub, error } = await supabase.from('wb_subscriptions')

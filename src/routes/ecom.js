@@ -107,7 +107,7 @@ module.exports = function ecomRouter(deps) {
   router.post('/checkout', async (req, res) => {
     const { channel, contact_id, provider, currency = 'INR', success_url, cancel_url } = req.body || {};
     if (!channel || !contact_id || !provider) return res.status(400).json({ error: 'channel, contact_id, and provider are required' });
-    if (!['razorpay', 'stripe', 'paypal'].includes(provider)) return res.status(400).json({ error: 'provider must be razorpay, stripe, or paypal' });
+    if (!['razorpay', 'stripe', 'paypal', 'cashfree'].includes(provider)) return res.status(400).json({ error: 'provider must be razorpay, stripe, paypal, or cashfree' });
 
     try {
       const { order, items } = await cart.checkoutCart(req.user.id, channel, contact_id, currency);
