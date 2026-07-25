@@ -70,6 +70,28 @@ const OAUTH_CONFIGS = {
 
 async function upsertConnection(supabase, userId, { platform, account_name, account_id, page_id, access_token, token_expires_at }) {
   const encryptedToken = encrypt(access_token);
+
+  // Enforce one active connection per user+platform. The unique constraint
+  // is (user_id, platform, account_id), which only dedupes when the SAME
+  // account_id reconnects. It does NOT catch the case where the same real
+  // account is reconnected via a different login path — e.g. Instagram via
+  // Facebook Login for Business gets one account_id, Instagram via Direct
+  // Instagram Login gets a different one for the same account — so without
+  // this, switching login methods silently leaves the old row behind,
+  // still marked is_connected=true, and getConnection()'s lookup can match
+  // the stale row (stale token, wrong host) instead of the new one.
+  // Deactivating every other connected row for this platform before the
+  // upsert guarantees at most one is_connected=true row per user+platform,
+  // regardless of which account_id it's keyed on.
+  const { error: deactivateErr } = await supabase
+    .from('smc_connections')
+    .update({ is_connected: false, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('platform', platform)
+    .eq('is_connected', true)
+    .neq('account_id', account_id);
+  if (deactivateErr) throw deactivateErr;
+
   const { data, error } = await supabase
     .from('smc_connections')
     .upsert({
