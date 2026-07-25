@@ -141,41 +141,75 @@ function router(supabase) {
       const rowsToUpsert = []; // { external_id, trigger_type, ... } ready for smc_automation_logs
 
       await Promise.all(connections.map(async (conn) => {
-        const token = decrypt(conn.access_token);
         const accountId = conn.account_id || conn.page_id;
 
+        const recordError = (scope, err) => {
+          const message = err.response?.data?.error?.message || err.message;
+          console.error(`⚠️  Live-fetch failed (${conn.platform}/${scope}, account ${accountId}): ${message}`);
+          errors.push({ platform: conn.platform, account_id: accountId, scope, message });
+        };
+
+        let token;
         try {
-          if (conn.platform === 'facebook') {
-            const pageId = conn.page_id || conn.account_id;
-            const [comments, convos] = await Promise.all([
-              facebook.listRecentComments(token, pageId, postLimit),
-              facebook.listConversations(token, pageId, dmLimit).catch(err => {
-                // Most common failure here: pages_messaging not yet granted/approved.
-                errors.push({ platform: 'facebook', account_id: accountId, scope: 'dm', message: err.response?.data?.error?.message || err.message });
-                return [];
-              }),
-            ]);
-            comments.forEach(c => rowsToUpsert.push(toLogRow('facebook', 'comment', accountId, c)));
-            convos.forEach(m => rowsToUpsert.push(toLogRow('facebook', 'dm', accountId, m)));
-          } else if (conn.platform === 'instagram') {
-            const igId = conn.account_id;
-            const [comments, convos] = await Promise.all([
-              instagram.listRecentComments(token, igId, postLimit, conn),
-              instagram.listConversations(token, igId, dmLimit, conn).catch(err => {
-                // Most common failure here: instagram_manage_messages / pages_messaging not yet granted/approved.
-                errors.push({ platform: 'instagram', account_id: accountId, scope: 'dm', message: err.response?.data?.error?.message || err.message });
-                return [];
-              }),
-            ]);
-            comments.forEach(c => rowsToUpsert.push(toLogRow('instagram', 'comment', accountId, c)));
-            convos.forEach(m => rowsToUpsert.push(toLogRow('instagram', 'dm', accountId, m)));
-          } else if (conn.platform === 'threads') {
+          token = decrypt(conn.access_token);
+        } catch (err) {
+          // A single connection's token failing to decrypt used to abort
+          // Promise.all entirely, discarding every other platform's
+          // in-flight results — that's what could make a working platform
+          // (e.g. Facebook) come back empty too if an unrelated IG/Threads
+          // connection had a bad token. Caught here so it only affects
+          // this one connection.
+          recordError('token', err);
+          return;
+        }
+
+        if (conn.platform === 'facebook') {
+          const pageId = conn.page_id || conn.account_id;
+          // Comments and DMs are fetched independently — Promise.allSettled
+          // (not Promise.all) so a failure in one (e.g. DMs failing because
+          // pages_messaging isn't approved yet) can't also wipe out the
+          // other, which Promise.all would do since a single rejection
+          // fails the whole combined promise.
+          const [commentsRes, convosRes] = await Promise.allSettled([
+            facebook.listRecentComments(token, pageId, postLimit),
+            facebook.listConversations(token, pageId, dmLimit),
+          ]);
+          if (commentsRes.status === 'fulfilled') {
+            commentsRes.value.forEach(c => rowsToUpsert.push(toLogRow('facebook', 'comment', accountId, c)));
+          } else {
+            recordError('comments', commentsRes.reason);
+          }
+          if (convosRes.status === 'fulfilled') {
+            convosRes.value.forEach(m => rowsToUpsert.push(toLogRow('facebook', 'dm', accountId, m)));
+          } else {
+            // Most common failure here: pages_messaging not yet granted/approved.
+            recordError('dm', convosRes.reason);
+          }
+        } else if (conn.platform === 'instagram') {
+          const igId = conn.account_id;
+          const [commentsRes, convosRes] = await Promise.allSettled([
+            instagram.listRecentComments(token, igId, postLimit, conn),
+            instagram.listConversations(token, igId, dmLimit, conn),
+          ]);
+          if (commentsRes.status === 'fulfilled') {
+            commentsRes.value.forEach(c => rowsToUpsert.push(toLogRow('instagram', 'comment', accountId, c)));
+          } else {
+            recordError('comments', commentsRes.reason);
+          }
+          if (convosRes.status === 'fulfilled') {
+            convosRes.value.forEach(m => rowsToUpsert.push(toLogRow('instagram', 'dm', accountId, m)));
+          } else {
+            // Most common failure here: instagram_manage_messages / pages_messaging not yet granted/approved.
+            recordError('dm', convosRes.reason);
+          }
+        } else if (conn.platform === 'threads') {
+          try {
             const comments = await threads.listRecentComments(token, conn.account_id, postLimit);
             comments.forEach(c => rowsToUpsert.push(toLogRow('threads', 'comment', accountId, c)));
             // Threads has no DM/messaging API — intentionally nothing to fetch here.
+          } catch (err) {
+            recordError('comments', err);
           }
-        } catch (err) {
-          errors.push({ platform: conn.platform, account_id: accountId, scope: 'comments', message: err.response?.data?.error?.message || err.message });
         }
       }));
 

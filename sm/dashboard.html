@@ -2706,10 +2706,25 @@
                 livePlatforms.map(p => apiFetch(`/sm/api/comments/live?platform=${p}`).then(r => r.json()).catch(() => null))
             );
             // Surface any per-platform fetch errors (e.g. missing pages_messaging
-            // permission for DMs) without blocking the rest of the refresh.
+            // permission for DMs, or a comment-fetch failure on one platform)
+            // so they don't disappear silently — a platform coming back
+            // empty is not the same as "no comments/DMs exist".
             const liveErrors = liveResults.filter(Boolean).flatMap(r => r.errors || []);
             if (liveErrors.length > 0) {
                 console.warn('Some accounts failed to live-refresh:', liveErrors);
+                const banner = document.getElementById('inboxLiveErrors') || (() => {
+                    const el = document.createElement('div');
+                    el.id = 'inboxLiveErrors';
+                    el.style.cssText = 'padding:8px 10px;margin-bottom:8px;border-radius:var(--radius-sm);background:rgba(220,53,69,0.1);color:var(--error);font-size:12px;';
+                    document.getElementById(`inbox-${activeTab}`)?.prepend(el);
+                    return el;
+                })();
+                banner.innerHTML = liveErrors.map(e =>
+                    `<div><strong>${e.platform}</strong> (${e.scope}): ${escapeHtml(e.message || 'unknown error')}</div>`
+                ).join('');
+                banner.style.display = 'block';
+            } else {
+                document.getElementById('inboxLiveErrors')?.remove();
             }
         } catch (err) {
             console.error('Live refresh failed, showing cached inbox instead:', err);
