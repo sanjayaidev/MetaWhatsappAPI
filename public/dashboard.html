@@ -304,7 +304,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="tab-panel" id="tab-received">
 <div class="page-header"><div class="page-title">Received Messages</div><div class="page-sub">Incoming WhatsApp messages from your contacts, via webhook</div></div>
 <div class="card">
-<div class="card-header"><div class="card-title">📥 Inbox</div><div style="display:flex;gap:8px;"><button class="btn btn-ghost btn-sm" onclick="markReceivedRead()">✓ Mark all read</button><button class="btn btn-ghost btn-sm" onclick="loadReceivedMessages()">↻ Refresh</button></div></div>
+<div class="card-header"><div class="card-title">📥 Inbox</div><div style="display:flex;gap:8px;"><button class="btn btn-ghost btn-sm" onclick="markReceivedRead()">✓ Mark all read</button><button class="btn btn-ghost btn-sm" onclick="loadReceivedMessages()">↻ Refresh</button><button class="btn btn-secondary btn-sm" onclick="window.location.href='/mobile.html'">📱 Open Mobile View</button></div></div>
 <div id="receivedMessagesList"><div class="empty-state"><div class="empty-icon">📥</div><p>No messages received yet</p></div></div>
 </div>
 </div>
@@ -1402,7 +1402,7 @@ const REPLY_WINDOW_HOURS = 22;
 let replyTargetPhone = null;
 
 async function loadReceivedMessages() {
-  const res = await apiCall('/api/messages/received');
+  const res = await apiCall('/api/messages/received?limit=500');
   const container = document.getElementById('receivedMessagesList');
   const badge = document.getElementById('receivedUnreadBadge');
   if (!res.success) return;
@@ -1410,7 +1410,20 @@ async function loadReceivedMessages() {
     if (res.unread > 0) { badge.style.display = ''; badge.textContent = res.unread > 99 ? '99+' : res.unread; }
     else badge.style.display = 'none';
   }
-  const messages = res.messages || [];
+  // The shared /api/messages/received endpoint returns the full in+out
+  // thread — mobile.html needs both directions to build its conversation
+  // view, so that endpoint stays as-is. Here we only want inbound messages,
+  // one row per unique contact (their most recent message), so filter and
+  // dedup client-side. Messages already arrive newest-first from the
+  // server, so keeping the first occurrence per phone keeps the latest one.
+  const seenPhones = new Set();
+  const messages = (res.messages || [])
+    .filter(m => m.direction !== 'out')
+    .filter(m => {
+      if (seenPhones.has(m.phone)) return false;
+      seenPhones.add(m.phone);
+      return true;
+    });
   if (!container) return;
   if (!messages.length) { container.innerHTML = '<div class="empty-state"><div class="empty-icon">📥</div><p>No messages received yet</p></div>'; return; }
   container.innerHTML = `<div class="table-wrap"><table><thead><tr><th>From</th><th>Type</th><th>Message</th><th>Received</th><th></th></tr></thead><tbody>${messages.map(m => {
