@@ -489,6 +489,7 @@
             max-width: 40px;
         }
         .step-indicator .line.done { background: var(--success); }
+        .step-indicator .step.skipped { opacity: 0.4; text-decoration: line-through; }
 
         .auto-step { display: none; animation: fadeUp 0.3s ease; }
         .auto-step.active { display: block; }
@@ -936,9 +937,9 @@
                     <div class="step-indicator" id="stepIndicator">
                         <div class="step active" data-step="1"><span class="num">1</span> Platform</div>
                         <div class="line"></div>
-                        <div class="step" data-step="2"><span class="num">2</span> Scope</div>
+                        <div class="step" data-step="2"><span class="num">2</span> Trigger</div>
                         <div class="line"></div>
-                        <div class="step" data-step="3"><span class="num">3</span> Trigger</div>
+                        <div class="step" data-step="3" id="scopeIndicatorStep"><span class="num">3</span> Scope</div>
                         <div class="line"></div>
                         <div class="step" data-step="4"><span class="num">4</span> Response</div>
                         <div class="line"></div>
@@ -971,13 +972,45 @@
                             </div>
                         </div>
                         <div class="flex" style="justify-content:flex-end; margin-top:16px;">
-                            <button class="btn btn-primary step-next">Next: Scope <i class="fas fa-arrow-right"></i></button>
+                            <button class="btn btn-primary step-next">Next: Trigger <i class="fas fa-arrow-right"></i></button>
                         </div>
                     </div>
 
-                    <!-- Step 2: Choose Post Scope -->
+                    <!-- Step 2: Choose Trigger Keyword -->
                     <div class="auto-step" data-step="2">
-                        <p class="text-muted mb-2">Should this automation apply to specific posts or all future posts?</p>
+                        <p class="text-muted mb-2">What keywords should trigger this automation?</p>
+                        <div><label>Keywords (comma separated)</label>
+                            <input type="text" placeholder="e.g. price, discount, support, how much" id="kwInput" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;">
+                        </div>
+                        <div style="margin-top:16px;">
+                            <label>Trigger Type</label>
+                            <select id="autoTrigger" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;">
+                                <option value="comment">Comment Only</option>
+                                <option value="dm">DM Only</option>
+                                <option value="both">Comment & DM</option>
+                            </select>
+                            <small class="text-muted" id="dmScopeNote" style="display:none;margin-top:6px;">DM-only automations aren't tied to a post — they'll fire on keyword match from any direct message, so there's no post-scope step for this trigger.</small>
+                        </div>
+                        <div style="margin-top:16px;">
+                            <label>Reply Location</label>
+                            <select id="replyLocation" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;">
+                                <option value="comment">Reply in Comment</option>
+                                <option value="dm">Reply via DM</option>
+                                <option value="both">Both Comment + DM</option>
+                            </select>
+                        </div>
+                        <div class="flex" style="justify-content:space-between; flex-wrap:wrap; margin-top:16px;">
+                            <button class="btn btn-outline step-prev"><i class="fas fa-arrow-left"></i> Back</button>
+                            <button class="btn btn-primary step-next" id="triggerStepNextBtn">Next: Scope <i class="fas fa-arrow-right"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Choose Post Scope (skipped entirely for DM-only triggers) -->
+                    <div class="auto-step" data-step="3">
+                        <p class="text-muted mb-2" id="scopeIntroText">Should this automation apply to specific posts or all future posts?</p>
+                        <div class="text-muted mb-2" id="bothScopeNote" style="display:none;padding:10px 12px;background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);">
+                            <i class="fas fa-circle-info"></i> This applies to <strong>comment replies only</strong> — DM replies on this automation will fire on keyword match regardless of which post the DM sender came from.
+                        </div>
                         <div class="auto-type-grid" id="scopeSelectGrid">
                             <div class="auto-type-card selected" data-scope="all">
                                 <div class="icon"><i class="fas fa-infinity"></i></div>
@@ -996,34 +1029,6 @@
                             <small class="text-muted">Choose the single post this automation should monitor</small>
                         </div>
 
-                        <div class="flex" style="justify-content:space-between; flex-wrap:wrap; margin-top:16px;">
-                            <button class="btn btn-outline step-prev"><i class="fas fa-arrow-left"></i> Back</button>
-                            <button class="btn btn-primary step-next">Next: Trigger <i class="fas fa-arrow-right"></i></button>
-                        </div>
-                    </div>
-
-                    <!-- Step 3: Choose Trigger Keyword -->
-                    <div class="auto-step" data-step="3">
-                        <p class="text-muted mb-2">What keywords should trigger this automation?</p>
-                        <div><label>Keywords (comma separated)</label>
-                            <input type="text" placeholder="e.g. price, discount, support, how much" id="kwInput" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;">
-                        </div>
-                        <div style="margin-top:16px;">
-                            <label>Trigger Type</label>
-                            <select id="autoTrigger" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;">
-                                <option value="comment">Comment Only</option>
-                                <option value="dm">DM Only</option>
-                                <option value="both">Comment & DM</option>
-                            </select>
-                        </div>
-                        <div style="margin-top:16px;">
-                            <label>Reply Location</label>
-                            <select id="replyLocation" style="padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-family:inherit;font-size:14px;width:100%;">
-                                <option value="comment">Reply in Comment</option>
-                                <option value="dm">Reply via DM</option>
-                                <option value="both">Both Comment + DM</option>
-                            </select>
-                        </div>
                         <div class="flex" style="justify-content:space-between; flex-wrap:wrap; margin-top:16px;">
                             <button class="btn btn-outline step-prev"><i class="fas fa-arrow-left"></i> Back</button>
                             <button class="btn btn-primary step-next">Next: Response <i class="fas fa-arrow-right"></i></button>
@@ -1779,6 +1784,7 @@
         // Step 3: Set trigger and keywords
         document.getElementById('autoTrigger').value = a.type || 'comment';
         updateResponseBlocksForTrigger();
+        updateScopeUiForTrigger();
         document.getElementById('kwInput').value = (a.keywords || []).join(', ');
         
         // Step 4: Set response type and data
@@ -2131,18 +2137,63 @@
         currentStep = step;
     }
 
+    // Scope (step 3) only makes sense when the trigger includes a comment —
+    // DM Only automations aren't tied to any post, so there's nothing to scope.
+    function triggerIsDmOnly() {
+        return document.getElementById('autoTrigger').value === 'dm';
+    }
+
     document.querySelectorAll('.step-next').forEach(btn => {
         btn.addEventListener('click', () => {
-            const next = currentStep + 1;
+            let next = currentStep + 1;
+            if (next === 3 && triggerIsDmOnly()) next = 4; // skip Scope for DM-only
             if (next <= 5) showStep(next);
         });
     });
     document.querySelectorAll('.step-prev').forEach(btn => {
         btn.addEventListener('click', () => {
-            const prev = currentStep - 1;
+            let prev = currentStep - 1;
+            if (prev === 3 && triggerIsDmOnly()) prev = 2; // skip Scope going back too
             if (prev >= 1) showStep(prev);
         });
     });
+
+    // Keep the Trigger step's "Next" label, the Scope step's intro copy, and
+    // the "both" clarifying note all in sync with the selected trigger type.
+    function updateScopeUiForTrigger() {
+        const trigger = document.getElementById('autoTrigger').value;
+        const isDm = trigger === 'dm';
+        const isBoth = trigger === 'both';
+
+        const nextBtn = document.getElementById('triggerStepNextBtn');
+        if (nextBtn) {
+            nextBtn.innerHTML = isDm
+                ? 'Next: Response <i class="fas fa-arrow-right"></i>'
+                : 'Next: Scope <i class="fas fa-arrow-right"></i>';
+        }
+
+        const dmNote = document.getElementById('dmScopeNote');
+        if (dmNote) dmNote.style.display = isDm ? 'block' : 'none';
+
+        const bothNote = document.getElementById('bothScopeNote');
+        if (bothNote) bothNote.style.display = isBoth ? 'block' : 'none';
+
+        const scopeIndicator = document.getElementById('scopeIndicatorStep');
+        if (scopeIndicator) scopeIndicator.classList.toggle('skipped', isDm);
+
+        // DM-only never sets target_published_ids — if scope was previously
+        // set to "specific" (e.g. user switched from Comment/Both), reset it
+        // to "all" so no stale post-targeting sneaks into the submitted data.
+        if (isDm) {
+            document.querySelectorAll('#scopeSelectGrid .auto-type-card').forEach(c => c.classList.remove('selected'));
+            const allCard = document.querySelector('#scopeSelectGrid .auto-type-card[data-scope="all"]');
+            if (allCard) allCard.classList.add('selected');
+            document.getElementById('specificPostSelector').style.display = 'none';
+            selectedAutomationPostIdsByPlatform = {};
+        }
+    }
+    document.getElementById('autoTrigger').addEventListener('change', updateScopeUiForTrigger);
+    updateScopeUiForTrigger();
 
     // Add variation — capped at 3 total (the base Reply Message counts as the
     // first one, so at most 2 extra variation boxes here).
@@ -2193,7 +2244,9 @@
         document.getElementById('reviewName').textContent = name;
         document.getElementById('reviewPlatform').textContent = selectedPlatformsForReview
             .map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ') || '(none selected)';
-        if (scope === 'all') {
+        if (trigger === 'dm') {
+            document.getElementById('reviewScope').textContent = 'N/A — DM-only, fires on keyword match regardless of post';
+        } else if (scope === 'all') {
             document.getElementById('reviewScope').textContent = 'All Future Posts';
         } else {
             // For specific scope, show per-platform post selections
@@ -2210,7 +2263,9 @@
                     return `${p}: "${targetPost ? targetPost.title : 'Unknown'}"`;
                 }
             });
-            document.getElementById('reviewScope').textContent = platformLabels.join(' | ');
+            let scopeText = platformLabels.join(' | ');
+            if (trigger === 'both') scopeText += ' (comment replies only — DMs are unscoped)';
+            document.getElementById('reviewScope').textContent = scopeText;
         }
         document.getElementById('reviewTrigger').textContent = trigger.charAt(0).toUpperCase() + trigger.slice(1);
         document.getElementById('reviewKeywords').textContent = keywords;

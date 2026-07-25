@@ -24,8 +24,12 @@ function findMatch(automations, { platform, triggerType, text, mediaId }) {
     // referenced target_published_ids from inside its own "is empty" case,
     // which meant it always evaluated to "no target" and silently rejected
     // every trigger for scoped automations lacking recorded published ids.
+    //
+    // Post-ID scoping only ever applies to the comment trigger. A DM has no
+    // post to scope to, so a DM trigger — including the DM half of a 'both'
+    // automation — always fires on keyword match regardless of target_published_ids.
     const targetId = (a.target_published_ids || {})[platform];
-    if (targetId) {
+    if (targetId && triggerType === 'comment') {
       if (!mediaId || String(targetId) !== String(mediaId)) return false;
     }
     const keywords = a.keywords || [];
