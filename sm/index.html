@@ -243,7 +243,7 @@
 </div>
 
 <script>
-    const API_BASE = '/api/auth';
+    const API_BASE = '/sm/api/auth';
 
     function showError(msg) {
         const el = document.getElementById('error-message');
@@ -289,7 +289,7 @@
                     localStorage.setItem('auth_token', data.token);
                 }
                 setTimeout(() => {
-                    window.location.href = '/dashboard.html';
+                    window.location.href = '/sm/dashboard';
                 }, 1000);
             } else {
                 showError(data.error || 'Login failed');
@@ -319,7 +319,7 @@
                     localStorage.setItem('auth_token', data.token);
                 }
                 setTimeout(() => {
-                    window.location.href = '/dashboard.html';
+                    window.location.href = '/sm/dashboard';
                 }, 1000);
             } else {
                 showError(data.error || 'Registration failed');
@@ -340,7 +340,7 @@
                     headers: { 'Authorization': `Bearer ${token}` }
                 });
                 if (res.ok) {
-                    window.location.href = '/dashboard.html';
+                    window.location.href = '/sm/dashboard';
                 } else {
                     // Token invalid, clear it
                     localStorage.removeItem('auth_token');

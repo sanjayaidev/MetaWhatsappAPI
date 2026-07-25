@@ -376,20 +376,20 @@ function oauthRouter(supabase) {
     const { code, state, error, error_description } = req.query;
 
     if (error) {
-      return res.redirect(`/dashboard.html?conn_error=${encodeURIComponent(error_description || error)}`);
+      return res.redirect(`/sm/dashboard?conn_error=${encodeURIComponent(error_description || error)}`);
     }
     if (!config || !code || !state) {
-      return res.redirect('/dashboard.html?conn_error=Missing+authorization+code');
+      return res.redirect('/sm/dashboard?conn_error=Missing+authorization+code');
     }
 
     let payload;
     try {
       payload = jwt.verify(state, JWT_SECRET);
     } catch {
-      return res.redirect('/dashboard.html?conn_error=Login+session+expired%2C+please+try+again');
+      return res.redirect('/sm/dashboard?conn_error=Login+session+expired%2C+please+try+again');
     }
     if (payload.platform !== platform) {
-      return res.redirect('/dashboard.html?conn_error=State+mismatch');
+      return res.redirect('/sm/dashboard?conn_error=State+mismatch');
     }
 
     const redirectUri = `${APP_BASE_URL}/api/connections/${platform}/callback`;
@@ -398,10 +398,10 @@ function oauthRouter(supabase) {
       if (saved && saved.needsPageSelection) {
         return res.send(renderPagePickerHtml(saved.pages, saved.selectionToken));
       }
-      res.redirect(`/dashboard.html?connected=${encodeURIComponent(saved.platform)}`);
+      res.redirect(`/sm/dashboard?connected=${encodeURIComponent(saved.platform)}`);
     } catch (err) {
       const message = err.response ? JSON.stringify(err.response.data) : err.message;
-      res.redirect(`/dashboard.html?conn_error=${encodeURIComponent(message)}`);
+      res.redirect(`/sm/dashboard?conn_error=${encodeURIComponent(message)}`);
     }
   });
 
@@ -462,7 +462,7 @@ function oauthRouter(supabase) {
     }
     try {
       const saved = await finishFacebookPage(supabase, payload.sub, page, payload.expiresAt ? new Date(payload.expiresAt) : null);
-      res.json({ redirect: `/dashboard.html?connected=${encodeURIComponent(saved.platform)}` });
+      res.json({ redirect: `/sm/dashboard?connected=${encodeURIComponent(saved.platform)}` });
     } catch (err) {
       res.status(500).json({ error: err.response ? JSON.stringify(err.response.data) : err.message });
     }

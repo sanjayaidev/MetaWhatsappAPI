@@ -43,6 +43,7 @@ const createPaymentsModule = require('./src/payments');
 const ecomMessages = require('./src/ecom/messages');
 const { matchRule } = require('./src/routes/bot-engine');
 const { startSheetPoller } = require('./src/sheet-poller');
+const { startPaymentPoller } = require('./src/payment-poller');
 const createChannelSender = require('./src/channel-send');
 
 // --- Social Manager (sm/) integration ---------------------------------
@@ -2763,14 +2764,39 @@ app.use('/api/billing', billingRouter(crmDeps));
 // needs to render/poll a checkout: no contact info, no merchant data.
 // Registered before the verifyUser-gated /api/ecom mount below so it isn't
 // swallowed by it.
+//
+// While status is still 'pending' and a provider checkout has actually been
+// started, this also re-verifies directly with the provider on every poll
+// (same on-demand check as the authenticated /api/ecom/orders/:id/status
+// route) rather than only reflecting whatever the webhook already wrote —
+// so a customer sitting on ecom-pay.html gets a real fallback check even if
+// the webhook is delayed or never arrives, without needing a login session.
 app.get('/api/ecom/orders/:id/public', async (req, res) => {
   const { data: order, error } = await supabase.from('wb_orders')
-    .select('id, amount, currency, status, provider, provider_order_id').eq('id', req.params.id).single();
+    .select('id, user_id, channel, contact_id, amount, currency, status, provider, provider_order_id').eq('id', req.params.id).single();
   if (error || !order) return res.status(404).json({ error: 'Order not found' });
-  const client_fields = order.provider === 'razorpay' && order.provider_order_id
-    ? { razorpay_order_id: order.provider_order_id, razorpay_key_id: process.env.RAZORPAY_TEST_KEY_ID || process.env.RAZORPAY_KEY_ID }
+
+  let liveOrder = order;
+  if (order.status === 'pending' && order.provider_order_id) {
+    try {
+      const status = await ecomPayments.verifyPayment({ order });
+      if (status !== 'pending') {
+        liveOrder = await ecomPayments.markOrderStatus(order.id, status);
+      }
+    } catch (err) {
+      // Provider lookup failed (rate limit, transient error, etc.) — fall
+      // back to the last-known DB status rather than failing the whole request.
+      console.error(`Public order status check failed for order ${order.id}:`, err.message);
+    }
+  }
+
+  const client_fields = liveOrder.provider === 'razorpay' && liveOrder.provider_order_id
+    ? { razorpay_order_id: liveOrder.provider_order_id, razorpay_key_id: process.env.RAZORPAY_TEST_KEY_ID || process.env.RAZORPAY_KEY_ID }
     : {};
-  res.json({ order, client_fields });
+  res.json({
+    order: { id: liveOrder.id, amount: liveOrder.amount, currency: liveOrder.currency, status: liveOrder.status, provider: liveOrder.provider, provider_order_id: liveOrder.provider_order_id },
+    client_fields,
+  });
 });
 app.use('/api/ecom', verifyUser, ecomRouter(crmDeps));
 // Public — payment providers call this directly with no user session.
@@ -2828,6 +2854,9 @@ startSheetPoller({
   fetch,
   sendChannelMessage: createChannelSender(crmDeps)
 });
+
+// Fallback for missed/delayed payment webhooks — see src/payment-poller.js.
+startPaymentPoller(crmDeps);
 
 // ================================================================
 // 16. API KEY MANAGEMENT ROUTES

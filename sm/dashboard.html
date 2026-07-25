@@ -655,13 +655,13 @@
 <!-- ===== SIDEBAR ===== -->
 <nav class="sidebar" id="sidebar">
     <div class="logo"><i class="fas fa-calendar-alt"></i> <span>Planner</span></div>
-    <a href="/dashboard" class="nav-item active" data-tab="scheduler"><i class="fas fa-calendar-day"></i> Scheduler</a>
-    <a href="/dashboard" class="nav-item" data-tab="inbox"><i class="fas fa-inbox"></i> Inbox <span class="badge" id="inboxBadge">0</span></a>
-    <a href="/dashboard" class="nav-item" data-tab="connections"><i class="fas fa-link"></i> Connections</a>
-    <a href="/dashboard" class="nav-item" data-tab="automation"><i class="fas fa-bolt"></i> Automation</a>
-    <a href="/insights" class="nav-item"><i class="fas fa-chart-line"></i> Insights</a>
-    <a href="/dashboard" class="nav-item" data-tab="profile"><i class="fas fa-user"></i> Profile</a>
-    <a href="/dashboard" class="nav-item" data-tab="settings"><i class="fas fa-sliders-h"></i> Settings</a>
+    <a href="/sm/dashboard" class="nav-item active" data-tab="scheduler"><i class="fas fa-calendar-day"></i> Scheduler</a>
+    <a href="/sm/dashboard" class="nav-item" data-tab="inbox"><i class="fas fa-inbox"></i> Inbox <span class="badge" id="inboxBadge">0</span></a>
+    <a href="/sm/dashboard" class="nav-item" data-tab="connections"><i class="fas fa-link"></i> Connections</a>
+    <a href="/sm/dashboard" class="nav-item" data-tab="automation"><i class="fas fa-bolt"></i> Automation</a>
+    <a href="/sm/insights" class="nav-item"><i class="fas fa-chart-line"></i> Insights</a>
+    <a href="/sm/dashboard" class="nav-item" data-tab="profile"><i class="fas fa-user"></i> Profile</a>
+    <a href="/sm/dashboard" class="nav-item" data-tab="settings"><i class="fas fa-sliders-h"></i> Settings</a>
     <div class="sidebar-footer">
         <div class="nav-item" id="logoutBtn" style="margin-bottom:8px;"><i class="fas fa-sign-out-alt"></i> Log out</div>
                 <a href="/about" style="color:var(--text-muted);font-size:11px;text-decoration:none;margin-right:8px;">About</a>
@@ -1293,7 +1293,7 @@
         });
         if (res.status === 401) {
             localStorage.removeItem('auth_token');
-            window.location.href = '/';
+            window.location.href = '/sm';
             return null;
         }
         return res;
@@ -1330,7 +1330,7 @@
     }
 
     async function loadPosts() {
-        const res = await apiFetch('/api/posts');
+        const res = await apiFetch('/sm/api/posts');
         if (res && res.ok) {
             posts = await res.json();
             renderCalendar();
@@ -1506,13 +1506,13 @@
 
     async function deletePost(id) {
         if (!confirm('Delete this post?')) return;
-        const res = await apiFetch(`/api/posts/${id}`, { method: 'DELETE' });
+        const res = await apiFetch(`/sm/api/posts/${id}`, { method: 'DELETE' });
         if (res && res.ok) await loadPosts();
     }
 
     async function publishPostNow(id) {
         if (!confirm('Publish this post now?')) return;
-        const res = await apiFetch(`/api/posts/${id}/publish-now`, { method: 'POST' });
+        const res = await apiFetch(`/sm/api/posts/${id}/publish-now`, { method: 'POST' });
         if (res && res.ok) {
             await loadPosts();
         } else if (res) {
@@ -1620,7 +1620,7 @@
             try {
                 const formData = new FormData();
                 formData.append('file', fileInput.files[0]);
-                const uploadRes = await apiFetch('/api/media/upload', { method: 'POST', body: formData });
+                const uploadRes = await apiFetch('/sm/api/media/upload', { method: 'POST', body: formData });
                 if (uploadRes && uploadRes.ok) {
                     const uploaded = await uploadRes.json();
                     currentMediaUrl = uploaded.media_url;
@@ -1655,7 +1655,7 @@
             media_url: currentMediaUrl,
             google_drive_file_id: currentDriveFileId
         };
-        const url = editingPostId ? `/api/posts/${editingPostId}` : '/api/posts';
+        const url = editingPostId ? `/sm/api/posts/${editingPostId}` : '/sm/api/posts';
         const method = editingPostId ? 'PUT' : 'POST';
         const res = await apiFetch(url, {
             method,
@@ -2028,8 +2028,8 @@
         list.innerHTML = '<div class="text-muted" style="padding:8px;"><i class="fas fa-spinner fa-spin"></i> Loading posts...</div>';
         try {
             const [localRes, remoteRes] = await Promise.all([
-                apiFetch('/api/posts'),
-                apiFetch('/api/posts/remote')
+                apiFetch('/sm/api/posts'),
+                apiFetch('/sm/api/posts/remote')
             ]);
             if (localRes && localRes.ok) {
                 posts = await localRes.json();
@@ -2253,7 +2253,7 @@
                         // so it has no local `posts` row yet — create one now so we can reference it.
                         const [, rPlatform, rId] = selectedValue.split(':');
                         const remotePost = remotePostsForAutomation.find(rp => rp.platform === rPlatform && String(rp.remote_id) === rId);
-                        const importRes = await apiFetch('/api/posts/import', {
+                        const importRes = await apiFetch('/sm/api/posts/import', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -2396,7 +2396,7 @@
         };
         
         // If editing an existing automation, use PUT; otherwise use POST
-        const url = editingAutomationId ? `/api/automations/${editingAutomationId}` : '/api/automations';
+        const url = editingAutomationId ? `/sm/api/automations/${editingAutomationId}` : '/sm/api/automations';
         const method = editingAutomationId ? 'PUT' : 'POST';
         
         const res = await apiFetch(url, {
@@ -2417,7 +2417,7 @@
     // AUTOMATIONS: LOAD & RENDER
     // ============================================================
     async function loadAutomations() {
-        const res = await apiFetch('/api/automations');
+        const res = await apiFetch('/sm/api/automations');
         if (res && res.ok) {
             automations = await res.json();
             renderAutomations();
@@ -2469,13 +2469,13 @@
     }
 
     async function toggleAutomation(id) {
-        const res = await apiFetch(`/api/automations/${id}/toggle`, { method: 'PATCH' });
+        const res = await apiFetch(`/sm/api/automations/${id}/toggle`, { method: 'PATCH' });
         if (res && res.ok) await loadAutomations();
     }
 
     async function deleteAutomation(id) {
         if (!confirm('Delete this automation?')) return;
-        const res = await apiFetch(`/api/automations/${id}`, { method: 'DELETE' });
+        const res = await apiFetch(`/sm/api/automations/${id}`, { method: 'DELETE' });
         if (res && res.ok) await loadAutomations();
     }
 
@@ -2493,7 +2493,7 @@
 
     async function loadConnections() {
         // Only update the status of existing static cards based on connection state
-        const res = await apiFetch('/api/connections').catch(() => null);
+        const res = await apiFetch('/sm/api/connections').catch(() => null);
         if (res && res.ok) {
             connections = await res.json();
         } else {
@@ -2539,17 +2539,17 @@
     // Real OAuth connect: this is a full-page redirect (not a fetch), so the
     // browser lands on Facebook/Google/etc.'s own login+consent screen, using
     // that platform's own App ID/Secret configured server-side, then bounces
-    // back to /api/connections/:platform/callback which saves the connection
+    // back to /sm/api/connections/:platform/callback which saves the connection
     // and redirects here again with ?connected=<platform> or ?conn_error=...
     function connectPlatform(platform) {
         const token = localStorage.getItem('auth_token') || '';
-        const url = `/api/connections/${platform}/authorize` + (token ? `?token=${encodeURIComponent(token)}` : '');
+        const url = `/sm/api/connections/${platform}/authorize` + (token ? `?token=${encodeURIComponent(token)}` : '');
         window.location.href = url;
     }
 
     async function disconnectPlatform(id) {
         if (!confirm('Disconnect this account?')) return;
-        const res = await apiFetch(`/api/connections/${id}`, { method: 'DELETE' });
+        const res = await apiFetch(`/sm/api/connections/${id}`, { method: 'DELETE' });
         if (res && res.ok) await loadConnections();
     }
 
@@ -2567,7 +2567,7 @@
             params.delete('connected');
             params.delete('conn_error');
             const rest = params.toString();
-            window.history.replaceState({}, '', rest ? `/dashboard.html?${rest}` : '/dashboard.html');
+            window.history.replaceState({}, '', rest ? `/sm/dashboard?${rest}` : '/sm/dashboard');
             document.querySelector('.nav-item[data-tab="connections"]').click();
         }
     }
@@ -2581,7 +2581,7 @@
     
     async function loadAiModels() {
         try {
-            const res = await apiFetch('/api/ai/models');
+            const res = await apiFetch('/sm/api/ai/models');
             if (res && res.ok) {
                 const data = await res.json();
                 // Handle both array response and object with models property
@@ -2624,7 +2624,7 @@
     
     async function loadUserProfile() {
         try {
-            const res = await apiFetch('/api/auth/me');
+            const res = await apiFetch('/sm/api/auth/me');
             if (res && res.ok) {
                 const data = await res.json();
                 const user = data.user;
@@ -2650,10 +2650,10 @@
 
     async function checkAuthAndInit() {
         const token = localStorage.getItem('auth_token');
-        const res = await fetch('/api/auth/me', { credentials: 'include', headers: authHeaders() });
+        const res = await fetch('/sm/api/auth/me', { credentials: 'include', headers: authHeaders() });
         if (!res.ok) {
             localStorage.removeItem('auth_token');
-            window.location.href = '/';
+            window.location.href = '/sm';
             return;
         }
         const data = await res.json();
@@ -2666,9 +2666,9 @@
     }
 
     document.getElementById('logoutBtn').addEventListener('click', async () => {
-        await apiFetch('/api/auth/logout', { method: 'POST' });
+        await apiFetch('/sm/api/auth/logout', { method: 'POST' });
         localStorage.removeItem('auth_token');
-        window.location.href = '/';
+        window.location.href = '/sm';
     });
 
     // ============================================================
@@ -2753,7 +2753,7 @@
         const container = document.getElementById('fbCommentsList');
         if (!container) return;
         try {
-            const res = await apiFetch('/api/comments?platform=facebook&limit=20');
+            const res = await apiFetch('/sm/api/comments?platform=facebook&limit=20');
             const comments = await res.json();
             container.innerHTML = '';
             if (comments.length === 0) {
@@ -2771,7 +2771,7 @@
         const container = document.getElementById('fbDmsList');
         if (!container) return;
         try {
-            const res = await apiFetch('/api/comments?platform=facebook&limit=20');
+            const res = await apiFetch('/sm/api/comments?platform=facebook&limit=20');
             const messages = await res.json();
             const dms = messages.filter(m => m.trigger_type === 'dm' || m.trigger_type === 'message');
             container.innerHTML = '';
@@ -2790,7 +2790,7 @@
         const container = document.getElementById('igCommentsList');
         if (!container) return;
         try {
-            const res = await apiFetch('/api/comments?platform=instagram&limit=20');
+            const res = await apiFetch('/sm/api/comments?platform=instagram&limit=20');
             const comments = await res.json();
             container.innerHTML = '';
             if (comments.length === 0) {
@@ -2808,7 +2808,7 @@
         const container = document.getElementById('igDmsList');
         if (!container) return;
         try {
-            const res = await apiFetch('/api/comments?platform=instagram&limit=20');
+            const res = await apiFetch('/sm/api/comments?platform=instagram&limit=20');
             const messages = await res.json();
             const dms = messages.filter(m => m.trigger_type === 'dm' || m.trigger_type === 'message');
             container.innerHTML = '';
@@ -2827,7 +2827,7 @@
         const container = document.getElementById('threadsCommentsList');
         if (!container) return;
         try {
-            const res = await apiFetch('/api/comments?platform=threads&limit=50');
+            const res = await apiFetch('/sm/api/comments?platform=threads&limit=50');
             const comments = await res.json();
             container.innerHTML = '';
             if (comments.length === 0) {
@@ -2849,9 +2849,9 @@
     async function updateInboxBadge() {
         try {
             const [fbRes, igRes, thRes] = await Promise.all([
-                apiFetch('/api/comments?platform=facebook&limit=100'),
-                apiFetch('/api/comments?platform=instagram&limit=100'),
-                apiFetch('/api/comments?platform=threads&limit=100')
+                apiFetch('/sm/api/comments?platform=facebook&limit=100'),
+                apiFetch('/sm/api/comments?platform=instagram&limit=100'),
+                apiFetch('/sm/api/comments?platform=threads&limit=100')
             ]);
             const [fb, ig, th] = await Promise.all([fbRes.json(), igRes.json(), thRes.json()]);
             const total = fb.length + ig.length + th.length;
@@ -2908,7 +2908,7 @@
                 // The API will handle routing based on trigger_type in the log
                 const requestBody = { message: text };
                 
-                const res = await apiFetch(`/api/comments/${logId}/reply`, {
+                const res = await apiFetch(`/sm/api/comments/${logId}/reply`, {
                     method: 'POST',
                     body: JSON.stringify(requestBody)
                 });

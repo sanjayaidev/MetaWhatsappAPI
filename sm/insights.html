@@ -525,7 +525,7 @@
 </main>
 
 <script>
-  // Live state, populated from /api/insights/* — starts empty/loading rather
+  // Live state, populated from /sm/api/insights/* — starts empty/loading rather
   // than hard-coded zeros so the UI can distinguish "no data yet" from
   // "confirmed zero" from "failed to load".
   const data = {
@@ -567,7 +567,7 @@
     });
     if (res.status === 401) {
       localStorage.removeItem('auth_token');
-      window.location.href = '/';
+      window.location.href = '/sm';
       return null;
     }
     return res;
@@ -709,8 +709,8 @@
 
     try {
       const [accountRes, postsRes] = await Promise.all([
-        apiFetch(`/api/insights/account?platform=${platform}`),
-        apiFetch(`/api/insights/posts?platform=${platform}`)
+        apiFetch(`/sm/api/insights/account?platform=${platform}`),
+        apiFetch(`/sm/api/insights/posts?platform=${platform}`)
       ]);
 
       if (!accountRes || !postsRes) return; // apiFetch already redirected on 401
