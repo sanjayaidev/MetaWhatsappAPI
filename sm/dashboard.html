@@ -2753,7 +2753,7 @@
         const container = document.getElementById('fbCommentsList');
         if (!container) return;
         try {
-            const res = await apiFetch('/sm/api/comments?platform=facebook&limit=20');
+            const res = await apiFetch('/sm/api/comments?platform=facebook&trigger_type=comment&limit=50');
             const comments = await res.json();
             container.innerHTML = '';
             if (comments.length === 0) {
@@ -2771,9 +2771,8 @@
         const container = document.getElementById('fbDmsList');
         if (!container) return;
         try {
-            const res = await apiFetch('/sm/api/comments?platform=facebook&limit=20');
+            const res = await apiFetch('/sm/api/comments?platform=facebook&trigger_type=dm&limit=50');
             const messages = await res.json();
-            const dms = messages.filter(m => m.trigger_type === 'dm' || m.trigger_type === 'message');
             container.innerHTML = '';
             if (dms.length === 0) {
                 container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;">No messages</div>';
@@ -2790,7 +2789,7 @@
         const container = document.getElementById('igCommentsList');
         if (!container) return;
         try {
-            const res = await apiFetch('/sm/api/comments?platform=instagram&limit=20');
+            const res = await apiFetch('/sm/api/comments?platform=instagram&trigger_type=comment&limit=50');
             const comments = await res.json();
             container.innerHTML = '';
             if (comments.length === 0) {
@@ -2808,9 +2807,8 @@
         const container = document.getElementById('igDmsList');
         if (!container) return;
         try {
-            const res = await apiFetch('/sm/api/comments?platform=instagram&limit=20');
+            const res = await apiFetch('/sm/api/comments?platform=instagram&trigger_type=dm&limit=50');
             const messages = await res.json();
-            const dms = messages.filter(m => m.trigger_type === 'dm' || m.trigger_type === 'message');
             container.innerHTML = '';
             if (dms.length === 0) {
                 container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;">No messages</div>';
