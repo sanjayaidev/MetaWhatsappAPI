@@ -905,32 +905,40 @@ function router(supabase) {
 
     const platform = 'threads';
 
-    // Threads webhooks arrive in one of two shapes depending on topic:
-    //  - "moderate" topic (what Threads actually sends for comment/reply
-    //    events): { topic, target_id, values: [{ value: {...}, uid? }] }
-    //  - Legacy Graph-API-style shape some docs describe:
-    //    { entry: [{ id, changes: [{ field, value }] }] }
-    // The code previously only handled the legacy shape via `payload.entry`,
-    // which is undefined for real Threads payloads — so the loop below ran
-    // zero times and every Threads comment was silently dropped before any
-    // matching/logging happened. Normalize both into a flat item list.
+    // Threads webhooks arrive in different shapes depending on topic:
+    //  - "moderate" topic: comment/reply events with text
+    //  - "interaction" topic: new post/thread events (no text for matching)
+    //  - Legacy Graph-API-style shape: { entry: [{ id, changes: [{ field, value }] }] }
+    // Normalize all into a flat item list.
     const items = [];
 
+    // Handle modern Threads webhook format with topic and values
     if (Array.isArray(payload.values)) {
       for (const item of payload.values) {
         const value = item.value || {};
-        items.push({
-          text: value.text,
-          replyId: value.id,
-          // target_id is the post/thread being replied to; prefer the more
-          // specific root_post/replied_to id from the payload when present.
-          mediaId: value.root_post?.id || value.replied_to?.id || payload.target_id,
-          // has_uid_field indicates whether `uid` is populated; fall back to
-          // the root post's owner as the account this event belongs to.
-          accountId: item.uid || value.root_post?.owner_id || null
-        });
+        
+        // Skip "interaction" topic events (new posts) as they don't have comment text
+        if (payload.topic === 'interaction' && !value.text) {
+          console.log(`⚠️  Skipping Threads interaction event (new post) without comment text`);
+          addToDebugLog({ platform, event: 'skipped_interaction', reason: 'no_comment_text', payload });
+          continue;
+        }
+        
+        // For "moderate" topic, extract comment/reply data
+        if (payload.topic === 'moderate' || value.text) {
+          items.push({
+            text: value.text,
+            replyId: value.id,
+            // target_id is the post/thread being replied to; prefer the more
+            // specific root_post/replied_to id from the payload when present.
+            mediaId: value.root_post?.id || value.replied_to?.id || payload.target_id,
+            // Use uid if available, otherwise fall back to root post owner
+            accountId: item.uid || value.root_post?.owner_id || null
+          });
+        }
       }
     } else {
+      // Legacy format handling
       for (const entry of payload.entry || []) {
         for (const change of entry.changes || []) {
           if (change.field !== 'replies' && change.field !== 'comments') {
