@@ -122,7 +122,7 @@ async function upsertConnection(supabase, userId, { platform, account_name, acco
 // (posting, comment replies, DMs) has to go through a Facebook Page, so
 // there is no personal-profile option to add here — only a choice of
 // *which* Page, when the user manages more than one.
-async function finishFacebook(supabase, userId, code, redirectUri, config) {
+async function finishFacebook(supabase, userId, code, redirectUri, config, returnTo) {
   const tokenRes = await axios.get(`https://graph.facebook.com/${GRAPH_VERSION}/oauth/access_token`, {
     params: { client_id: config.clientId, client_secret: config.clientSecret, redirect_uri: redirectUri, code },
   });
@@ -155,6 +155,7 @@ async function finishFacebook(supabase, userId, code, redirectUri, config) {
         {
           sub: userId,
           platform: 'facebook',
+          return_to: returnTo,
           expiresAt,
           pages: pages.map(p => ({
             id: p.id,
@@ -362,6 +363,19 @@ const FINISHERS = {
 // resolved manually: session cookie, or a `token` query param for the
 // initial /authorize hop; the callback trusts the signed `state` instead.
 // ===========================================================
+// Where /callback (and the Facebook page-picker's follow-up) sends the
+// browser once a connection succeeds or fails. Whitelisted — never trust an
+// arbitrary path from the query string — so other apps in this same server
+// (like the CRM) can reuse this exact connect flow and land back on their
+// own page instead of always bouncing to /sm/dashboard.
+const RETURN_PAGES = {
+  sm: '/sm/dashboard',
+  crm: '/crm.html?tab=sources',
+};
+function resolveReturnBase(key) {
+  return RETURN_PAGES[key] || RETURN_PAGES.sm;
+}
+
 function oauthRouter(supabase) {
   const r = express.Router();
 
@@ -379,7 +393,8 @@ function oauthRouter(supabase) {
     }
     if (!userId) return res.status(401).send('Please log in first, then try connecting again.');
 
-    const state = jwt.sign({ sub: userId, platform }, JWT_SECRET, { expiresIn: '10m' });
+    const returnTo = RETURN_PAGES[req.query.return_to] ? req.query.return_to : 'sm';
+    const state = jwt.sign({ sub: userId, platform, return_to: returnTo }, JWT_SECRET, { expiresIn: '10m' });
     const redirectUri = `${APP_BASE_URL}/sm/api/connections/${platform}/callback`;
     const params = new URLSearchParams({
       client_id: config.clientId,
@@ -397,6 +412,9 @@ function oauthRouter(supabase) {
     const config = OAUTH_CONFIGS[platform];
     const { code, state, error, error_description } = req.query;
 
+    // No verified state yet at this point (missing/invalid), so these
+    // earliest-exit redirects can't know return_to and always go to /sm —
+    // acceptable since they're pre-auth failures, not the case we care about.
     if (error) {
       return res.redirect(`/sm/dashboard?conn_error=${encodeURIComponent(error_description || error)}`);
     }
@@ -414,16 +432,18 @@ function oauthRouter(supabase) {
       return res.redirect('/sm/dashboard?conn_error=State+mismatch');
     }
 
+    const returnBase = resolveReturnBase(payload.return_to);
+    const sep = returnBase.includes('?') ? '&' : '?';
     const redirectUri = `${APP_BASE_URL}/sm/api/connections/${platform}/callback`;
     try {
-      const saved = await FINISHERS[platform](supabase, payload.sub, code, redirectUri, config);
+      const saved = await FINISHERS[platform](supabase, payload.sub, code, redirectUri, config, payload.return_to);
       if (saved && saved.needsPageSelection) {
         return res.send(renderPagePickerHtml(saved.pages, saved.selectionToken));
       }
-      res.redirect(`/sm/dashboard?connected=${encodeURIComponent(saved.platform)}`);
+      res.redirect(`${returnBase}${sep}connected=${encodeURIComponent(saved.platform)}`);
     } catch (err) {
       const message = err.response ? JSON.stringify(err.response.data) : err.message;
-      res.redirect(`/sm/dashboard?conn_error=${encodeURIComponent(message)}`);
+      res.redirect(`${returnBase}${sep}conn_error=${encodeURIComponent(message)}`);
     }
   });
 
@@ -484,7 +504,9 @@ function oauthRouter(supabase) {
     }
     try {
       const saved = await finishFacebookPage(supabase, payload.sub, page, payload.expiresAt ? new Date(payload.expiresAt) : null);
-      res.json({ redirect: `/sm/dashboard?connected=${encodeURIComponent(saved.platform)}` });
+      const returnBase = resolveReturnBase(payload.return_to);
+      const sep = returnBase.includes('?') ? '&' : '?';
+      res.json({ redirect: `${returnBase}${sep}connected=${encodeURIComponent(saved.platform)}` });
     } catch (err) {
       res.status(500).json({ error: err.response ? JSON.stringify(err.response.data) : err.message });
     }

@@ -2838,6 +2838,45 @@ app.use('/sm/api/insights', smcRequireAuth, smcInsightsRouter(supabase));
 app.use('/sm/api/ai', smcAiRouter(supabase));
 
 app.use('/sm', express.static(path.join(__dirname, 'sm')));
+
+// ================================================================
+// CRM's Instagram/Facebook connect + unified inbox — reuses sm's own
+// routers and tables (smc_connections, smc_automation_logs) rather than a
+// second implementation. verifyUser resolves the CRM's Supabase Auth user;
+// smcBridge.mapToSmcUser then swaps req.user for the linked smc_users
+// identity (matched by email) before handing off to sm's unmodified
+// handlers, which only ever look at req.user.id / req.user.sub.
+// ================================================================
+const smcBridge = require('./src/smc-bridge')(supabase);
+
+// GET /api/social/connect-url/:platform -> { url } for the frontend to
+// window.location.href to (mirrors the existing connectOAuth() pattern in
+// crm.html, which already expects a JSON { url } response from a fetch
+// call rather than a bare redirect, since this endpoint itself needs the
+// Authorization header a plain top-level navigation wouldn't send).
+app.get('/api/social/connect-url/:platform', verifyUser, async (req, res) => {
+  const platform = req.params.platform;
+  if (!['facebook', 'instagram'].includes(platform)) {
+    return res.status(400).json({ error: `Unsupported platform: ${platform}` });
+  }
+  try {
+    const smcUser = await smcBridge.getOrCreateSmcUser(req.user);
+    const token = smcBridge.mintSmcToken(smcUser.id, smcUser.email);
+    const url = `/sm/api/connections/${platform}/authorize?token=${encodeURIComponent(token)}&return_to=crm`;
+    res.json({ url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// List/delete connections (GET /, DELETE /:id) — smcConnectionsRouter's
+// protected CRUD router, unmodified, now reading/writing smc_connections
+// for the CRM user's linked smc_users identity.
+app.use('/api/social/connections', verifyUser, smcBridge.mapToSmcUser, smcConnectionsRouter(supabase));
+
+// Unified inbox (GET /, GET /live, POST /:id/reply) — smcCommentsRouter,
+// unmodified, reading/writing smc_automation_logs for the same identity.
+app.use('/api/social/comments', verifyUser, smcBridge.mapToSmcUser, smcCommentsRouter(supabase));
 app.get('/sm', (req, res) => res.sendFile(path.join(__dirname, 'sm', 'index.html')));
 app.get('/sm/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'sm', 'dashboard.html')));
 app.get('/sm/insights', (req, res) => res.sendFile(path.join(__dirname, 'sm', 'insights.html')));

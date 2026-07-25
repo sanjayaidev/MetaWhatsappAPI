@@ -276,24 +276,23 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 
 <div class="card">
 <div class="card-header"><div class="card-title">📷 Instagram</div><span class="badge badge-gray" id="badge-instagram">Not connected</span></div>
-<p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Capture DMs and comments as leads, and reply from the Leads tab.</p>
+<p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Capture DMs and comments as leads, and reply from the Leads tab. Same connection used by the Social Inbox.</p>
 <div id="instagramConnectedInfo" style="display:none;font-size:12.5px;color:var(--text2);margin-bottom:10px;">
-  <label style="font-size:11px;color:var(--text3);">Select Page:</label>
-  <select id="instagramPageSelect" style="width:100%;margin-top:4px;" onchange="saveInstagramSelection()"></select>
+  Connected as <strong id="instagramConnectedName" style="color:var(--text);"></strong>
 </div>
-<button class="btn btn-secondary btn-sm" id="instagramConnectBtn" onclick="connectOAuth('facebook')">F Connect with Facebook</button>
-<button class="btn btn-ghost btn-sm" id="instagramDisconnectBtn" style="display:none;" onclick="disconnectOAuth('facebook')">Disconnect</button>
+<button class="btn btn-secondary btn-sm" id="instagramConnectBtn" onclick="connectSocial('facebook')">F Connect via Facebook Page</button>
+<button class="btn btn-ghost btn-sm" id="instagramConnectBtn2" onclick="connectSocial('instagram')" style="margin-left:6px;">📷 Or connect Instagram directly</button>
+<button class="btn btn-ghost btn-sm" id="instagramDisconnectBtn" style="display:none;" onclick="disconnectSocial('instagram')">Disconnect</button>
 </div>
 
 <div class="card">
 <div class="card-header"><div class="card-title">👥 Facebook Page</div><span class="badge badge-gray" id="badge-facebook">Not connected</span></div>
-<p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Capture Page messages and comments as leads.</p>
+<p style="font-size:12.5px;color:var(--text2);margin-bottom:10px;">Capture Page messages and comments as leads. Same connection used by the Social Inbox.</p>
 <div id="facebookConnectedInfo" style="display:none;font-size:12.5px;color:var(--text2);margin-bottom:10px;">
-  <label style="font-size:11px;color:var(--text3);">Select Page:</label>
-  <select id="facebookPageSelect" style="width:100%;margin-top:4px;" onchange="saveFacebookSelection()"></select>
+  Connected as <strong id="facebookConnectedName" style="color:var(--text);"></strong>
 </div>
-<button class="btn btn-secondary btn-sm" id="facebookConnectBtn" onclick="connectOAuth('facebook')">F Connect with Facebook</button>
-<button class="btn btn-ghost btn-sm" id="facebookDisconnectBtn" style="display:none;" onclick="disconnectOAuth('facebook')">Disconnect</button>
+<button class="btn btn-secondary btn-sm" id="facebookConnectBtn" onclick="connectSocial('facebook')">F Connect with Facebook</button>
+<button class="btn btn-ghost btn-sm" id="facebookDisconnectBtn" style="display:none;" onclick="disconnectSocial('facebook')">Disconnect</button>
 </div>
 
 <div class="card">
@@ -957,29 +956,48 @@ async function loadOAuthStatuses() {
     }
   } catch(e) {}
   
-  // Facebook/Instagram
+  // Facebook/Instagram — reuses the same smc_connections rows the Social
+  // Inbox (and sm's own dashboard, if you use it) reads from, via the
+  // email-matched smc bridge. See /api/social/connections.
   try {
-    const fbData = await apiCall('/api/oauth/facebook/status');
-    const connected = fbData && fbData.connected;
-    if (connected) {
-      document.getElementById('instagramConnectBtn').style.display = 'none';
-      document.getElementById('instagramDisconnectBtn').style.display = 'inline-flex';
-      document.getElementById('instagramConnectedInfo').style.display = 'block';
-      document.getElementById('facebookConnectBtn').style.display = 'none';
-      document.getElementById('facebookDisconnectBtn').style.display = 'inline-flex';
-      document.getElementById('facebookConnectedInfo').style.display = 'block';
-      if (fbData.pages && fbData.pages.length) {
-        populatePageSelects(fbData.pages);
-      }
-    } else {
-      document.getElementById('instagramConnectBtn').style.display = 'inline-flex';
-      document.getElementById('instagramDisconnectBtn').style.display = 'none';
-      document.getElementById('instagramConnectedInfo').style.display = 'none';
-      document.getElementById('facebookConnectBtn').style.display = 'inline-flex';
-      document.getElementById('facebookDisconnectBtn').style.display = 'none';
-      document.getElementById('facebookConnectedInfo').style.display = 'none';
-    }
+    const conns = await apiCall('/api/social/connections');
+    const list = Array.isArray(conns) ? conns : [];
+    window._socialConnIds = {};
+
+    const igConn = list.find(c => c.platform === 'instagram' && c.is_connected);
+    window._socialConnIds.instagram = igConn ? igConn.id : null;
+    document.getElementById('badge-instagram').textContent = igConn ? 'Connected' : 'Not connected';
+    document.getElementById('badge-instagram').className = 'badge ' + (igConn ? 'badge-green' : 'badge-gray');
+    document.getElementById('instagramConnectBtn').style.display = igConn ? 'none' : 'inline-flex';
+    document.getElementById('instagramConnectBtn2').style.display = igConn ? 'none' : 'inline-flex';
+    document.getElementById('instagramDisconnectBtn').style.display = igConn ? 'inline-flex' : 'none';
+    document.getElementById('instagramConnectedInfo').style.display = igConn ? 'block' : 'none';
+    if (igConn) document.getElementById('instagramConnectedName').textContent = igConn.account_name || igConn.account_id;
+
+    const fbConn = list.find(c => c.platform === 'facebook' && c.is_connected);
+    window._socialConnIds.facebook = fbConn ? fbConn.id : null;
+    document.getElementById('badge-facebook').textContent = fbConn ? 'Connected' : 'Not connected';
+    document.getElementById('badge-facebook').className = 'badge ' + (fbConn ? 'badge-green' : 'badge-gray');
+    document.getElementById('facebookConnectBtn').style.display = fbConn ? 'none' : 'inline-flex';
+    document.getElementById('facebookDisconnectBtn').style.display = fbConn ? 'inline-flex' : 'none';
+    document.getElementById('facebookConnectedInfo').style.display = fbConn ? 'block' : 'none';
+    if (fbConn) document.getElementById('facebookConnectedName').textContent = fbConn.account_name || fbConn.account_id;
   } catch(e) {}
+}
+
+async function connectSocial(platform) {
+  const data = await apiCall(`/api/social/connect-url/${platform}`);
+  if (data.error || !data.url) { showToast('Could not start connection: ' + (data.error || 'Missing URL'), true); return; }
+  window.location.href = data.url;
+}
+
+async function disconnectSocial(platform) {
+  const id = window._socialConnIds && window._socialConnIds[platform];
+  if (!id) { showToast('Nothing to disconnect'); return; }
+  if (!confirm(`Disconnect ${platform}?`)) return;
+  const data = await apiCall(`/api/social/connections/${id}`, 'DELETE');
+  if (data.error) { showToast('Failed: ' + data.error, true); return; }
+  showToast('Disconnected'); loadOAuthStatuses();
 }
 
 async function loadGoogleSheets() {
@@ -1085,26 +1103,6 @@ function saveSheetSelection() {
     localStorage.setItem('crm_selected_worksheet', worksheetSelect.value);
   }
   showToast('✅ Sheet & page selection saved');
-}
-
-function populatePageSelects(pages) {
-  const igSelect = document.getElementById('instagramPageSelect');
-  const fbSelect = document.getElementById('facebookPageSelect');
-  const options = pages.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
-  igSelect.innerHTML = options;
-  fbSelect.innerHTML = options;
-}
-
-function saveInstagramSelection() {
-  const select = document.getElementById('instagramPageSelect');
-  localStorage.setItem('crm_selected_instagram_page', select.value);
-  showToast('✅ Instagram page selected');
-}
-
-function saveFacebookSelection() {
-  const select = document.getElementById('facebookPageSelect');
-  localStorage.setItem('crm_selected_facebook_page', select.value);
-  showToast('✅ Facebook page selected');
 }
 
 let currentIntegrationType = null;
