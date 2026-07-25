@@ -582,6 +582,7 @@ function router(supabase) {
             });
             return;
           }
+          console.log(`📤 Sending ${platform} dm reply on behalf of account ${conn.account_id || conn.page_id}`);
           await facebook.sendDM(token, conn.account_id || conn.page_id, senderId, reply);
           await logAutomationEvent(supabase, {
             platform,
