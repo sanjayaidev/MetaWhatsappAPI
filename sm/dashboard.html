@@ -2691,9 +2691,32 @@
         });
     });
 
-    // Refresh inbox button
-    document.getElementById('refreshInboxBtn').addEventListener('click', () => {
+    // Refresh inbox button — pulls fresh comments/DMs straight from Meta
+    // (GET /live) first, so anything missed by webhooks still shows up,
+    // then reloads the inbox from the (now updated) local cache.
+    document.getElementById('refreshInboxBtn').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
         const activeTab = document.querySelector('[data-inbox-tab].active')?.dataset.inboxTab || 'fb-ig';
+        btn.disabled = true;
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Refreshing...';
+        try {
+            const livePlatforms = activeTab === 'threads' ? ['threads'] : ['facebook', 'instagram'];
+            const liveResults = await Promise.all(
+                livePlatforms.map(p => apiFetch(`/sm/api/comments/live?platform=${p}`).then(r => r.json()).catch(() => null))
+            );
+            // Surface any per-platform fetch errors (e.g. missing pages_messaging
+            // permission for DMs) without blocking the rest of the refresh.
+            const liveErrors = liveResults.filter(Boolean).flatMap(r => r.errors || []);
+            if (liveErrors.length > 0) {
+                console.warn('Some accounts failed to live-refresh:', liveErrors);
+            }
+        } catch (err) {
+            console.error('Live refresh failed, showing cached inbox instead:', err);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
         loadInboxData(activeTab);
     });
 
@@ -2774,11 +2797,11 @@
             const res = await apiFetch('/sm/api/comments?platform=facebook&trigger_type=dm&limit=50');
             const messages = await res.json();
             container.innerHTML = '';
-            if (dms.length === 0) {
+            if (messages.length === 0) {
                 container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;">No messages</div>';
                 return;
             }
-            dms.forEach(m => container.appendChild(createMessageCard(m, 'facebook', 'DM')));
+            messages.forEach(m => container.appendChild(createMessageCard(m, 'facebook', 'DM')));
         } catch (err) {
             container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;color:var(--error);">Failed to load</div>';
         }
@@ -2810,11 +2833,11 @@
             const res = await apiFetch('/sm/api/comments?platform=instagram&trigger_type=dm&limit=50');
             const messages = await res.json();
             container.innerHTML = '';
-            if (dms.length === 0) {
+            if (messages.length === 0) {
                 container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;">No messages</div>';
                 return;
             }
-            dms.forEach(m => container.appendChild(createMessageCard(m, 'instagram', 'DM')));
+            messages.forEach(m => container.appendChild(createMessageCard(m, 'instagram', 'DM')));
         } catch (err) {
             container.innerHTML = '<div class="text-muted" style="padding:10px;font-size:12px;color:var(--error);">Failed to load</div>';
         }

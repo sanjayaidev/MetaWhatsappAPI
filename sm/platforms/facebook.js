@@ -52,6 +52,69 @@ async function replyToComment(token, objectId, message) {
   return res.id;
 }
 
+// Live fetch: the most recent comment on each of the Page's recent posts.
+// Meta has no single "all comments across all posts" edge, so this fans out
+// per-post (order=reverse_chronological + limit=1 gets the latest comment
+// without pulling full history). Returns one entry per post that has at
+// least one comment — callers wanting "recent comment per post" get that
+// for free, no extra dedup needed.
+async function listRecentComments(token, pageId, postLimit = 10) {
+  const posts = await get(`${BASE}/${pageId}/posts`, { fields: 'id', limit: postLimit }, token);
+  const postIds = (posts.data || []).map(p => p.id);
+
+  const results = await Promise.all(postIds.map(async (postId) => {
+    try {
+      const res = await get(`${BASE}/${postId}/comments`, {
+        fields: 'id,message,from,created_time',
+        order: 'reverse_chronological',
+        limit: 1,
+      }, token);
+      const comment = (res.data || [])[0];
+      if (!comment) return null;
+      return {
+        external_id: comment.id,
+        media_id: postId,
+        sender_id: comment.from?.id || null,
+        sender_name: comment.from?.name || null,
+        trigger_text: comment.message || '',
+        created_at: comment.created_time,
+      };
+    } catch (err) {
+      console.log(`⚠️  Facebook: failed to fetch comments for post ${postId}: ${err.response?.data?.error?.message || err.message}`);
+      return null;
+    }
+  }));
+
+  return results.filter(Boolean);
+}
+
+// Live fetch: the most recent message in each Messenger conversation for
+// this Page — i.e. one row per user who has DMed the Page, showing only
+// their latest message. Requires the pages_messaging permission on the
+// Page's access token; without it Meta returns error code 10 / subcode
+// 2018108 ("access to messenger endpoints"), which is surfaced as-is so
+// the caller can tell the difference from a network/auth failure.
+async function listConversations(token, pageId, limit = 25) {
+  const res = await get(`${BASE}/${pageId}/conversations`, {
+    fields: `participants,updated_time,messages.limit(1){message,from,created_time,id}`,
+    limit,
+  }, token);
+
+  return (res.data || []).map(convo => {
+    const latest = convo.messages?.data?.[0];
+    if (!latest) return null;
+    // The "other" participant — Page itself is also listed in participants.
+    const other = (convo.participants?.data || []).find(p => p.id !== pageId) || convo.participants?.data?.[0];
+    return {
+      external_id: latest.id,
+      sender_id: other?.id || latest.from?.id || null,
+      sender_name: other?.name || latest.from?.name || null,
+      trigger_text: latest.message || '',
+      created_at: latest.created_time || convo.updated_time,
+    };
+  }).filter(Boolean);
+}
+
 async function sendDM(token, pageId, recipientId, text, replyToMid) {
   // Build the message payload - supports both text and attachments
   let messagePayload = {
@@ -87,4 +150,4 @@ async function sendPrivateReply(token, pageId, commentId, message) {
   return res.message_id;
 }
 
-module.exports = { publishPost, replyToComment, sendDM, sendPrivateReply, listRecentPosts };
+module.exports = { publishPost, replyToComment, sendDM, sendPrivateReply, listRecentPosts, listRecentComments, listConversations };

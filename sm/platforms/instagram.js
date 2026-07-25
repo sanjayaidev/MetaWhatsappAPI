@@ -194,6 +194,67 @@ async function listRecentMedia(token, igId, limit = 25, conn) {
   return result.data.data || [];
 }
 
+// Live fetch: the most recent comment on each of the account's recent
+// media items. Same reasoning as the Facebook version — Meta has no
+// "all comments" edge, so this fans out per-media with limit=1.
+async function listRecentComments(token, igId, postLimit = 10, conn) {
+  const hosts = conn ? getHosts(conn) : { primary: FB_BASE, fallback: IG_BASE };
+  const mediaResult = await getWithFallback(hosts, `/${igId}/media`, { fields: 'id', limit: postLimit }, token);
+  if (!mediaResult.success) throw mediaResult.error;
+  const mediaIds = (mediaResult.data.data || []).map(m => m.id);
+
+  const results = await Promise.all(mediaIds.map(async (mediaId) => {
+    const res = await getWithFallback(hosts, `/${mediaId}/comments`, {
+      fields: 'id,text,username,timestamp,from',
+      order: 'reverse_chronological',
+      limit: 1,
+    }, token);
+    if (!res.success) {
+      console.log(`⚠️  Instagram: failed to fetch comments for media ${mediaId}: ${res.error?.response?.data?.error?.message || res.error?.message}`);
+      return null;
+    }
+    const comment = (res.data.data || [])[0];
+    if (!comment) return null;
+    return {
+      external_id: comment.id,
+      media_id: mediaId,
+      sender_id: comment.from?.id || null,
+      sender_name: comment.username || comment.from?.username || null,
+      trigger_text: comment.text || '',
+      created_at: comment.timestamp,
+    };
+  }));
+
+  return results.filter(Boolean);
+}
+
+// Live fetch: the most recent message in each Instagram DM conversation —
+// one row per user who has messaged the account, latest message only.
+// Requires instagram_manage_messages (and, for accounts connected via
+// Facebook Login for Business, pages_messaging on the linked Page token).
+async function listConversations(token, igId, limit = 25, conn) {
+  const hosts = conn ? getHosts(conn) : { primary: FB_BASE, fallback: IG_BASE };
+  const res = await getWithFallback(hosts, `/${igId}/conversations`, {
+    platform: 'instagram',
+    fields: 'participants,updated_time,messages.limit(1){message,from,created_time,id}',
+    limit,
+  }, token);
+  if (!res.success) throw res.error;
+
+  return (res.data.data || []).map(convo => {
+    const latest = convo.messages?.data?.[0];
+    if (!latest) return null;
+    const other = (convo.participants?.data || []).find(p => p.id !== igId) || convo.participants?.data?.[0];
+    return {
+      external_id: latest.id,
+      sender_id: other?.id || latest.from?.id || null,
+      sender_name: other?.username || latest.from?.username || null,
+      trigger_text: latest.message || '',
+      created_at: latest.created_time || convo.updated_time,
+    };
+  }).filter(Boolean);
+}
+
 // Kept for parity with the test scripts / manual debugging — the webhook
 // flow doesn't need this since it gets the sender id directly from the event.
 async function getRecipientFromLatestConversation(token, igId, myUsername, conn) {
@@ -215,4 +276,4 @@ async function getRecipientFromLatestConversation(token, igId, myUsername, conn)
   return participants.find((p) => p.username !== myUsername) || null;
 }
 
-module.exports = { publishPost, replyToComment, sendDM, sendPrivateReply, getRecipientFromLatestConversation, listRecentMedia };
+module.exports = { publishPost, replyToComment, sendDM, sendPrivateReply, getRecipientFromLatestConversation, listRecentMedia, listRecentComments, listConversations };

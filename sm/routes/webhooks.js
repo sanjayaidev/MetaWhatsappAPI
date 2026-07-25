@@ -44,6 +44,11 @@ async function logAutomationEvent(supabase, data) {
       reply_location: data.replyLocation || null,
       success: data.success,
       error_message: data.errorMessage || null,
+      // The comment_id (for comment triggers) or mid (for dm/message
+      // triggers) — the actual Graph API object id, distinct from this
+      // row's own local serial id. Needed so POST /api/comments/:id/reply
+      // can target the right object; see migrations/006_add_external_id_to_automation_logs.sql.
+      external_id: data.externalId || null,
     });
     if (error) throw error;
   } catch (err) {
@@ -423,6 +428,7 @@ function router(supabase) {
           triggerType: 'comment',
           text,
           replyTargetId: commentId,
+          externalId: commentId,
           mediaId,
           accountId: entry.id,
           extraLookupId: fromId
@@ -440,13 +446,14 @@ function router(supabase) {
           triggerType: 'dm',
           text,
           senderId,
+          externalId: msgId,
           accountId: entry.id,
           extraLookupId: null
         });
       }
     }
 
-    async function handleTrigger({ platform, triggerType, text, replyTargetId, senderId, accountId, mediaId, extraLookupId = null }) {
+    async function handleTrigger({ platform, triggerType, text, replyTargetId, senderId, accountId, mediaId, extraLookupId = null, externalId = null }) {
       console.log(`🔔 Webhook trigger: ${platform}/${triggerType} - Text: "${text?.substring(0, 50)}${text?.length > 50 ? '...' : ''}"`);
 
       const automations = await getActiveAutomations();
@@ -462,6 +469,7 @@ function router(supabase) {
           mediaId,
           senderId,
           accountId,
+          externalId,
           automationId: null,
           automationName: null,
           responseType: null,
@@ -485,6 +493,7 @@ function router(supabase) {
           mediaId,
           senderId,
           accountId,
+          externalId,
           automationId: match.id,
           automationName: match.name,
           responseType: null,
@@ -514,7 +523,7 @@ function router(supabase) {
               console.log(`📤 Sending ${platform} comment reply on behalf of account ${conn.account_id || conn.page_id}`);
               await facebook.replyToComment(token, replyTargetId, commentReply);
               await logAutomationEvent(supabase, {
-                platform, triggerType, triggerText: text, mediaId, senderId, accountId,
+                platform, triggerType, triggerText: text, mediaId, senderId, accountId, externalId,
                 automationId: match.id, automationName: match.name,
                 responseType: commentResult.type, responseContent: commentReply,
                 replyLocation: 'comment', success: true, errorMessage: null
@@ -529,7 +538,7 @@ function router(supabase) {
               console.log(`📤 Sending ${platform} private reply (DM) for comment ${replyTargetId} on behalf of account ${conn.account_id || conn.page_id}`);
               await facebook.sendPrivateReply(token, conn.account_id || conn.page_id, replyTargetId, dmReply);
               await logAutomationEvent(supabase, {
-                platform, triggerType, triggerText: text, mediaId, senderId, accountId,
+                platform, triggerType, triggerText: text, mediaId, senderId, accountId, externalId,
                 automationId: match.id, automationName: match.name,
                 responseType: dmResult.type, responseContent: dmReply,
                 replyLocation: 'dm', success: true, errorMessage: null
@@ -541,7 +550,7 @@ function router(supabase) {
           const reply = responseResult?.text;
           if (!reply) {
             await logAutomationEvent(supabase, {
-              platform, triggerType, triggerText: text, mediaId, senderId, accountId,
+              platform, triggerType, triggerText: text, mediaId, senderId, accountId, externalId,
               automationId: match.id, automationName: match.name,
               responseType: null, responseContent: null, replyLocation: null,
               success: false, errorMessage: 'No response generated'
@@ -556,6 +565,7 @@ function router(supabase) {
             mediaId: null,
             senderId,
             accountId,
+            externalId,
             automationId: match.id,
             automationName: match.name,
             responseType: responseResult.type,
@@ -575,6 +585,7 @@ function router(supabase) {
           mediaId,
           senderId,
           accountId,
+          externalId,
           automationId: match.id,
           automationName: match.name,
           responseType: null,
@@ -663,6 +674,7 @@ function router(supabase) {
           triggerType: 'comment',
           text,
           replyTargetId: commentId,
+          externalId: commentId,
           mediaId,
           accountId: entry.id,
           extraLookupId: fromId
@@ -680,13 +692,14 @@ function router(supabase) {
           triggerType: 'dm',
           text,
           senderId,
+          externalId: msgId,
           accountId: entry.id,
           extraLookupId: null
         });
       }
     }
 
-    async function handleTrigger({ platform, triggerType, text, replyTargetId, senderId, accountId, mediaId, extraLookupId = null }) {
+    async function handleTrigger({ platform, triggerType, text, replyTargetId, senderId, accountId, mediaId, extraLookupId = null, externalId = null }) {
       console.log(`🔔 Webhook trigger: ${platform}/${triggerType} - Text: "${text?.substring(0, 50)}${text?.length > 50 ? '...' : ''}"`);
       addToDebugLog({
         platform,
@@ -714,6 +727,7 @@ function router(supabase) {
           mediaId,
           senderId,
           accountId,
+          externalId,
           automationId: null,
           automationName: null,
           responseType: null,
@@ -738,6 +752,7 @@ function router(supabase) {
           mediaId,
           senderId,
           accountId,
+          externalId,
           automationId: match.id,
           automationName: match.name,
           responseType: null,
@@ -771,7 +786,7 @@ function router(supabase) {
               console.log(`📤 Sending ${platform} comment reply on behalf of account ${conn.account_id || conn.page_id}`);
               await instagram.replyToComment(token, replyTargetId, commentReply, conn);
               await logAutomationEvent(supabase, {
-                platform, triggerType, triggerText: text, mediaId, senderId, accountId,
+                platform, triggerType, triggerText: text, mediaId, senderId, accountId, externalId,
                 automationId: match.id, automationName: match.name,
                 responseType: commentResult.type, responseContent: commentReply,
                 replyLocation: 'comment', success: true, errorMessage: null
@@ -786,7 +801,7 @@ function router(supabase) {
               console.log(`📤 Sending ${platform} private reply (DM) for comment ${replyTargetId} on behalf of account ${conn.account_id || conn.page_id}`);
               await instagram.sendPrivateReply(token, conn.account_id || conn.page_id, replyTargetId, dmReply, conn);
               await logAutomationEvent(supabase, {
-                platform, triggerType, triggerText: text, mediaId, senderId, accountId,
+                platform, triggerType, triggerText: text, mediaId, senderId, accountId, externalId,
                 automationId: match.id, automationName: match.name,
                 responseType: dmResult.type, responseContent: dmReply,
                 replyLocation: 'dm', success: true, errorMessage: null
@@ -798,7 +813,7 @@ function router(supabase) {
           const reply = responseResult?.text;
           if (!reply) {
             await logAutomationEvent(supabase, {
-              platform, triggerType, triggerText: text, mediaId, senderId, accountId,
+              platform, triggerType, triggerText: text, mediaId, senderId, accountId, externalId,
               automationId: match.id, automationName: match.name,
               responseType: null, responseContent: null, replyLocation: null,
               success: false, errorMessage: 'No response generated'
@@ -819,6 +834,7 @@ function router(supabase) {
             mediaId: null,
             senderId,
             accountId,
+            externalId,
             automationId: match.id,
             automationName: match.name,
             responseType: responseResult.type,
@@ -838,6 +854,7 @@ function router(supabase) {
           mediaId,
           senderId,
           accountId,
+          externalId,
           automationId: match.id,
           automationName: match.name,
           responseType: null,
@@ -983,6 +1000,7 @@ function router(supabase) {
             mediaId,
             senderId: null,
             accountId,
+            externalId: replyId,
             automationId: null,
             automationName: null,
             responseType: null,
@@ -1007,6 +1025,7 @@ function router(supabase) {
             mediaId,
             senderId: null,
             accountId,
+            externalId: replyId,
             automationId: match.id,
             automationName: match.name,
             responseType: null,
@@ -1028,6 +1047,7 @@ function router(supabase) {
             mediaId,
             senderId: null,
             accountId,
+            externalId: replyId,
             automationId: match.id,
             automationName: match.name,
             responseType: responseResult.type,
@@ -1049,6 +1069,7 @@ function router(supabase) {
             mediaId,
             senderId: null,
             accountId,
+            externalId: replyId,
             automationId: match.id,
             automationName: match.name,
             responseType: responseResult.type,
@@ -1067,6 +1088,7 @@ function router(supabase) {
             mediaId,
             senderId: null,
             accountId,
+            externalId: replyId,
             automationId: match.id,
             automationName: match.name,
             responseType: responseResult?.type,

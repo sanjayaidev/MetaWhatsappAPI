@@ -58,6 +58,40 @@ async function listRecentThreads(token, threadsUserId, limit = 25) {
   return res.data.data || [];
 }
 
+// Live fetch: the most recent reply on each of the account's recent
+// threads. Threads calls comments "replies" — GET /{thread-id}/replies,
+// newest first, so limit=1 per thread gets the latest reply directly with
+// no client-side sort needed.
+async function listRecentComments(token, threadsUserId, limit = 10) {
+  const threadsRes = await axios.get(`${BASE}/${threadsUserId}/threads`, {
+    params: { fields: 'id', limit, access_token: token },
+  });
+  const threadIds = (threadsRes.data.data || []).map(t => t.id);
+
+  const results = await Promise.all(threadIds.map(async (threadId) => {
+    try {
+      const res = await axios.get(`${BASE}/${threadId}/replies`, {
+        params: { fields: 'id,text,username,timestamp', access_token: token },
+      });
+      const reply = (res.data.data || [])[0];
+      if (!reply) return null;
+      return {
+        external_id: reply.id,
+        media_id: threadId,
+        sender_id: null, // Threads replies expose username, not a numeric user id
+        sender_name: reply.username || null,
+        trigger_text: reply.text || '',
+        created_at: reply.timestamp,
+      };
+    } catch (err) {
+      console.log(`⚠️  Threads: failed to fetch replies for thread ${threadId}: ${err.response?.data?.error?.message || err.message}`);
+      return null;
+    }
+  }));
+
+  return results.filter(Boolean);
+}
+
 async function replyToThread(token, threadsUserId, replyToId, text) {
   const create = await post(`${BASE}/${threadsUserId}/threads`, {
     media_type: 'TEXT',
@@ -74,4 +108,4 @@ async function sendDM() {
   throw new Error('Threads has no DM/messaging API — this is a platform limitation, not a bug.');
 }
 
-module.exports = { publishPost, replyToThread, sendDM, listRecentThreads };
+module.exports = { publishPost, replyToThread, sendDM, listRecentThreads, listRecentComments };
