@@ -6,7 +6,7 @@ const { encrypt } = require('../lib/crypto');
 const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-change-in-production';
 // Used to build absolute redirect_uri values that Meta/Google send users back to.
 // Must exactly match a Valid OAuth Redirect URI configured in each app's dashboard.
-const APP_BASE_URL = (process.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+const APP_BASE_URL = (process.env.APP_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 const GRAPH_VERSION = process.env.GRAPH_VERSION || 'v25.0';
 const THREADS_VERSION = process.env.THREADS_VERSION || 'v1.0';

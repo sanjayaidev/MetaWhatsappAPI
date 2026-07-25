@@ -7,7 +7,9 @@ const drive = require('../lib/googleDrive');
 // since we buffer in memory before forwarding to Drive.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
 
-const APP_BASE_URL = (process.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+const APP_BASE_URL = (process.env.APP_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000').replace(/\/$/, '');
+// Ensure /sm prefix is included when mounted inside the main WaBlast server
+const MEDIA_PATH_PREFIX = process.env.SM_MEDIA_PATH_PREFIX || '/sm';
 const PROXY_URL_TTL_MS = 365 * 24 * 60 * 60 * 1000; // 1 year — long enough that a scheduled post never finds it expired
 
 async function getDriveConnection(supabase, userId) {
@@ -66,7 +68,7 @@ function router(supabase) {
 
       const expiresAt = Date.now() + PROXY_URL_TTL_MS;
       const sig = signMediaToken(userId, uploaded.id, expiresAt);
-      const mediaUrl = `${APP_BASE_URL}/api/media/stream/${userId}/${uploaded.id}?exp=${expiresAt}&sig=${sig}`;
+      const mediaUrl = `${APP_BASE_URL}${MEDIA_PATH_PREFIX}/api/media/stream/${userId}/${uploaded.id}?exp=${expiresAt}&sig=${sig}`;
 
       res.json({
         google_drive_file_id: uploaded.id,
