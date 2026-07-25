@@ -31,7 +31,7 @@ Copy `.env.example` to `.env` and configure the following:
 1. Go to [Meta Developers](https://developers.facebook.com/)
 2. Create a new app with "Business" type
 3. Add "Facebook Login" product
-4. Configure OAuth redirect URI: `{APP_BASE_URL}/api/connections/facebook/callback`
+4. Configure OAuth redirect URI: `{APP_BASE_URL}/sm/api/connections/facebook/callback`
 5. Get App ID and App Secret from Dashboard > Settings > Basic
 
 - `FB_APP_ID` - Facebook App ID
@@ -49,7 +49,7 @@ Copy `.env.example` to `.env` and configure the following:
 - For separate app: Follow same steps as Facebook but add "Instagram Graph API" product
 
 1. Add "Instagram Graph API" product to your Meta app
-2. Configure OAuth redirect URI: `{APP_BASE_URL}/api/connections/instagram/callback`
+2. Configure OAuth redirect URI: `{APP_BASE_URL}/sm/api/connections/instagram/callback`
 3. Get App ID and App Secret
 
 - `IG_APP_ID` - Instagram App ID (can be same as FB_APP_ID)
@@ -68,7 +68,7 @@ Threads API requires a dedicated app registration separate from Facebook/Instagr
 1. Go to [Meta Developers](https://developers.facebook.com/)
 2. Create a NEW app (don't reuse Facebook/Instagram app)
 3. Add "Threads" product
-4. Configure OAuth redirect URI: `{APP_BASE_URL}/api/connections/threads/callback`
+4. Configure OAuth redirect URI: `{APP_BASE_URL}/sm/api/connections/threads/callback`
 5. Get App ID and App Secret from Dashboard > Settings > Basic
 
 - `TH_APP_ID` - Threads App ID (must be separate from FB/IG)
@@ -91,7 +91,7 @@ Threads API requires a dedicated app registration separate from Facebook/Instagr
    - Google+ API (for userinfo)
 4. Go to "Credentials" > "Create Credentials" > "OAuth 2.0 Client ID"
 5. Configure OAuth consent screen
-6. Add authorized redirect URI: `{APP_BASE_URL}/api/connections/google_sheets/callback` and `{APP_BASE_URL}/api/connections/google_drive/callback`
+6. Add authorized redirect URI: `{APP_BASE_URL}/sm/api/connections/google_sheets/callback` and `{APP_BASE_URL}/sm/api/connections/google_drive/callback`
 7. Get Client ID and Client Secret
 
 - `GOOGLE_CLIENT_ID` - Google OAuth Client ID
@@ -152,10 +152,10 @@ Open http://localhost:3000
 - `GET /api/auth/me` - Get current user
 
 ### Connections (OAuth)
-- `GET /api/connections/:platform/authorize` - Initiate OAuth flow
-- `GET /api/connections/:platform/callback` - OAuth callback
-- `GET /api/connections` - List user connections (protected)
-- `DELETE /api/connections/:id` - Remove connection (protected)
+- `GET /sm/api/connections/:platform/authorize` - Initiate OAuth flow
+- `GET /sm/api/connections/:platform/callback` - OAuth callback
+- `GET /sm/api/connections` - List user connections (protected)
+- `DELETE /sm/api/connections/:id` - Remove connection (protected)
 
 ### Posts
 - `GET /api/posts` - Get all posts (protected)

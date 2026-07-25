@@ -358,7 +358,7 @@ function oauthRouter(supabase) {
     if (!userId) return res.status(401).send('Please log in first, then try connecting again.');
 
     const state = jwt.sign({ sub: userId, platform }, JWT_SECRET, { expiresIn: '10m' });
-    const redirectUri = `${APP_BASE_URL}/api/connections/${platform}/callback`;
+    const redirectUri = `${APP_BASE_URL}/sm/api/connections/${platform}/callback`;
     const params = new URLSearchParams({
       client_id: config.clientId,
       redirect_uri: redirectUri,
@@ -392,7 +392,7 @@ function oauthRouter(supabase) {
       return res.redirect('/sm/dashboard?conn_error=State+mismatch');
     }
 
-    const redirectUri = `${APP_BASE_URL}/api/connections/${platform}/callback`;
+    const redirectUri = `${APP_BASE_URL}/sm/api/connections/${platform}/callback`;
     try {
       const saved = await FINISHERS[platform](supabase, payload.sub, code, redirectUri, config);
       if (saved && saved.needsPageSelection) {
