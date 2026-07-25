@@ -22,7 +22,7 @@ const OAUTH_CONFIGS = {
   facebook: {
     label: 'Facebook',
     authUrl: `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`,
-    scope: 'pages_show_list,pages_read_engagement,pages_read_user_content,read_insights,business_management,pages_manage_metadata,pages_messaging,instagram_basic,instagram_manage_comments,instagram_manage_messages,marketing_messages_messenger,email',
+    scope: 'pages_show_list,pages_read_engagement,pages_read_user_content,read_insights,business_management,pages_manage_metadata,pages_messaging,instagram_basic,instagram_manage_comments,instagram_manage_messages,email',
     clientId: process.env.FB_APP_ID,
     clientSecret: process.env.FB_SECRET,
     webhookVerifyToken: process.env.FB_WEBHOOK_VERIFY_TOKEN,
