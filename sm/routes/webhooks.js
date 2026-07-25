@@ -467,6 +467,14 @@ function router(supabase) {
       console.log(`🔔 Webhook trigger: ${platform}/${triggerType} - Text: "${text?.substring(0, 50)}${text?.length > 50 ? '...' : ''}"`);
 
       const automations = await getActiveAutomations();
+      // TEMPORARY diagnostic — logs exactly what each active automation looks
+      // like right before matching, so a "no matching automation found" can
+      // be traced to the specific field (type/platforms/keywords) causing the
+      // mismatch without needing direct DB access. Remove once DM-matching
+      // issues are confirmed resolved.
+      console.log(`[match-debug] ${platform}/${triggerType} text="${text}" — ${automations.length} active automation(s):`,
+        JSON.stringify(automations.map(a => ({ id: a.id, name: a.name, type: a.type, platforms: a.platforms, keywords: a.keywords, target_published_ids: a.target_published_ids })))
+      );
       const match = findMatch(automations, { platform, triggerType, text, mediaId });
 
       if (!match) {
@@ -731,6 +739,11 @@ function router(supabase) {
       });
 
       const automations = await getActiveAutomations();
+      // TEMPORARY diagnostic — see matching comment in the Facebook handler
+      // above. Remove once DM-matching issues are confirmed resolved.
+      console.log(`[match-debug] ${platform}/${triggerType} text="${text}" — ${automations.length} active automation(s):`,
+        JSON.stringify(automations.map(a => ({ id: a.id, name: a.name, type: a.type, platforms: a.platforms, keywords: a.keywords, target_published_ids: a.target_published_ids })))
+      );
       const match = findMatch(automations, { platform, triggerType, text, mediaId });
 
       if (!match) {
