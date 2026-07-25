@@ -4,11 +4,13 @@ function router(supabase) {
   const r = express.Router();
 
   // GET /api/comments - Fetch recent comments and DMs from automation_logs
+  // Returns latest message per sender_id for each platform/trigger_type combination
   r.get('/', async (req, res) => {
     try {
       const userId = req.user.id || req.user.sub;
       const limit = parseInt(req.query.limit) || 50;
       const platform = req.query.platform; // Optional filter by platform
+      const triggerType = req.query.trigger_type; // Optional filter by trigger_type (comment, dm, message)
 
       // Get connections for this user to filter by their accounts
       let connectionsQuery = supabase
@@ -26,7 +28,8 @@ function router(supabase) {
         return res.json([]);
       }
 
-      // Support both comments and DMs/messages
+      // Build query for latest messages per sender
+      // We use a subquery approach: first get distinct sender_ids, then fetch latest for each
       let logsQuery = supabase
         .from('smc_automation_logs')
         .select('id, platform, trigger_type, trigger_text, media_id, sender_id, account_id, automation_id, automation_name, response_type, response_content, reply_location, success, error_message, created_at')
@@ -34,11 +37,28 @@ function router(supabase) {
         .in('trigger_type', ['comment', 'dm', 'message', 'manual_reply'])
         .order('created_at', { ascending: false })
         .limit(limit);
+      
       if (platform) logsQuery = logsQuery.eq('platform', platform);
+      if (triggerType) logsQuery = logsQuery.eq('trigger_type', triggerType);
 
       const { data, error } = await logsQuery;
       if (error) throw error;
-      res.json(data);
+      
+      // Group by sender_id + platform + trigger_type and keep only the latest per sender
+      const grouped = new Map();
+      (data || []).forEach(item => {
+        if (!item.sender_id) return; // Skip items without sender_id
+        const key = `${item.platform}-${item.trigger_type}-${item.sender_id}`;
+        if (!grouped.has(key)) {
+          grouped.set(key, item);
+        }
+      });
+      
+      // Convert back to array and sort by created_at descending
+      const result = Array.from(grouped.values())
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      
+      res.json(result);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
