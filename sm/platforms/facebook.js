@@ -128,12 +128,16 @@ async function sendDM(token, pageId, recipientId, text, replyToMid) {
     messagePayload.reply_to = { mid: replyToMid };
   }
   
-  const res = await post(`${BASE}/${pageId}/messages`, {
+  const bodyParams = {
     recipient: JSON.stringify(messagePayload.recipient),
     messaging_type: messagePayload.messaging_type,
     message: JSON.stringify(messagePayload.message),
-    reply_to: messagePayload.reply_to ? JSON.stringify(messagePayload.reply_to) : undefined
-  }, token);
+  };
+  if (messagePayload.reply_to) {
+    bodyParams.reply_to = JSON.stringify(messagePayload.reply_to);
+  }
+
+  const res = await post(`${BASE}/${pageId}/messages`, bodyParams, token);
   return res.message_id;
 }
 

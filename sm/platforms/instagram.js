@@ -145,12 +145,16 @@ async function sendDM(token, igId, recipientId, text, conn, replyToMid) {
     };
   }
   
-  const result = await postWithFallback(hosts, `/${igId}/messages`, {
+  const bodyParams = {
     recipient: JSON.stringify(messagePayload.recipient),
     messaging_type: messagePayload.messaging_type,
     message: JSON.stringify(messagePayload.message),
-    reply_to: messagePayload.reply_to ? JSON.stringify(messagePayload.reply_to) : undefined
-  }, token);
+  };
+  if (messagePayload.reply_to) {
+    bodyParams.reply_to = JSON.stringify(messagePayload.reply_to);
+  }
+
+  const result = await postWithFallback(hosts, `/${igId}/messages`, bodyParams, token);
   
   if (!result.success) {
     throw result.error;
