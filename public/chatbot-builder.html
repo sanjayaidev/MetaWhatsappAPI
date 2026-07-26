@@ -695,6 +695,18 @@ document.querySelectorAll('.nav-item').forEach(btn=>{
     if(btn.dataset.view==='templates') renderTemplates();
     if(btn.dataset.view==='integrations') loadIntegrationsStatus();
     if(btn.dataset.view==='connection') renderConnection();
+    if(btn.dataset.view==='rules'){
+      // Docs/Sheets pickers + the sheet-lookup toggle depend on `integrations`
+      // being populated. If the page-load fetch hasn't finished (or failed),
+      // re-check now instead of leaving the Rules tab stuck on stale state.
+      const sheetsInt = integrations.find(i=>i.id==='sheets');
+      const docsInt = integrations.find(i=>i.id==='docs');
+      if(!(sheetsInt && sheetsInt.connected) || !(docsInt && docsInt.connected)){
+        loadIntegrationsStatus().then(()=>renderRuleEditor()).catch(()=>{});
+      } else {
+        renderRuleEditor();
+      }
+    }
   });
 });
 
@@ -2024,11 +2036,16 @@ function escapeAttr(s=''){ return escapeHtml(s).replace(/"/g,'&quot;'); }
 renderRuleList();
 renderRuleEditor();
 updateRailBadge();
-loadFromServer();
 api.listAccounts().then(res=>{connectionState=(res.accounts&&res.accounts[0])||null; updateRailBadge();}).catch(()=>{});
-// So the Rules tab's sheet-lookup picker already knows whether Sheets is
-// connected, instead of only finding out once the user visits Integrations.
-loadIntegrationsStatus().then(()=>renderRuleEditor()).catch(()=>{});
+// loadFromServer() and loadIntegrationsStatus() run concurrently, but each
+// re-renders the Rules editor on its own completion. Whichever settles last
+// used to "win" — if that was loadFromServer(), the freshly-loaded rules got
+// rendered with whatever integrations state existed at that moment, which
+// could still be the disconnected default. Waiting on both before the final
+// render guarantees the Rules tab always reflects the true connection state.
+Promise.all([loadFromServer(), loadIntegrationsStatus()])
+  .then(()=>renderRuleEditor())
+  .catch(()=>{});
 </script>
 </body>
 </html>
