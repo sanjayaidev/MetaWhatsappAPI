@@ -915,7 +915,7 @@ function renderRuleDocPicker(rule){
     return;
   }
   select.disabled = false;
-  const opts = '<option value="">No doc (don't use one)</option>' +
+ const opts = '<option value="">No doc (don&#39;t use one)</option>' +
     availableDocs.map(d=>`<option value="${d.id}" data-name="${escapeAttr(d.name)}" ${current?.docId===d.id?'selected':''}>${escapeHtml(d.name)}</option>`).join('');
   select.innerHTML = availableDocs.length ? opts : '<option value="">No Google Docs found</option>';
 
