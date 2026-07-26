@@ -42,6 +42,7 @@ const createCartModule = require('./src/ecom/cart');
 const createPaymentsModule = require('./src/payments');
 const ecomMessages = require('./src/ecom/messages');
 const { matchRule } = require('./src/routes/bot-engine');
+const createGoogleAuthHelper = require('./src/google-auth');
 const { startSheetPoller } = require('./src/sheet-poller');
 const { startPaymentPoller } = require('./src/payment-poller');
 const createChannelSender = require('./src/channel-send');
@@ -90,6 +91,11 @@ const supabase = createClient(
 // the exact same cart/order logic instead of two divergent copies.
 const ecomCart = createCartModule({ supabase });
 const ecomPayments = createPaymentsModule({ supabase });
+
+// Shared with bot-engine's matchRule() below, so a bot-builder rule with a
+// sheet_lookup configured can fetch a valid Google access token the same way
+// src/routes/flows.js's Sheets endpoints already do.
+const { getValidGoogleAccessToken } = createGoogleAuthHelper({ supabase, encryptToken, decryptToken, fetch });
 
 // ================================================================
 // 2. CRYPTO — AES-256-GCM for WA token encryption
@@ -2226,7 +2232,7 @@ async function handleIncomingMessage(value, msg) {
   if (msg.type === 'text' && msg.text?.body) {
     let match = null;
     try {
-      match = await matchRule({ supabase }, {
+      match = await matchRule({ supabase, getValidGoogleAccessToken }, {
         userId: waAccount.user_id,
         phone: msg.from,
         text: msg.text.body,
@@ -2246,9 +2252,26 @@ async function handleIncomingMessage(value, msg) {
             // by chatbot-builder.html — spreading it straight into the send
             // body (as this used to do) is exactly what Meta was rejecting
             // with "(#100) Invalid parameter". Convert it to a real payload first.
+            //
+            // If the rule has a sheet_lookup configured, let its result fill in
+            // a {{sheet_lookup}} placeholder anywhere in the template's text
+            // fields (body/header/footer/button titles/etc) before validation —
+            // done via a stringify/replace/parse round-trip so it works no matter
+            // which template type (plaintext/buttons/list/cta/product) is in play,
+            // without hardcoding every possible field path.
+            let templatePayload = tpl.payload;
+            if (match.sheetLookupResult) {
+              const value = match.sheetLookupResult.found ? String(match.sheetLookupResult.value) : '';
+              const escaped = JSON.stringify(value).slice(1, -1); // escaped for safe re-embedding, no surrounding quotes
+              try {
+                templatePayload = JSON.parse(JSON.stringify(tpl.payload).split('{{sheet_lookup}}').join(escaped));
+              } catch (e) {
+                console.error('[webhook] sheet_lookup placeholder substitution failed:', e.message);
+              }
+            }
             let payload;
             try {
-              payload = buildBotBuilderTemplatePayload(tpl.type, tpl.payload, msg.from);
+              payload = buildBotBuilderTemplatePayload(tpl.type, templatePayload, msg.from);
             } catch (convErr) {
               console.error('[webhook] bot-engine template payload invalid:', convErr.message);
               return;
@@ -2276,9 +2299,18 @@ async function handleIncomingMessage(value, msg) {
         }
       } else if (match.actionType === 'ai') {
         try {
+          let systemPrompt = match.aiPrompt || 'You are a helpful business assistant.';
+          if (match.docContent) {
+            systemPrompt += `\n\nUse the following knowledge base content to answer questions:\n${match.docContent}`;
+          }
+          if (match.sheetLookupResult) {
+            systemPrompt += match.sheetLookupResult.found
+              ? `\n\nSheet lookup result for this message: "${match.sheetLookupResult.value}". Use this as the answer if it's relevant, in your own words.`
+              : `\n\nA sheet lookup was attempted for this message but found no matching row. Say you don't have that information rather than guessing, and offer to connect the customer with a teammate.`;
+          }
           const replyText = await generateReply({
             model: DEFAULT_AI_MODEL,
-            systemPrompt: match.aiPrompt || 'You are a helpful business assistant.',
+            systemPrompt,
             userText: msg.text.body
           }).catch(() => match.aiFallback);
           if (replyText) {
