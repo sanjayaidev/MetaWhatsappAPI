@@ -204,6 +204,26 @@
   .field-err{border-color:var(--follow) !important;}
   .form-err{font-size:12px;color:var(--follow);margin-top:8px;}
 
+  /* Assistant FAB and Panel */
+  .assistant-fab { position: fixed; bottom: 24px; right: 24px; width: 54px; height: 54px; border-radius: 50%; background: var(--green); display: flex; align-items: center; justify-content: center; font-size: 22px; cursor: pointer; box-shadow: 0 8px 24px rgba(34,209,114,.35); z-index: 500; }
+  .assistant-panel { position: fixed; bottom: 92px; right: 24px; width: 340px; max-height: 460px; background: var(--panel); border: 1px solid var(--line); border-radius: 20px; display: none; flex-direction: column; z-index: 500; box-shadow: 0 16px 48px rgba(0,0,0,.5); }
+  .assistant-panel.open { display: flex; }
+  .assistant-header { padding: 14px 16px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+  .assistant-body { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .assistant-json-body { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .assistant-tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .assistant-tab { flex: 1; text-align: center; padding: 10px 8px; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; }
+  .assistant-tab:hover { color: var(--ink); background: var(--bg); }
+  .assistant-tab.active { color: var(--green-dark); border-bottom-color: var(--green-dark); background: var(--green-light); }
+  .assistant-input-row { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--line); }
+  .msg-bubble { max-width: 85%; padding: 9px 12px; border-radius: 14px; font-size: 13px; line-height: 1.5; word-wrap: break-word; }
+  .msg-bubble p { margin: 0 0 6px; }
+  .msg-bubble p:last-child { margin: 0; }
+  .msg-bubble ul, .msg-bubble ol { margin: 4px 0; padding-left: 16px; }
+  .msg-bubble blockquote { border-left: 3px solid var(--line); padding-left: 10px; margin: 6px 0; color: var(--muted); }
+  .msg-in { align-self: flex-start; background: var(--bg); border-bottom-left-radius: 2px; }
+  .msg-out { align-self: flex-end; background: var(--green-light); color: var(--green-dark); border-bottom-right-radius: 2px; }
+
   @media (max-width:900px){
     .app{grid-template-columns:1fr;}
     .rail{position:relative;height:auto;flex-direction:row;overflow-x:auto;align-items:center;}
@@ -234,6 +254,7 @@
     .block::before{left:-18.5px;}
   }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body><div id="fb-root"></div>
 <script>
@@ -404,6 +425,30 @@
 
   </main>
 </div>
+
+<!-- ══ CHATBOT BUILDER AI ASSISTANT WITH TABS ══ -->
+<div class="assistant-fab" onclick="toggleAssistant()">🤖</div>
+<div class="assistant-panel" id="assistantPanel">
+<div class="assistant-header">
+  <span>🤖 Builder Assistant</span>
+  <span style="cursor:pointer;color:var(--muted);" onclick="toggleAssistant()">✕</span>
+</div>
+<div class="assistant-tabs">
+  <div class="assistant-tab active" data-tab="general" onclick="switchAssistantTab('general')">💬 General Help</div>
+  <div class="assistant-tab" data-tab="json" onclick="switchAssistantTab('json')">📝 JSON Template</div>
+</div>
+<div class="assistant-body" id="assistantBody"><div class="msg-bubble msg-in">Hey — ask me about rules, templates, or how to configure your chatbot.</div></div>
+<div class="assistant-json-body" id="assistantJsonBody" style="display:none;"><div class="msg-bubble msg-in">I'll help you generate JSON message templates. Describe what you need.</div></div>
+<div class="assistant-input-row" id="assistantGeneralInput">
+  <textarea id="assistantInput" placeholder="Ask something…" style="min-height:38px;"></textarea>
+  <button class="btn btn-primary btn-sm" onclick="sendAssistantMessage()">➤</button>
+</div>
+<div class="assistant-input-row" id="assistantJsonInput" style="display:none;">
+  <textarea id="assistantJsonInputField" placeholder="Describe the message template you need…" style="min-height:38px;"></textarea>
+  <button class="btn btn-primary btn-sm" onclick="sendAssistantJsonMessage()">➤</button>
+</div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -418,6 +463,169 @@ let integrations = [
 let selectedRuleId = null;
 let selectedTplId = null;
 let uid = () => Math.random().toString(36).slice(2,9);
+
+// ── ASSISTANT WIDGET WITH TABS ──
+let currentAssistantTab = 'general';
+let assistantConversationHistory = [];
+
+async function loadAssistantHistory() {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(['assistantHistory'], (result) => {
+          assistantConversationHistory = result.assistantHistory || [];
+          resolve(assistantConversationHistory);
+        });
+      });
+    } else {
+      const stored = localStorage.getItem('assistantHistory');
+      assistantConversationHistory = stored ? JSON.parse(stored) : [];
+      return assistantConversationHistory;
+    }
+  } catch (e) {
+    console.error('Failed to load assistant history:', e);
+    assistantConversationHistory = [];
+    return [];
+  }
+}
+
+async function saveAssistantHistory() {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      return new Promise((resolve) => {
+        chrome.storage.local.set({ assistantHistory: assistantConversationHistory }, resolve);
+      });
+    } else {
+      localStorage.setItem('assistantHistory', JSON.stringify(assistantConversationHistory));
+    }
+  } catch (e) {
+    console.error('Failed to save assistant history:', e);
+  }
+}
+
+function renderAssistantMessage(content, isUser, container) {
+  if (isUser) {
+    container.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-out">${escapeHtml(content)}</div>`);
+  } else {
+    const htmlContent = marked.parse(content || '');
+    container.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-in">${htmlContent}</div>`);
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+function toggleAssistant() {
+  const panel = document.getElementById('assistantPanel');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) {
+    loadAssistantHistory().then(() => renderAssistantConversation());
+  }
+}
+
+function renderAssistantConversation() {
+  const body = document.getElementById('assistantBody');
+  body.innerHTML = '';
+  if (assistantConversationHistory.length === 0) {
+    body.innerHTML = '<div class="msg-bubble msg-in">Hey — ask me about rules, templates, or how to configure your chatbot.</div>';
+  } else {
+    assistantConversationHistory.forEach(msg => {
+      renderAssistantMessage(msg.content, msg.role === 'user', body);
+    });
+  }
+}
+
+function switchAssistantTab(tab) {
+  currentAssistantTab = tab;
+  document.querySelectorAll('.assistant-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.assistant-tab[data-tab="${tab}"]`).classList.add('active');
+  if (tab === 'general') {
+    document.getElementById('assistantBody').style.display = 'flex';
+    document.getElementById('assistantJsonBody').style.display = 'none';
+    document.getElementById('assistantGeneralInput').style.display = 'flex';
+    document.getElementById('assistantJsonInput').style.display = 'none';
+  } else {
+    document.getElementById('assistantBody').style.display = 'none';
+    document.getElementById('assistantJsonBody').style.display = 'flex';
+    document.getElementById('assistantGeneralInput').style.display = 'none';
+    document.getElementById('assistantJsonInput').style.display = 'flex';
+  }
+}
+
+async function sendAssistantMessage() {
+  const input = document.getElementById('assistantInput');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  const body = document.getElementById('assistantBody');
+  assistantConversationHistory.push({ role: 'user', content: msg });
+  renderAssistantMessage(msg, true, body);
+  input.value = '';
+  await saveAssistantHistory();
+
+  try {
+    const data = await apiCall('/api/chatbot/assistant-message', 'POST', {
+      message: msg,
+      conversation_history: assistantConversationHistory.filter(m => m.role !== 'system')
+    });
+    const reply = data.reply || 'Assistant backend not wired up yet.';
+    assistantConversationHistory.push({ role: 'assistant', content: reply });
+    renderAssistantMessage(reply, false, body);
+    await saveAssistantHistory();
+  } catch (err) {
+    console.error('Assistant message error:', err);
+    const errorMsg = 'Failed to get response. Please try again.';
+    assistantConversationHistory.push({ role: 'assistant', content: errorMsg });
+    renderAssistantMessage(errorMsg, false, body);
+    await saveAssistantHistory();
+  }
+}
+
+async function sendAssistantJsonMessage() {
+  const input = document.getElementById('assistantJsonInputField');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  const body = document.getElementById('assistantJsonBody');
+  assistantConversationHistory.push({ role: 'user', content: msg });
+  renderAssistantMessage(msg, true, body);
+  input.value = '';
+  await saveAssistantHistory();
+
+  try {
+    const data = await apiCall('/api/chatbot/assistant-json-message', 'POST', {
+      message: msg,
+      conversation_history: assistantConversationHistory.filter(m => m.role !== 'system')
+    });
+
+    let replyText = data.reply || data.error || 'Failed to generate JSON template.';
+    if (data.interactive) {
+      const jsonStr = JSON.stringify(data.interactive, null, 2);
+      const id = 'json_' + Date.now();
+      replyText = '<pre id="' + id + '" style="background:var(--bg);padding:8px;border-radius:8px;overflow-x:auto;font-size:11px;">' + escapeHtml(jsonStr) + '</pre>'
+        + '<button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="copyJsonFromPre(\'' + id + '\')">Copy</button>';
+    }
+
+    assistantConversationHistory.push({ role: 'assistant', content: replyText });
+    renderAssistantMessage(replyText, false, body);
+    await saveAssistantHistory();
+  } catch (err) {
+    console.error('Assistant JSON message error:', err);
+    const errorMsg = 'Failed to generate JSON template.';
+    assistantConversationHistory.push({ role: 'assistant', content: errorMsg });
+    renderAssistantMessage(errorMsg, false, body);
+    await saveAssistantHistory();
+  }
+}
+
+function copyJsonFromPre(preId) {
+  const pre = document.getElementById(preId);
+  if (!pre) return;
+  const text = pre.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    toast('JSON copied to clipboard');
+  }).catch(() => {
+    toast('Failed to copy', true);
+  });
+}
 
 const TYPE_META = {
   plaintext:{label:'Text', icon:'&#128172;'},
