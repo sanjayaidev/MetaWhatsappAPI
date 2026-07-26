@@ -323,8 +323,8 @@
       <!-- Sheet Lookup Configuration -->
       <div id="sheet-lookup-section" style="display:none;margin-top:20px;">
         <div class="card">
-          <div class="card-header"><div class="card-title">📊 Sheet Lookup Configuration</div></div>
-          <p style="font-size:12.5px;color:var(--text2);margin-bottom:15px;">Configure which sheet and columns to use for lookups in your chatbot rules.</p>
+          <div class="card-header"><div class="card-title">📊 Sheet Data Preview</div></div>
+          <p style="font-size:12.5px;color:var(--text2);margin-bottom:15px;">Browse a sheet's columns and rows here. To actually use a sheet lookup in a reply, open a rule in the Rules tab and turn on "Sheet lookup" under its action — each rule can point at a different sheet.</p>
           
           <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;">
             <div style="flex:1;min-width:180px;">
@@ -369,8 +369,8 @@
       <!-- Docs Configuration -->
       <div id="docs-config-section" style="display:none;margin-top:20px;">
         <div class="card">
-          <div class="card-header"><div class="card-title">📄 Google Docs Configuration</div></div>
-          <p style="font-size:12.5px;color:var(--text2);margin-bottom:15px;">Select a document to use as AI grounding context for your chatbot responses.</p>
+          <div class="card-header"><div class="card-title">📄 Google Docs Preview</div></div>
+          <p style="font-size:12.5px;color:var(--text2);margin-bottom:15px;">Browse a doc's content here. To actually ground an AI rule's replies in a doc, open the rule in the Rules tab and pick it under "Knowledge source" — each AI rule can use a different doc.</p>
           
           <div style="margin-bottom:16px;">
             <label style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;">Select Document:</label>
@@ -648,7 +648,12 @@ function newTemplate(type){
 function newRule(){
   return {
     id:uid(), name:'New rule', keywords:[], matchType:'contains',
-    action:{type:'template', templateId:null, aiPrompt:'', aiFallback:"I'll get a teammate to help with that."},
+    // action.config.sheet_lookup (when set) is this rule's own Google Sheet
+    // lookup: {workbookId, workbookName, worksheet, lookupColumn, returnColumn,
+    // matchType}. Because it lives per-rule (not in one global config), each
+    // rule can point at a different sheet/column — that's what gives multiple
+    // sheet lookups across a bot, each triggered by its own keywords.
+    action:{type:'template', templateId:null, aiPrompt:'', aiFallback:"I'll get a teammate to help with that.", config:{}},
     conditions:[], elseTemplateId:null,
     followUp:{enabled:false, hours:4, condition:'no_reply', templateId:null}
   };
@@ -880,18 +885,162 @@ function renderActionBody(rule){
         <label>Fallback if unsure</label>
         <input type="text" id="f-ai-fallback" value="${escapeAttr(rule.action.aiFallback)}" />
       </div>
-      <div class="field">
-        <label>Knowledge source</label>
-        <div style="display:flex;gap:8px;">
-          <span class="tag" style="background:var(--ai-bg);color:var(--ai);">Google Docs</span>
-          <span class="tag" style="background:var(--ai-bg);color:var(--ai);">Product Sheet</span>
-        </div>
-        <p class="hint">Connected in the Integrations tab.</p>
+      <div class="field" id="rl-doc-field">
+        <label>Knowledge source (Google Doc)</label>
+        <select id="rl-doc-select" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+          <option value="">Loading connection status…</option>
+        </select>
+        <p class="hint">The doc's full text is added to the AI's context so it can answer using it. Managed per-rule here — the "Sheet lookup" block below covers structured data (price, stock, order status).</p>
       </div>
     `;
     el.querySelector('#f-ai-prompt').addEventListener('input', e=>{rule.action.aiPrompt=e.target.value;});
     el.querySelector('#f-ai-fallback').addEventListener('input', e=>{rule.action.aiFallback=e.target.value;});
+    renderRuleDocPicker(rule);
   }
+
+  renderRuleSheetLookup(rule, el);
+}
+
+/* ---- Per-rule Google Doc knowledge source for AI-action rules ---- */
+function renderRuleDocPicker(rule){
+  const select = document.getElementById('rl-doc-select');
+  if(!select) return;
+  const docsIntegration = integrations.find(i=>i.id==='docs');
+  if(!rule.action.config) rule.action.config = {};
+  const current = rule.action.config.knowledge_doc || null;
+
+  if(!docsIntegration || !docsIntegration.connected){
+    select.innerHTML = '<option value="">Connect Google Docs in the Integrations tab first</option>';
+    select.disabled = true;
+    return;
+  }
+  select.disabled = false;
+  const opts = '<option value="">No doc (don't use one)</option>' +
+    availableDocs.map(d=>`<option value="${d.id}" data-name="${escapeAttr(d.name)}" ${current?.docId===d.id?'selected':''}>${escapeHtml(d.name)}</option>`).join('');
+  select.innerHTML = availableDocs.length ? opts : '<option value="">No Google Docs found</option>';
+
+  select.addEventListener('change', ()=>{
+    const docId = select.value;
+    if(!docId){ rule.action.config.knowledge_doc = null; return; }
+    const name = select.options[select.selectedIndex]?.dataset?.name || '';
+    rule.action.config.knowledge_doc = { docId, docName: name };
+  });
+}
+
+/* ---- Per-rule Sheet lookup (multiple rules => multiple independent lookups) ---- */
+function renderRuleSheetLookup(rule, actionBodyEl){
+  const sheetsIntegration = integrations.find(i=>i.id==='sheets');
+  if(!sheetsIntegration || !sheetsIntegration.connected){
+    actionBodyEl.insertAdjacentHTML('beforeend', `
+      <div class="field" style="margin-top:6px;">
+        <p class="hint">Connect Google Sheets in the Integrations tab to let this rule look up an answer (price, stock, order status…) from a spreadsheet.</p>
+      </div>
+    `);
+    return;
+  }
+
+  if(!rule.action.config) rule.action.config = {};
+  const lk = rule.action.config.sheet_lookup || null;
+  const enabled = !!(lk && lk.workbookId);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'field';
+  wrap.style.marginTop = '10px';
+  wrap.innerHTML = `
+    <label style="display:flex;align-items:center;justify-content:space-between;">
+      <span>📊 Sheet lookup</span>
+      <span class="switch ${enabled?'on':''}" id="rl-switch"></span>
+    </label>
+    <p class="hint">Looks up the incoming message against a column in a sheet, then uses the matching row's value ${rule.action.type==='ai' ? 'as grounding for the AI reply' : 'to fill a {{sheet_lookup}} placeholder in the template'}.</p>
+    <div id="rl-body" style="${enabled?'':'display:none;'}margin-top:8px;display:grid;gap:8px;">
+      <select id="rl-workbook" style="padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
+        <option value="">Select a workbook…</option>
+        ${availableSheets.map(s=>`<option value="${s.id}" data-name="${escapeAttr(s.name)}" ${lk?.workbookId===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
+      </select>
+      <select id="rl-worksheet" style="padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" ${lk?.workbookId?'':'disabled'}>
+        <option value="">${lk?.workbookId?'Select a sheet…':'Select workbook first'}</option>
+        ${lk?.worksheet?`<option value="${escapeAttr(lk.worksheet)}" selected>${escapeHtml(lk.worksheet)}</option>`:''}
+      </select>
+      <div class="field-row">
+        <select id="rl-lookup-col" style="padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" ${lk?.worksheet?'':'disabled'}>
+          <option value="">${lk?.worksheet?'Lookup column…':'Select sheet first'}</option>
+          ${lk?.lookupColumn?`<option value="${escapeAttr(lk.lookupColumn)}" selected>${escapeHtml(lk.lookupColumn)}</option>`:''}
+        </select>
+        <select id="rl-return-col" style="padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" ${lk?.worksheet?'':'disabled'}>
+          <option value="">${lk?.worksheet?'Return column…':'Select sheet first'}</option>
+          ${lk?.returnColumn?`<option value="${escapeAttr(lk.returnColumn)}" selected>${escapeHtml(lk.returnColumn)}</option>`:''}
+        </select>
+      </div>
+      <div class="seg" id="rl-match-seg">
+        <button data-v="contains" class="${(!lk?.matchType || lk.matchType==='contains')?'on':''}">Contains match</button>
+        <button data-v="exact" class="${lk?.matchType==='exact'?'on':''}">Exact match</button>
+      </div>
+      <p class="hint">Match column: which column in the sheet the incoming message is compared against. Return column: which column's value gets used in the reply.</p>
+    </div>
+  `;
+  actionBodyEl.appendChild(wrap);
+
+  function ensureLookup(){
+    if(!rule.action.config.sheet_lookup) rule.action.config.sheet_lookup = { workbookId:'', workbookName:'', worksheet:'', lookupColumn:'', returnColumn:'', matchType:'contains' };
+    return rule.action.config.sheet_lookup;
+  }
+
+  wrap.querySelector('#rl-switch').addEventListener('click', ()=>{
+    if(enabled){
+      rule.action.config.sheet_lookup = null;
+    } else {
+      ensureLookup();
+    }
+    renderActionBody(rule);
+  });
+
+  const workbookSel = wrap.querySelector('#rl-workbook');
+  const worksheetSel = wrap.querySelector('#rl-worksheet');
+  const lookupColSel = wrap.querySelector('#rl-lookup-col');
+  const returnColSel = wrap.querySelector('#rl-return-col');
+
+  workbookSel?.addEventListener('change', async ()=>{
+    const l = ensureLookup();
+    l.workbookId = workbookSel.value;
+    l.workbookName = workbookSel.options[workbookSel.selectedIndex]?.dataset?.name || '';
+    l.worksheet = ''; l.lookupColumn = ''; l.returnColumn = '';
+    if(!l.workbookId){ renderActionBody(rule); return; }
+    worksheetSel.disabled = true; worksheetSel.innerHTML = '<option value="">Loading sheets…</option>';
+    try{
+      const data = await apiCall(`/oauth/google/worksheets/${encodeURIComponent(l.workbookId)}`);
+      if(data.error || !data.worksheets) throw new Error(data.error || 'Failed to load sheets');
+      worksheetSel.innerHTML = '<option value="">Select a sheet…</option>' + data.worksheets.map(w=>`<option value="${escapeAttr(w)}">${escapeHtml(w)}</option>`).join('');
+      worksheetSel.disabled = false;
+    }catch(err){
+      worksheetSel.innerHTML = '<option value="">Error loading sheets</option>';
+      toast(err.message||'Could not load sheets', true);
+    }
+  });
+
+  worksheetSel?.addEventListener('change', async ()=>{
+    const l = ensureLookup();
+    l.worksheet = worksheetSel.value;
+    l.lookupColumn = ''; l.returnColumn = '';
+    if(!l.worksheet){ renderActionBody(rule); return; }
+    [lookupColSel, returnColSel].forEach(s=>{ s.disabled = true; s.innerHTML = '<option value="">Loading columns…</option>'; });
+    try{
+      const data = await apiCall(`/oauth/google/columns/${encodeURIComponent(l.workbookId)}/${encodeURIComponent(l.worksheet)}`);
+      if(data.error || !data.columns) throw new Error(data.error || 'Failed to load columns');
+      const opts = '<option value="">Select column…</option>' + data.columns.map(c=>`<option value="${escapeAttr(c)}">${escapeHtml(c)}</option>`).join('');
+      lookupColSel.innerHTML = opts; returnColSel.innerHTML = opts;
+      lookupColSel.disabled = false; returnColSel.disabled = false;
+    }catch(err){
+      [lookupColSel, returnColSel].forEach(s=>s.innerHTML = '<option value="">Error loading columns</option>');
+      toast(err.message||'Could not load columns', true);
+    }
+  });
+
+  lookupColSel?.addEventListener('change', ()=>{ ensureLookup().lookupColumn = lookupColSel.value; });
+  returnColSel?.addEventListener('change', ()=>{ ensureLookup().returnColumn = returnColSel.value; });
+  wrap.querySelectorAll('#rl-match-seg button').forEach(b=>b.addEventListener('click', ()=>{
+    ensureLookup().matchType = b.dataset.v;
+    wrap.querySelectorAll('#rl-match-seg button').forEach(x=>x.classList.toggle('on', x===b));
+  }));
 }
 
 function renderConditions(rule){
@@ -1644,7 +1793,7 @@ async function loadFromServer(){
     if(serverRules.length){
       rules = serverRules.map(r=>({
         id:uid(), serverId:r.id, name:r.name, keywords:r.keywords||[], matchType:r.match_type,
-        action:{type:r.action_type, templateId:r.action_template_id, aiPrompt:r.ai_prompt||'', aiFallback:r.ai_fallback||''},
+        action:{type:r.action_type, templateId:r.action_template_id, aiPrompt:r.ai_prompt||'', aiFallback:r.ai_fallback||'', config:r.action_config||{}},
         conditions:r.conditions||[], elseTemplateId:r.else_template_id,
         followUp: (() => {
           const fu = r.follow_up || {enabled:false};
@@ -1877,6 +2026,9 @@ renderRuleEditor();
 updateRailBadge();
 loadFromServer();
 api.listAccounts().then(res=>{connectionState=(res.accounts&&res.accounts[0])||null; updateRailBadge();}).catch(()=>{});
+// So the Rules tab's sheet-lookup picker already knows whether Sheets is
+// connected, instead of only finding out once the user visits Integrations.
+loadIntegrationsStatus().then(()=>renderRuleEditor()).catch(()=>{});
 </script>
 </body>
 </html>
