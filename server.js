@@ -1908,6 +1908,7 @@ app.post('/webhook', async (req, res) => {
       }, null, 2));
     }
   }
+
   // Fire-and-forget audit log of every delivery Meta sends us, valid or not,
   // so webhook issues (missed events, bad signatures, unexpected payload
   // shapes) can be diagnosed after the fact instead of only via console.log.
