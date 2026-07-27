@@ -1740,6 +1740,203 @@ function escapeHtml(str) {
   }[c]));
 }
 
+// ===== Inbox Assistant (chatbot widget) =====
+let currentAssistantTab = 'general';
+// Session conversation history stored in chrome.storage.local (or localStorage fallback)
+let assistantConversationHistory = [];
+
+async function loadAssistantHistory() {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(['assistantHistory'], (result) => {
+          assistantConversationHistory = result.assistantHistory || [];
+          resolve(assistantConversationHistory);
+        });
+      });
+    } else {
+      const stored = localStorage.getItem('assistantHistory');
+      assistantConversationHistory = stored ? JSON.parse(stored) : [];
+      return assistantConversationHistory;
+    }
+  } catch (e) {
+    console.error('Failed to load assistant history:', e);
+    assistantConversationHistory = [];
+    return [];
+  }
+}
+
+async function saveAssistantHistory() {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      return new Promise((resolve) => {
+        chrome.storage.local.set({ assistantHistory: assistantConversationHistory }, resolve);
+      });
+    } else {
+      localStorage.setItem('assistantHistory', JSON.stringify(assistantConversationHistory));
+    }
+  } catch (e) {
+    console.error('Failed to save assistant history:', e);
+  }
+}
+
+function renderAssistantMessage(content, isUser, container) {
+  if (isUser) {
+    container.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-out">${escapeHtml(content)}</div>`);
+  } else {
+    // Parse markdown for AI responses
+    const htmlContent = marked.parse(content || '');
+    container.insertAdjacentHTML('beforeend', `<div class="msg-bubble msg-in">${htmlContent}</div>`);
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+function toggleAssistant() {
+  const panel = document.getElementById('assistantPanel');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) {
+    loadAssistantHistory().then(() => renderAssistantConversation());
+  }
+}
+
+function renderAssistantConversation() {
+  const body = document.getElementById('assistantBody');
+  body.innerHTML = '';
+  if (assistantConversationHistory.length === 0) {
+    body.innerHTML = '<div class="msg-bubble msg-in">Hey — ask me about templates, campaigns, or API usage.</div>';
+  } else {
+    assistantConversationHistory.forEach(msg => {
+      renderAssistantMessage(msg.content, msg.role === 'user', body);
+    });
+  }
+}
+
+function switchAssistantTab(tab) {
+  currentAssistantTab = tab;
+  document.querySelectorAll('.assistant-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.assistant-tab[data-tab="${tab}"]`).classList.add('active');
+  if (tab === 'general') {
+    document.getElementById('assistantBody').style.display = 'flex';
+    document.getElementById('assistantJsonBody').style.display = 'none';
+    document.getElementById('assistantGeneralInput').style.display = 'flex';
+    document.getElementById('assistantJsonInput').style.display = 'none';
+  } else {
+    document.getElementById('assistantBody').style.display = 'none';
+    document.getElementById('assistantJsonBody').style.display = 'flex';
+    document.getElementById('assistantGeneralInput').style.display = 'none';
+    document.getElementById('assistantJsonInput').style.display = 'flex';
+  }
+}
+
+async function sendAssistantMessage() {
+  const input = document.getElementById('assistantInput');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  const body = document.getElementById('assistantBody');
+
+  // Add user message to history and UI
+  assistantConversationHistory.push({ role: 'user', content: msg });
+  renderAssistantMessage(msg, true, body);
+  input.value = '';
+
+  // Save history and send to API with full conversation
+  await saveAssistantHistory();
+
+  try {
+    const data = await apiCall('/api/chatbot/assistant-message', 'POST', {
+      message: msg,
+      conversation_history: assistantConversationHistory.filter(m => m.role !== 'system')
+    });
+
+    // Add AI response to history and UI
+    const reply = data.reply || 'Assistant backend not wired up yet.';
+    assistantConversationHistory.push({ role: 'assistant', content: reply });
+    renderAssistantMessage(reply, false, body);
+    await saveAssistantHistory();
+  } catch (err) {
+    console.error('Assistant message error:', err);
+    const errorMsg = 'Failed to get response. Please try again.';
+    assistantConversationHistory.push({ role: 'assistant', content: errorMsg });
+    renderAssistantMessage(errorMsg, false, body);
+    await saveAssistantHistory();
+  }
+}
+
+async function sendAssistantJsonMessage() {
+  const input = document.getElementById('assistantJsonInputField');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  const body = document.getElementById('assistantJsonBody');
+
+  // Add user message to history
+  assistantConversationHistory.push({ role: 'user', content: msg });
+  renderAssistantMessage(msg, true, body);
+  input.value = '';
+
+  // Save history
+  await saveAssistantHistory();
+
+  // No system_prompt override here — leave it unset so the backend uses its
+  // default, which spells out Meta's actual button/list/cta_url JSON shapes
+  // and limits (see DEFAULT_JSON_SYSTEM_PROMPT in src/routes/chatbot.js),
+  // and the response is validated against those limits before coming back.
+  try {
+    const data = await apiCall('/api/chatbot/assistant-json-message', 'POST', {
+      message: msg,
+      conversation_history: assistantConversationHistory.filter(m => m.role !== 'system')
+    });
+
+    let replyText = data.reply || data.error || 'Failed to generate JSON template.';
+    if (data.interactive) {
+      const jsonStr = JSON.stringify(data.interactive, null, 2);
+      const id = 'json_' + Date.now();
+      replyText = '<pre id="' + id + '" style="background:var(--bg2);padding:8px;border-radius:8px;overflow-x:auto;font-size:11px;">' + escapeHtml(jsonStr) + '</pre>'
+        + '<button class="btn btn-ghost btn-xs" onclick="copyJsonFromPre(\'' + id + '\')">Copy</button>';
+    }
+
+    // Add AI response to history and UI
+    assistantConversationHistory.push({ role: 'assistant', content: replyText });
+    renderAssistantMessage(replyText, false, body);
+    await saveAssistantHistory();
+  } catch (err) {
+    console.error('Assistant JSON message error:', err);
+    const errorMsg = 'Failed to generate JSON template.';
+    assistantConversationHistory.push({ role: 'assistant', content: errorMsg });
+    renderAssistantMessage(errorMsg, false, body);
+    await saveAssistantHistory();
+  }
+}
+
+function copyJsonFromPre(preId) {
+  const pre = document.getElementById(preId);
+  if (!pre) return;
+  const text = pre.textContent;
+
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text)
+      .then(() => showToast('✓ Copied JSON to clipboard'))
+      .catch(() => showToast('Copy failed — select and copy manually'));
+    return;
+  }
+
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showToast('✓ Copied JSON to clipboard');
+  } catch (e) {
+    showToast('Copy failed — select and copy manually');
+  }
+  document.body.removeChild(ta);
+}
+
 // Renders WhatsApp's own markdown subset — *bold*, _italic_, ~strikethrough~,
 // and ```monospace``` — safely: escapes HTML first, then only ever inserts
 // tags we generate ourselves, so user-supplied text can't smuggle markup in
