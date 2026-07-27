@@ -1195,9 +1195,88 @@
 //  API CONFIGURATION & AUTH
 // ====================================================================
 const API_BASE_URL = window.location.origin;
+const SUPABASE_REFRESH_KEY = 'supabase_refresh_token';
 let authToken = null;
+let refreshToken = null;
+let supabaseConfig = null;   // { url, anonKey } — fetched once, lazily
+let refreshTimer = null;     // proactive pre-expiry refresh
+let refreshInFlight = null;  // dedupes concurrent refresh calls (e.g. two
+                              // 401s landing at once from the 30s poll + a
+                              // manual action)
 
-async function apiCall(endpoint, method = 'GET', body = null) {
+// Loads the public Supabase URL/anon key from the server (same endpoint
+// login.html uses) so this page can talk to Supabase's token endpoint
+// directly without hardcoding project credentials here.
+async function getSupabaseConfig() {
+  if (supabaseConfig) return supabaseConfig;
+  const res = await fetch(`${API_BASE_URL}/api/public-config`);
+  const cfg = await res.json();
+  supabaseConfig = { url: cfg.supabaseUrl, anonKey: cfg.supabaseAnonKey };
+  return supabaseConfig;
+}
+
+// Reads the `exp` claim out of a JWT without verifying it — just enough to
+// know when to proactively refresh. Verification of the token itself always
+// happens server-side.
+function decodeJwtExpiryMs(token) {
+  try {
+    const payload = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = JSON.parse(atob(payload));
+    return json.exp ? json.exp * 1000 : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Exchanges the stored refresh_token for a new access_token via Supabase's
+// auth endpoint directly (no need to pull in the full supabase-js SDK for
+// just this). Returns true/false so callers can decide whether to retry
+// or fall back to doLogout().
+async function refreshAuthSession() {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    if (!refreshToken) return false;
+    try {
+      const cfg = await getSupabaseConfig();
+      if (!cfg.url || !cfg.anonKey) return false;
+      const res = await fetch(`${cfg.url}/auth/v1/token?grant_type=refresh_token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: cfg.anonKey },
+        body: JSON.stringify({ refresh_token: refreshToken })
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (!data.access_token) return false;
+      authToken = data.access_token;
+      refreshToken = data.refresh_token || refreshToken;
+      localStorage.setItem('supabase_token', authToken);
+      localStorage.setItem(SUPABASE_REFRESH_KEY, refreshToken);
+      scheduleProactiveRefresh();
+      return true;
+    } catch (err) {
+      console.error('Session refresh failed:', err);
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+// Renews the session ~60s before the access_token actually expires, so the
+// 30s poll and normal usage never have to hit a 401 wall in the first place.
+// The reactive retry-on-401 path below is just a safety net for cases like
+// the device being asleep past the timer.
+function scheduleProactiveRefresh() {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  if (!refreshToken) return;
+  const expMs = decodeJwtExpiryMs(authToken);
+  if (!expMs) return;
+  const delay = Math.max(expMs - Date.now() - 60000, 5000);
+  refreshTimer = setTimeout(() => { refreshAuthSession(); }, delay);
+}
+
+async function apiCall(endpoint, method = 'GET', body = null, _retried = false) {
   const headers = { 'Content-Type': 'application/json' };
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
   const options = { method, headers };
@@ -1206,6 +1285,11 @@ async function apiCall(endpoint, method = 'GET', body = null) {
     const res = await fetch(`${API_BASE_URL}${endpoint}`, options);
     const data = await res.json();
     if (res.status === 401) {
+      // Access token expired (or was rejected) — try a silent refresh once
+      // before giving up and forcing a full re-login.
+      if (!_retried && await refreshAuthSession()) {
+        return apiCall(endpoint, method, body, true);
+      }
       doLogout();
       throw new Error('Session expired');
     }
@@ -1218,7 +1302,10 @@ async function apiCall(endpoint, method = 'GET', body = null) {
 
 function doLogout() {
   authToken = null;
+  refreshToken = null;
+  if (refreshTimer) clearTimeout(refreshTimer);
   localStorage.removeItem('supabase_token');
+  localStorage.removeItem(SUPABASE_REFRESH_KEY);
   window.location.href = '/login.html';
 }
 
@@ -2605,18 +2692,22 @@ async function init() {
 if (window.location.hash && window.location.hash.includes('access_token')) {
   const params = new URLSearchParams(window.location.hash.substring(1));
   const hashToken = params.get('access_token');
+  const hashRefresh = params.get('refresh_token');
   if (hashToken) {
     localStorage.setItem('supabase_token', hashToken);
+    if (hashRefresh) localStorage.setItem(SUPABASE_REFRESH_KEY, hashRefresh);
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 }
 
 const savedToken = localStorage.getItem('supabase_token');
-if (savedToken) { 
-  authToken = savedToken; 
-  init(); 
-} else { 
-  window.location.href = '/login.html'; 
+if (savedToken) {
+  authToken = savedToken;
+  refreshToken = localStorage.getItem(SUPABASE_REFRESH_KEY);
+  scheduleProactiveRefresh();
+  init();
+} else {
+  window.location.href = '/login.html';
 }
 
 // ====================================================================
