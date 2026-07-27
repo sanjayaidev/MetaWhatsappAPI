@@ -1899,6 +1899,15 @@ app.post('/webhook', async (req, res) => {
 
   const body = req.body;
 
+  for (const entry of (body?.entry || [])) {
+    for (const change of (entry.changes || [])) {
+      console.log('[webhook] incoming:', JSON.stringify({
+        waba_id: entry.id,
+        field: change.field,
+        value: change.value
+      }, null, 2));
+    }
+  }
   // Fire-and-forget audit log of every delivery Meta sends us, valid or not,
   // so webhook issues (missed events, bad signatures, unexpected payload
   // shapes) can be diagnosed after the fact instead of only via console.log.
