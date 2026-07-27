@@ -48,6 +48,75 @@ module.exports = function leadsRouter(deps) {
     res.json({ lead: data });
   });
 
+  // GET /api/leads/inbox?q=&channel=
+  // Unified inbox: every lead as a "thread", each annotated with its most
+  // recent message across ALL channels, sorted by that message's time (or
+  // last_activity_at if the lead has no messages yet — e.g. a manually
+  // added lead). This mirrors sm/dashboard's Inbox tab, but built on the
+  // CRM's cross-channel wb_leads/wb_channel_messages model instead of raw
+  // per-platform comment/DM tables.
+  // NOTE: this route must stay registered before GET /:id, or Express will
+  // try to treat "inbox" as a lead id.
+  router.get('/inbox', async (req, res) => {
+    const { q, channel } = req.query;
+    let leadQuery = supabase.from('wb_leads').select('*').eq('user_id', req.user.id);
+    if (q) leadQuery = leadQuery.or(`name.ilike.%${q}%,phone.ilike.%${q}%,email.ilike.%${q}%`);
+    const { data: leads, error: leadsErr } = await leadQuery;
+    if (leadsErr) return res.status(500).json({ error: leadsErr.message });
+    if (!leads || !leads.length) return res.json({ threads: [] });
+
+    const leadIds = leads.map(l => l.id);
+    // Pull recent messages for these leads and keep only the newest per lead
+    // in JS — avoids needing a DB migration just for a "latest per group" query.
+    const { data: messages, error: msgErr } = await supabase.from('wb_channel_messages')
+      .select('lead_id, channel, direction, body, created_at')
+      .in('lead_id', leadIds)
+      .order('created_at', { ascending: false })
+      .limit(3000);
+    if (msgErr) return res.status(500).json({ error: msgErr.message });
+
+    const lastByLead = {};
+    for (const m of (messages || [])) {
+      if (!lastByLead[m.lead_id]) lastByLead[m.lead_id] = m;
+    }
+
+    let threads = leads.map(l => ({
+      id: l.id, name: l.name, phone: l.phone, email: l.email,
+      primary_source: l.primary_source, status: l.status, tags: l.tags,
+      last_activity_at: l.last_activity_at,
+      last_message: lastByLead[l.id] || null,
+      // Simple "needs a reply" signal since there's no read/unread tracking:
+      // the last message on record came from the contact, not from us.
+      needs_reply: !!(lastByLead[l.id] && lastByLead[l.id].direction === 'in')
+    }));
+
+    if (channel) {
+      threads = threads.filter(t => t.primary_source === channel || t.last_message?.channel === channel);
+    }
+
+    threads.sort((a, b) => {
+      const at = a.last_message?.created_at || a.last_activity_at;
+      const bt = b.last_message?.created_at || b.last_activity_at;
+      return new Date(bt) - new Date(at);
+    });
+
+    res.json({ threads, needs_reply_count: threads.filter(t => t.needs_reply).length });
+  });
+
+  // GET /api/leads/:id/thread — every message for this lead across ALL
+  // channels, merged into one chronological feed (unlike /:id/messages,
+  // which is scoped to a single ?channel=). Powers the Inbox's single
+  // conversation pane where a contact may have messaged in on more than
+  // one channel.
+  router.get('/:id/thread', async (req, res) => {
+    const owns = await supabase.from('wb_leads').select('id').eq('id', req.params.id).eq('user_id', req.user.id).single();
+    if (!owns.data) return res.status(404).json({ error: 'Lead not found' });
+    const { data, error } = await supabase.from('wb_channel_messages')
+      .select('*').eq('lead_id', req.params.id).order('created_at', { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ messages: data || [] });
+  });
+
   // GET /api/leads/:id
   router.get('/:id', async (req, res) => {
     const { data, error } = await supabase.from('wb_leads').select('*').eq('id', req.params.id).eq('user_id', req.user.id).single();
