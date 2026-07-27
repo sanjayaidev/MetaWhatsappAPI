@@ -126,6 +126,36 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 .msg-bubble.msg-in blockquote { border-left: 3px solid var(--green); padding-left: 10px; margin: 6px 0; color: var(--text2); }
 .msg-bubble.msg-in h1, .msg-bubble.msg-in h2, .msg-bubble.msg-in h3 { margin: 8px 0 4px; font-weight: 700; }
 .msg-bubble.msg-in img { max-width: 100%; border-radius: 8px; margin: 6px 0; }
+/* Unified Inbox */
+.inbox-layout { display: flex; height: 640px; }
+.inbox-list-pane { width: 320px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.inbox-list-toolbar { padding: 14px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; flex-shrink: 0; }
+.inbox-list-toolbar input { font-size: 12.5px; padding: 8px 10px; }
+.inbox-list-toolbar select { width: auto; flex-shrink: 0; font-size: 12px; padding: 8px 8px; }
+.inbox-thread-list { flex: 1; overflow-y: auto; }
+.inbox-thread-item { display: flex; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); cursor: pointer; position: relative; }
+.inbox-thread-item:hover { background: var(--surface2); }
+.inbox-thread-item.active { background: var(--green-dim); }
+.inbox-thread-item.active .inbox-thread-name { color: var(--green); }
+.inbox-thread-top { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+.inbox-thread-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 165px; }
+.inbox-thread-time { font-size: 10px; color: var(--text3); flex-shrink: 0; }
+.inbox-thread-preview { font-size: 12px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; display: flex; align-items: center; gap: 5px; }
+.inbox-thread-preview .out-marker { color: var(--text3); flex-shrink: 0; }
+.inbox-needs-reply-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; margin-top: 4px; }
+.inbox-thread-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.inbox-thread-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+.inbox-thread-header-info { display: flex; align-items: center; gap: 12px; }
+.inbox-thread-body { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.inbox-msg-channel-tag { font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text3); margin-bottom: 2px; }
+.inbox-reply-bar { border-top: 1px solid var(--border); padding: 12px 16px; display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0; }
+.inbox-reply-bar select { width: auto; flex-shrink: 0; font-size: 12px; padding: 10px 8px; }
+.inbox-reply-bar textarea { min-height: 42px; max-height: 120px; }
+@media (max-width: 860px) {
+  .inbox-layout { flex-direction: column; height: auto; }
+  .inbox-list-pane { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 320px; }
+  .inbox-thread-pane { height: 520px; }
+}
 .plan-card { border: 1px solid var(--border2); border-radius: 16px; padding: 20px; text-align: center; } .plan-card.current { border-color: var(--green); background: var(--green-dim); }
 .provider-row { display: flex; gap: 8px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
 </style>
@@ -145,6 +175,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div class="nav-section">
 <div class="nav-section-label">Pipeline</div>
 <div class="nav-item active" data-tab="leads"><span class="nav-icon">🎯</span> Leads <span class="nav-count" id="navLeadsCount">0</span></div>
+<div class="nav-item" data-tab="inbox"><span class="nav-icon">📥</span> Inbox <span class="nav-count" id="navInboxCount">0</span></div>
 <div class="nav-item" data-tab="meetings"><span class="nav-icon">📅</span> Meetings</div>
 </div>
 <div class="nav-section">
@@ -221,6 +252,35 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🎯</div><p>No leads yet. Connect a source or add one manually.</p></div></td></tr>
 </tbody>
 </table>
+</div>
+</div>
+</div>
+
+<!-- ══ INBOX ══ -->
+<div class="tab-panel" id="tab-inbox">
+<div class="page-header"><div><div class="page-title">Inbox</div><div class="page-sub">Every conversation, every channel, in one place</div></div><button class="btn btn-ghost btn-sm" onclick="loadInboxThreads()">↻ Refresh</button></div>
+<div class="card" style="padding:0;overflow:hidden;">
+<div class="inbox-layout">
+  <div class="inbox-list-pane">
+    <div class="inbox-list-toolbar">
+      <input type="text" id="inboxSearch" placeholder="🔍 Search…" oninput="debouncedLoadInboxThreads()">
+      <select id="inboxChannelFilter" onchange="loadInboxThreads()">
+        <option value="">All</option>
+        <option value="whatsapp">📱</option>
+        <option value="instagram">📷</option>
+        <option value="facebook">👥</option>
+        <option value="webform">📝</option>
+        <option value="email">📧</option>
+        <option value="web_chat">🤖</option>
+      </select>
+    </div>
+    <div id="inboxThreadList" class="inbox-thread-list">
+      <div class="empty-state"><p>Loading…</p></div>
+    </div>
+  </div>
+  <div class="inbox-thread-pane" id="inboxThreadPane">
+    <div class="empty-state" style="margin:auto;"><div class="empty-icon">📥</div><p>Select a conversation to view it here.</p></div>
+  </div>
 </div>
 </div>
 </div>
@@ -703,6 +763,7 @@ document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
 });
 function loadTabData(tab) {
   if (tab === 'leads') loadLeads();
+  if (tab === 'inbox') loadInboxThreads();
   if (tab === 'meetings') loadMeetings();
   if (tab === 'sources') loadIntegrations();
   if (tab === 'fieldmapping') { loadFieldMappings('webform'); loadFieldMappings('sheet'); }
@@ -759,6 +820,128 @@ async function createLead() {
   const data = await apiCall('/api/leads', 'POST', body);
   if (data.error) { showToast('Failed: ' + data.error, true); return; }
   showToast('✅ Lead added'); closeModal('newLeadModal'); loadLeads();
+}
+
+// ── UNIFIED INBOX ──
+let inboxSearchTimer = null;
+let currentInboxLeadId = null;
+let currentInboxThreads = [];
+
+function debouncedLoadInboxThreads() { clearTimeout(inboxSearchTimer); inboxSearchTimer = setTimeout(loadInboxThreads, 350); }
+
+async function loadInboxThreads() {
+  const q = document.getElementById('inboxSearch').value.trim();
+  const channel = document.getElementById('inboxChannelFilter').value;
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (channel) params.set('channel', channel);
+
+  const listEl = document.getElementById('inboxThreadList');
+  const data = await apiCall('/api/leads/inbox?' + params.toString());
+  if (data.error) { listEl.innerHTML = `<div class="empty-state"><p>Couldn't load inbox.</p></div>`; return; }
+
+  currentInboxThreads = data.threads || [];
+  const badge = document.getElementById('navInboxCount');
+  if (badge) badge.textContent = data.needs_reply_count || 0;
+
+  if (!currentInboxThreads.length) {
+    listEl.innerHTML = `<div class="empty-state"><div class="empty-icon">📥</div><p>No conversations yet.</p></div>`;
+    return;
+  }
+
+  listEl.innerHTML = currentInboxThreads.map(t => {
+    const lm = t.last_message;
+    const preview = lm ? escapeHtml((lm.body || '').slice(0, 60)) : 'No messages yet';
+    const outMarker = lm && lm.direction === 'out' ? '<span class="out-marker">You:</span>' : '';
+    const time = timeAgo(lm ? lm.created_at : t.last_activity_at);
+    const icon = SOURCE_ICON[(lm && lm.channel) || t.primary_source] || '🎯';
+    return `<div class="inbox-thread-item ${t.id === currentInboxLeadId ? 'active' : ''}" onclick="openInboxThread('${t.id}')">
+      <div class="lead-avatar" style="width:36px;height:36px;font-size:13px;">${escapeHtml((t.name || '?').charAt(0).toUpperCase())}</div>
+      <div style="flex:1;min-width:0;">
+        <div class="inbox-thread-top">
+          <div class="inbox-thread-name">${escapeHtml(t.name || t.phone || t.email || 'Unnamed')}</div>
+          <div class="inbox-thread-time">${icon} ${time}</div>
+        </div>
+        <div class="inbox-thread-preview">${outMarker} ${preview}</div>
+      </div>
+      ${t.needs_reply ? '<div class="inbox-needs-reply-dot" title="Needs a reply"></div>' : ''}
+    </div>`;
+  }).join('');
+}
+
+async function refreshInboxBadge() {
+  const data = await apiCall('/api/leads/inbox');
+  if (!data.error) {
+    const badge = document.getElementById('navInboxCount');
+    if (badge) badge.textContent = data.needs_reply_count || 0;
+  }
+}
+
+async function openInboxThread(leadId) {
+  currentInboxLeadId = leadId;
+  document.querySelectorAll('.inbox-thread-item').forEach(el => el.classList.remove('active'));
+  await loadInboxThreads(); // re-render list so the active row highlights correctly
+
+  const thread = currentInboxThreads.find(t => t.id === leadId);
+  const pane = document.getElementById('inboxThreadPane');
+  if (!thread) return;
+
+  const defaultChannel = thread.last_message?.channel || thread.primary_source || 'whatsapp';
+
+  pane.innerHTML = `
+    <div class="inbox-thread-header">
+      <div class="inbox-thread-header-info">
+        <div class="lead-avatar">${escapeHtml((thread.name || '?').charAt(0).toUpperCase())}</div>
+        <div>
+          <div style="font-weight:700;font-size:14px;">${escapeHtml(thread.name || thread.phone || thread.email || 'Unnamed')}</div>
+          <div style="font-size:11.5px;color:var(--text2);">${[thread.phone, thread.email].filter(Boolean).map(escapeHtml).join(' · ')}</div>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="openLead('${thread.id}')">Full details ↗</button>
+    </div>
+    <div class="inbox-thread-body" id="inboxThreadBody"><div class="empty-state"><p>Loading…</p></div></div>
+    <div class="inbox-reply-bar">
+      <select id="inboxReplyChannel">
+        <option value="whatsapp" ${defaultChannel === 'whatsapp' ? 'selected' : ''}>📱 WhatsApp</option>
+        <option value="instagram" ${defaultChannel === 'instagram' ? 'selected' : ''}>📷 Instagram</option>
+        <option value="facebook" ${defaultChannel === 'facebook' ? 'selected' : ''}>👥 Facebook</option>
+        <option value="email" ${defaultChannel === 'email' ? 'selected' : ''}>📧 Email</option>
+      </select>
+      <textarea id="inboxReplyBox" placeholder="Type a reply…" rows="1"></textarea>
+      <button class="btn btn-primary btn-sm" onclick="sendInboxReply()">Send</button>
+    </div>`;
+
+  loadInboxThreadMessages(leadId);
+}
+
+async function loadInboxThreadMessages(leadId) {
+  const data = await apiCall(`/api/leads/${leadId}/thread`);
+  const el = document.getElementById('inboxThreadBody');
+  if (!el) return; // pane was closed/switched before this resolved
+  if (data.error || !data.messages || !data.messages.length) {
+    el.innerHTML = '<div class="empty-state"><p>No messages yet.</p></div>';
+    return;
+  }
+  el.innerHTML = data.messages.map(m => `<div class="msg-bubble msg-${m.direction}">
+      <div class="inbox-msg-channel-tag">${SOURCE_ICON[m.channel] || ''} ${escapeHtml(m.channel)}</div>
+      ${escapeHtml(m.body || '')}
+      <div class="msg-time">${timeAgo(m.created_at)}</div>
+    </div>`).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+async function sendInboxReply() {
+  if (!currentInboxLeadId) return;
+  const box = document.getElementById('inboxReplyBox');
+  const channel = document.getElementById('inboxReplyChannel').value;
+  const body = box.value.trim();
+  if (!body) return;
+
+  const data = await apiCall(`/api/leads/${currentInboxLeadId}/messages`, 'POST', { channel, body });
+  if (data.error) { showToast('Failed to send: ' + data.error, true); return; }
+  box.value = '';
+  loadInboxThreadMessages(currentInboxLeadId);
+  loadInboxThreads();
 }
 
 // ── LEAD DETAIL ──
@@ -1912,6 +2095,7 @@ async function initApp() {
   }
   document.getElementById('app').style.display = 'block';
   loadLeads();
+  refreshInboxBadge();
 }
 const savedToken = localStorage.getItem('supabase_token');
 if (savedToken) { authToken = savedToken; initApp(); } else { window.location.href = '/login.html'; }
