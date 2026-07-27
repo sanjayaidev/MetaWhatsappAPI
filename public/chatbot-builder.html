@@ -1697,6 +1697,8 @@ let apiOnline = false;
 
 function getAuthToken(){ return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || ''; }
 
+function doLogout(){ localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY); window.location.href = '/chatbot-login.html'; }
+
 async function apiCall(path, opts={}){
   const token = getAuthToken();
   const res = await fetch(API_BASE + path, {
@@ -1706,6 +1708,7 @@ async function apiCall(path, opts={}){
     },
     ...opts
   });
+  if(res.status === 401){ doLogout(); throw new Error('Session expired'); }
   if(!res.ok){ const e = await res.json().catch(()=>({error:res.statusText})); throw new Error(e.error||'Request failed'); }
   return res.status===204 ? null : res.json();
 }
@@ -2033,6 +2036,7 @@ function escapeHtml(s=''){ return s.replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;
 function escapeAttr(s=''){ return escapeHtml(s).replace(/"/g,'&quot;'); }
 
 /* ---------------- INIT ---------------- */
+if (!getAuthToken()) { window.location.href = '/chatbot-login.html'; }
 renderRuleList();
 renderRuleEditor();
 updateRailBadge();
