@@ -1,1 +1,28 @@
-Nothing should be ignored since the changes only include source files (.html, .js) without any build artifacts, dependencies, or temporary files.
+# Dependencies
+node_modules/
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Build artifacts
+dist/
+build/
+
+# Misc
+*.pem
+*.key
+coverage/
