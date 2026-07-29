@@ -1,350 +1,130 @@
-// src/payments.js — provider-agnostic checkout + verification, shared by any
-// module that needs to take a payment (ecom checkout, CRM billing, chatbot
-// builder "pay now" buttons, etc). Adapted from the donationalert project's
-// single-amount "tip" checkout: same three providers (Razorpay, Stripe,
-// PayPal) and the same create → pending-row → verify/poll pattern, but
-// generalized to take a cart (array of line items) instead of one fixed
-// amount, and to write to this repo's wb_orders / wb_order_items tables
-// instead of a `donations` table.
+// src/payments.js — routes checkout/verification to each CLIENT'S OWN
+// PaymentGatewayAPI deployment (https://github.com/sanjaymeherdev/PaymentGatewayAPI),
+// instead of holding Razorpay/Stripe/PayPal/Cashfree credentials directly in
+// this app's env vars. Each client (wb_ecom_settings row) has their own
+// gateway_base_url + encrypted gateway_api_key, so a client's payment
+// credentials/transactions never mix with another client's.
 //
-// Usage:
+// This app now knows NOTHING about individual payment providers — it just
+// forwards { provider, amount, name, email, ... } to whichever gateway URL
+// is configured for that order's merchant, per PaymentGatewayAPI's
+// generic /api/create-order and /api/verify-order contract.
+//
+// Usage (interface unchanged from the old per-provider version, so
+// ecom.js / payments-webhook.js / payment-poller.js / server.js call sites
+// do not need to change, EXCEPT verifyWebhookSignature — see note below):
 //   const payments = require('./payments')({ supabase });
 //   const { checkout_url, provider_order_id } = await payments.createCheckout({
-//     provider: 'razorpay', order, items, successUrl, cancelUrl,
+//     order, items, successUrl, cancelUrl, // order.provider still selects razorpay/stripe/paypal/cashfree
 //   });
-//   ... later, from a webhook or poll ...
-//   const status = await payments.verifyPayment({ provider, order });
+//   const status = await payments.verifyPayment({ order });
 
 const fetch = require('node-fetch');
+const { decryptToken } = require('./crypto');
 
 module.exports = function createPaymentsModule({ supabase }) {
-  const isTestMode = process.env.PAYMENTS_TEST_MODE !== 'false'; // default to test/sandbox unless explicitly turned off
+  // ─── Per-client gateway config ────────────────────────────────────────────
+  // Looked up fresh each call rather than cached, so a client rotating their
+  // GATEWAY_API_KEY or switching deployments takes effect immediately.
+  async function gatewayConfigFor(userId) {
+    if (!userId) throw new Error('order.user_id is required to resolve a gateway config');
 
-  function creds(provider) {
-    const upper = provider.toUpperCase();
-    const test = (name) => process.env[`${upper}_TEST_${name}`] || process.env[`${upper}_${name}`];
-    const live = (name) => process.env[`${upper}_${name}`];
-    return isTestMode ? test : live;
-  }
-
-  // ─── Razorpay ────────────────────────────────────────────────────────────
-  async function createRazorpayOrder({ order, successUrl }) {
-    const get = creds('razorpay');
-    const keyId = get('KEY_ID');
-    const keySecret = get('KEY_SECRET');
-    if (!keyId || !keySecret) throw new Error(`Razorpay credentials not set for ${isTestMode ? 'TEST' : 'PRODUCTION'} mode`);
-
-    const res = await fetch('https://api.razorpay.com/v1/orders', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64'),
-      },
-      body: JSON.stringify({
-        amount: Math.round(Number(order.amount) * 100), // paise
-        currency: order.currency || 'INR',
-        receipt: order.id,
-        notes: { order_id: order.id, contact_name: order.contact_name || '' },
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error?.description || `Razorpay order creation failed (${res.status})`);
-    return {
-      provider_order_id: data.id,
-      checkout_url: null, // Razorpay uses Checkout.js client-side with key_id + order_id, not a redirect URL
-      client_fields: { razorpay_key_id: keyId, razorpay_order_id: data.id },
-    };
-  }
-
-  async function verifyRazorpayOrder({ order }) {
-    const get = creds('razorpay');
-    const keyId = get('KEY_ID');
-    const keySecret = get('KEY_SECRET');
-    const res = await fetch(`https://api.razorpay.com/v1/orders/${order.provider_order_id}/payments`, {
-      headers: { Authorization: 'Basic ' + Buffer.from(`${keyId}:${keySecret}`).toString('base64') },
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error?.description || 'Razorpay payment lookup failed');
-    const captured = (data.items || []).find((p) => p.status === 'captured');
-    return captured ? 'paid' : 'pending';
-  }
-
-  function verifyRazorpayWebhookSignature(rawBody, signatureHeader) {
-    const crypto = require('crypto');
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-    if (!secret) return false;
-    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-    return expected === signatureHeader;
-  }
-
-  // ─── Stripe ──────────────────────────────────────────────────────────────
-  async function createStripeSession({ order, items, successUrl, cancelUrl }) {
-    const get = creds('stripe');
-    const secretKey = get('SECRET_KEY');
-    if (!secretKey) throw new Error(`Stripe credentials not set for ${isTestMode ? 'TEST' : 'PRODUCTION'} mode`);
-    const currency = (order.currency || 'usd').toLowerCase();
-
-    const body = new URLSearchParams();
-    body.append('mode', 'payment');
-    body.append('success_url', successUrl);
-    body.append('cancel_url', cancelUrl);
-    body.append('client_reference_id', order.id);
-    if (order.contact_email) body.append('customer_email', order.contact_email);
-    body.append('metadata[order_id]', order.id);
-
-    (items && items.length ? items : [{ name: 'Order', unit_price: order.amount, quantity: 1 }]).forEach((item, i) => {
-      body.append(`line_items[${i}][quantity]`, String(item.quantity || 1));
-      body.append(`line_items[${i}][price_data][currency]`, currency);
-      body.append(`line_items[${i}][price_data][unit_amount]`, String(Math.round(Number(item.unit_price) * 100)));
-      body.append(`line_items[${i}][price_data][product_data][name]`, item.name || 'Item');
-    });
-
-    const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Bearer ${secretKey}` },
-      body: body.toString(),
-    });
-    const session = await res.json();
-    if (!res.ok || !session.url) throw new Error(session.error?.message || `Stripe checkout session creation failed (${res.status})`);
-    return { provider_order_id: session.id, checkout_url: session.url, client_fields: {} };
-  }
-
-  async function verifyStripeSession({ order }) {
-    const get = creds('stripe');
-    const secretKey = get('SECRET_KEY');
-    const res = await fetch(`https://api.stripe.com/v1/checkout/sessions/${order.provider_order_id}`, {
-      headers: { Authorization: `Bearer ${secretKey}` },
-    });
-    const session = await res.json();
-    if (!res.ok) throw new Error(session.error?.message || 'Stripe session lookup failed');
-    if (session.payment_status === 'paid') return 'paid';
-    if (session.status === 'expired') return 'failed';
-    return 'pending';
-  }
-
-  // Stripe signature verification without the stripe SDK: same construction
-  // Stripe's own libraries use — HMAC-SHA256 over "{timestamp}.{rawBody}"
-  // with the webhook signing secret, compared against the v1 signature(s)
-  // in the Stripe-Signature header.
-  function verifyStripeWebhookSignature(rawBody, sigHeader) {
-    const crypto = require('crypto');
-    const secret = process.env.STRIPE_WEBHOOK_SECRET;
-    if (!secret || !sigHeader) return false;
-    const parts = Object.fromEntries(sigHeader.split(',').map((p) => p.split('=')));
-    if (!parts.t || !parts.v1) return false;
-    const expected = crypto.createHmac('sha256', secret).update(`${parts.t}.${rawBody}`).digest('hex');
-    return expected === parts.v1;
-  }
-
-  // ─── PayPal ──────────────────────────────────────────────────────────────
-  async function paypalAccessToken() {
-    const get = creds('paypal');
-    const clientId = get('CLIENT_ID');
-    const clientSecret = get('CLIENT_SECRET');
-    if (!clientId || !clientSecret) throw new Error(`PayPal credentials not set for ${isTestMode ? 'TEST' : 'PRODUCTION'} mode`);
-    const base = isTestMode ? 'https://api-m.sandbox.paypal.com' : 'https://api-m.paypal.com';
-    const res = await fetch(`${base}/v1/oauth2/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64'),
-      },
-      body: 'grant_type=client_credentials',
-    });
-    const data = await res.json();
-    if (!res.ok || !data.access_token) throw new Error('PayPal token fetch failed');
-    return { accessToken: data.access_token, base };
-  }
-
-  async function createPaypalOrder({ order, items, successUrl, cancelUrl }) {
-    const { accessToken, base } = await paypalAccessToken();
-    const currency = (order.currency || 'USD').toUpperCase();
-    const res = await fetch(`${base}/v2/checkout/orders`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({
-        intent: 'CAPTURE',
-        purchase_units: [{
-          reference_id: order.id,
-          custom_id: order.id,
-          amount: { currency_code: currency, value: Number(order.amount).toFixed(2) },
-        }],
-        application_context: {
-          return_url: successUrl,
-          cancel_url: cancelUrl,
-          user_action: 'PAY_NOW',
-        },
-      }),
-    });
-    const data = await res.json();
-    const approvalUrl = data.links?.find((l) => l.rel === 'approve')?.href;
-    if (!res.ok || !approvalUrl) throw new Error(data.message || `PayPal order creation failed (${res.status})`);
-    return { provider_order_id: data.id, checkout_url: approvalUrl, client_fields: {} };
-  }
-
-  async function verifyPaypalOrder({ order }) {
-    const { accessToken, base } = await paypalAccessToken();
-    const res = await fetch(`${base}/v2/checkout/orders/${order.provider_order_id}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'PayPal order lookup failed');
-    if (data.status === 'COMPLETED') return 'paid';
-    if (data.status === 'APPROVED') {
-      // Approved but not yet captured — capture now so funds actually move.
-      const captureRes = await fetch(`${base}/v2/checkout/orders/${order.provider_order_id}/capture`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      });
-      const captureData = await captureRes.json();
-      if (captureRes.ok && captureData.status === 'COMPLETED') return 'paid';
-      return 'pending';
+    const { data, error } = await supabase
+      .from('wb_ecom_settings')
+      .select('gateway_base_url, gateway_api_key_encrypted')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw new Error(`Failed to load gateway config: ${error.message}`);
+    if (!data || !data.gateway_base_url || !data.gateway_api_key_encrypted) {
+      throw new Error(`No payment gateway configured for merchant ${userId}. Set gateway_base_url and gateway_api_key_encrypted in wb_ecom_settings.`);
     }
-    if (data.status === 'VOIDED') return 'failed';
-    return 'pending';
-  }
 
-  // PayPal webhook verification requires a round-trip to PayPal's own
-  // verify-webhook-signature endpoint (there's no local HMAC scheme, unlike
-  // Razorpay/Stripe) — done here rather than trusting the payload as-is.
-  async function verifyPaypalWebhookSignature(rawBody, headers) {
+    let apiKey;
     try {
-      const { accessToken, base } = await paypalAccessToken();
-      const webhookId = process.env.PAYPAL_WEBHOOK_ID;
-      if (!webhookId) return false;
-      const res = await fetch(`${base}/v1/notifications/verify-webhook-signature`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({
-          auth_algo: headers['paypal-auth-algo'],
-          cert_url: headers['paypal-cert-url'],
-          transmission_id: headers['paypal-transmission-id'],
-          transmission_sig: headers['paypal-transmission-sig'],
-          transmission_time: headers['paypal-transmission-time'],
-          webhook_id: webhookId,
-          webhook_event: JSON.parse(rawBody),
-        }),
-      });
-      const data = await res.json();
-      return data.verification_status === 'SUCCESS';
-    } catch {
-      return false;
+      apiKey = decryptToken(data.gateway_api_key_encrypted);
+    } catch (e) {
+      throw new Error(`Failed to decrypt gateway_api_key for merchant ${userId}: ${e.message}`);
     }
+
+    // Defensive: reject anything that isn't a normal https URL, so a bad
+    // row in the DB can't be used to make this server call an internal/
+    // non-http(s) address (SSRF via a compromised/typo'd config row).
+    let base;
+    try {
+      base = new URL(data.gateway_base_url);
+    } catch {
+      throw new Error(`gateway_base_url for merchant ${userId} is not a valid URL`);
+    }
+    if (base.protocol !== 'https:') {
+      throw new Error(`gateway_base_url for merchant ${userId} must be https`);
+    }
+
+    return { baseUrl: base.origin, apiKey };
   }
 
-  // ─── Cashfree ────────────────────────────────────────────────────────────
-  const CASHFREE_API_VERSION = '2023-08-01';
-
-  function cashfreeBase() {
-    return isTestMode ? 'https://sandbox.cashfree.com/pg' : 'https://api.cashfree.com/pg';
-  }
-
-  // Unlike Razorpay/Stripe/PayPal, Cashfree requires the merchant to assign
-  // the order_id up front rather than returning one — so we reuse our own
-  // wb_orders row id as Cashfree's order_id. That means no separate
-  // provider_order_id needs to be minted or looked up: verification and
-  // webhook matching both just use order.id directly.
-  async function createCashfreeOrder({ order, successUrl }) {
-    const get = creds('cashfree');
-    const appId = get('APP_ID');
-    const secretKey = get('SECRET_KEY');
-    if (!appId || !secretKey) throw new Error(`Cashfree credentials not set for ${isTestMode ? 'TEST' : 'PRODUCTION'} mode`);
-
-    const res = await fetch(`${cashfreeBase()}/orders`, {
+  async function gatewayFetch(userId, path, body) {
+    const { baseUrl, apiKey } = await gatewayConfigFor(userId);
+    const res = await fetch(`${baseUrl}${path}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-version': CASHFREE_API_VERSION,
-        'x-client-id': appId,
-        'x-client-secret': secretKey,
-      },
-      body: JSON.stringify({
-        order_id: order.id,
-        order_amount: Number(Number(order.amount).toFixed(2)), // max 2 decimals
-        order_currency: order.currency || 'INR',
-        customer_details: {
-          customer_id: `cust_${order.id}`,
-          customer_name: order.contact_name || 'Customer',
-          customer_email: order.contact_email || 'no-reply@example.com',
-          customer_phone: order.contact_phone || '9999999999', // required by CF; may not have a real one on file
-        },
-        // {order_id} is a REQUIRED literal placeholder — Cashfree substitutes
-        // it on redirect. Only used for the post-payment redirect-back;
-        // client_fields.cashfree_payment_session_id is what actually mounts
-        // the checkout drop-in on our own /ecom-pay.html.
-        order_meta: { return_url: successUrl || null },
-      }),
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify(body),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || `Cashfree order creation failed (${res.status})`);
-    if (!data.payment_session_id) throw new Error('No payment_session_id returned by Cashfree');
-    return {
-      provider_order_id: order.id, // = Cashfree's order_id, set above
-      checkout_url: null, // Cashfree Checkout JS mounts client-side via payment_session_id, same pattern as Razorpay
-      client_fields: {
-        cashfree_payment_session_id: data.payment_session_id,
-        cashfree_order_id: order.id,
-        cashfree_mode: isTestMode ? 'sandbox' : 'production',
-      },
-    };
-  }
-
-  async function verifyCashfreeOrder({ order }) {
-    const get = creds('cashfree');
-    const appId = get('APP_ID');
-    const secretKey = get('SECRET_KEY');
-    const res = await fetch(`${cashfreeBase()}/orders/${order.provider_order_id}`, {
-      headers: {
-        'x-api-version': CASHFREE_API_VERSION,
-        'x-client-id': appId,
-        'x-client-secret': secretKey,
-      },
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Cashfree order lookup failed');
-    if (data.order_status === 'PAID') return 'paid';
-    if (data.order_status === 'EXPIRED' || data.order_status === 'TERMINATED') return 'failed';
-    return 'pending'; // ACTIVE / PENDING / etc.
-  }
-
-  // Cashfree webhooks are signed with the same client secret used for API
-  // calls (there's no separate webhook signing secret to generate, unlike
-  // Stripe/Razorpay): base64(HMAC-SHA256(timestamp + rawBody, secretKey)),
-  // compared against the x-webhook-signature header.
-  function verifyCashfreeWebhookSignature(rawBody, headers) {
-    const crypto = require('crypto');
-    const get = creds('cashfree');
-    const secretKey = get('SECRET_KEY');
-    const signature = headers['x-webhook-signature'];
-    const timestamp = headers['x-webhook-timestamp'];
-    if (!secretKey || !signature || !timestamp) return false;
-    const expected = crypto.createHmac('sha256', secretKey).update(timestamp + rawBody).digest('base64');
-    return expected === signature;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `Gateway request ${path} failed (${res.status})`);
+    }
+    return data;
   }
 
   // ─── Unified interface ───────────────────────────────────────────────────
-  async function createCheckout({ provider, order, items, successUrl, cancelUrl }) {
-    if (provider === 'razorpay') return createRazorpayOrder({ order, successUrl });
-    if (provider === 'stripe') return createStripeSession({ order, items, successUrl, cancelUrl });
-    if (provider === 'paypal') return createPaypalOrder({ order, items, successUrl, cancelUrl });
-    if (provider === 'cashfree') return createCashfreeOrder({ order, successUrl });
-    throw new Error(`Unsupported payment provider: ${provider}`);
+  async function createCheckout({ order, items, successUrl, cancelUrl }) {
+    const data = await gatewayFetch(order.user_id, '/api/create-order', {
+      provider: order.provider,
+      amount: order.amount,
+      name: order.contact_name || 'Customer',
+      email: order.contact_email || undefined,
+      message: order.id,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      // The gateway fires this once it independently confirms payment.
+      // Treated as a trigger-to-recheck, NOT as trusted proof — see
+      // payments-webhook.js, which re-verifies via /api/verify-order
+      // before ever marking an order paid.
+      callback_url: `${process.env.APP_BASE_URL}/api/payments/webhook/gateway`,
+    });
+
+    return {
+      provider_order_id: data.order_id,
+      checkout_url: data.paypal_approval_url || data.stripe_checkout_url || null,
+      client_fields: {
+        razorpay_key_id: data.razorpay_key_id,
+        razorpay_order_id: data.razorpay_order_id,
+        cashfree_payment_session_id: data.payment_session_id,
+        cashfree_mode: data.mode,
+      },
+    };
   }
 
   async function verifyPayment({ order }) {
-    if (order.provider === 'razorpay') return verifyRazorpayOrder({ order });
-    if (order.provider === 'stripe') return verifyStripeSession({ order });
-    if (order.provider === 'paypal') return verifyPaypalOrder({ order });
-    if (order.provider === 'cashfree') return verifyCashfreeOrder({ order });
-    throw new Error(`Unsupported payment provider: ${order.provider}`);
+    const data = await gatewayFetch(order.user_id, '/api/verify-order', {
+      order_id: order.provider_order_id,
+    });
+    if (data.paid === true) return 'paid';
+    if (data.status === 'failed') return 'failed';
+    return 'pending';
   }
 
-  function verifyWebhookSignature(provider, rawBody, headers) {
-    if (provider === 'razorpay') return verifyRazorpayWebhookSignature(rawBody, headers['x-razorpay-signature']);
-    if (provider === 'stripe') return verifyStripeWebhookSignature(rawBody, headers['stripe-signature']);
-    if (provider === 'paypal') return verifyPaypalWebhookSignature(rawBody, headers);
-    if (provider === 'cashfree') return verifyCashfreeWebhookSignature(rawBody, headers);
-    return false;
+  // NOTE — breaking change from the old provider-native version:
+  // PaymentGatewayAPI's callback_url POST is NOT cryptographically signed
+  // (see api/_lib/common.js fireCallback — plain POST, no HMAC). Anyone who
+  // learns/guesses this webhook URL could POST a fake "paid" body. So this
+  // no longer does per-provider signature verification (verifyRazorpaySignature
+  // etc. are gone) — instead payments-webhook.js MUST treat the incoming
+  // POST as only a hint to re-check, and call verifyPayment() (which hits
+  // the gateway's own /api/verify-order with our GATEWAY_API_KEY) before
+  // marking anything paid. See updated payments-webhook.js.
+  function verifyWebhookSignature() {
+    throw new Error('verifyWebhookSignature is no longer used — see payments-webhook.js, which now re-verifies via verifyPayment() instead of trusting webhook payloads.');
   }
 
   // Marks an order paid/failed in wb_orders (idempotent — safe to call from
@@ -358,7 +138,6 @@ module.exports = function createPaymentsModule({ supabase }) {
   }
 
   return {
-    isTestMode,
     createCheckout,
     verifyPayment,
     verifyWebhookSignature,

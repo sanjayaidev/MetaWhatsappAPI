@@ -2151,7 +2151,7 @@ async function handleEcomInteraction({ waAccount, from, contactName, replyId }) 
   if (replyId === 'ecom_checkout') {
     const { order, items } = await ecomCart.checkoutCart(waAccount.user_id, 'whatsapp', from, currency);
     const checkoutResult = await ecomPayments.createCheckout({
-      provider, order, items,
+      order: { ...order, provider, user_id: waAccount.user_id }, items,
       successUrl: `${SELF_URL}/ecom-pay.html?order_id=${order.id}&status=success`,
       cancelUrl: `${SELF_URL}/ecom-pay.html?order_id=${order.id}&status=cancel`,
     });

@@ -111,8 +111,12 @@ module.exports = function ecomRouter(deps) {
 
     try {
       const { order, items } = await cart.checkoutCart(req.user.id, channel, contact_id, currency);
+      // provider/user_id must be on `order` before calling createCheckout —
+      // payments.js now resolves the merchant's own gateway deployment from
+      // order.user_id (wb_ecom_settings.gateway_base_url), and order.provider
+      // instead of taking a separate top-level `provider` arg.
       const checkoutResult = await payments.createCheckout({
-        provider, order, items,
+        order: { ...order, provider, user_id: req.user.id }, items,
         successUrl: success_url || `${req.protocol}://${req.get('host')}/ecom/thank-you?order_id=${order.id}`,
         cancelUrl: cancel_url || `${req.protocol}://${req.get('host')}/ecom`,
       });

@@ -1,20 +1,19 @@
-// src/routes/payments-webhook.js — public endpoint providers call directly
-// on payment success/failure. Mounted WITHOUT verifyUser (the provider has
-// no user session — the order id in the payload is how we find the merchant):
+// src/routes/payments-webhook.js — public endpoint our own PaymentGatewayAPI
+// deployment(s) call on payment success/failure. Mounted WITHOUT verifyUser
+// (the gateway has no user session — order_id in the payload is how we find
+// the merchant):
 //   app.use('/api/payments/webhook', paymentsWebhookRouter(crmDeps));
 //
-// Signature verification needs the exact raw request bytes, not the
-// re-serialized parsed body. server.js's global express.json() already
-// captures that via `verify: (req,_res,buf) => { req.rawBody = buf }` (used
-// elsewhere for the same reason), so these handlers read req.rawBody for
-// signature checks and req.body (already-parsed JSON) for the payload.
-
-//
-// On a verified "paid" event, this both updates wb_orders AND sends the
-// customer a confirmation message back on the same channel (WhatsApp/
-// Instagram/Facebook) their order came in on, using the existing
-// channel-send.js sender + wb_leads lookup — so a merchant using the
-// ecom module, the CRM, or the chatbot builder all get this for free.
+// SECURITY — this callback is NOT signed by PaymentGatewayAPI (see its
+// api/_lib/common.js fireCallback: a plain unsigned POST). That means this
+// endpoint's URL is effectively public: anyone who learns/guesses it could
+// POST a fake { paid: true, order_id: "..." } body. So the payload here is
+// treated as ONLY a hint to re-check — we never mark an order paid based on
+// what this request body claims. Instead, on any hit we call back to that
+// order's own gateway deployment via payments.verifyPayment(), which is
+// authenticated with our GATEWAY_API_KEY, and trust ONLY that response.
+// This also naturally handles routing to the right client's gateway, since
+// verifyPayment() looks up order.user_id -> wb_ecom_settings itself.
 const express = require('express');
 const createPaymentsModule = require('../payments');
 const createChannelSender = require('../channel-send');
@@ -25,9 +24,6 @@ module.exports = function paymentsWebhookRouter(deps) {
   const sendChannelMessage = createChannelSender(deps);
   const router = express.Router();
 
-  // Finds the wb_leads row for this order's channel+contact so we know how
-  // to address the customer (phone / ig_handle / fb_psid) via channel-send.js,
-  // which expects a "lead"-shaped object.
   async function leadForOrder(order) {
     if (order.channel === 'manual' || !order.contact_id) return null;
     const column = order.channel === 'whatsapp' ? 'phone' : order.channel === 'instagram' ? 'ig_handle' : 'fb_psid';
@@ -35,86 +31,45 @@ module.exports = function paymentsWebhookRouter(deps) {
     return data || null;
   }
 
-  async function handleEvent(provider, orderId, resolvedStatus) {
-    const { data: order, error } = await supabase.from('wb_orders').select('*').eq('id', orderId).single();
-    if (error || !order) return;
-    if (order.status === resolvedStatus) return; // already processed — webhooks can arrive more than once
-
-    await payments.markOrderStatus(order.id, resolvedStatus);
-
-    if (resolvedStatus === 'paid') {
-      const lead = await leadForOrder(order);
-      if (lead) {
-        try {
-          await sendChannelMessage({
-            lead, channel: order.channel, isAutomation: true,
-            body: `✅ Payment received for your order (₹${order.amount}). We'll get it ready for you shortly!`,
-          });
-        } catch (_) { /* order is still marked paid even if the notify send fails */ }
-      }
+  async function markPaidAndNotify(order) {
+    await payments.markOrderStatus(order.id, 'paid');
+    const lead = await leadForOrder(order);
+    if (lead) {
+      try {
+        await sendChannelMessage({
+          lead, channel: order.channel, isAutomation: true,
+          body: `✅ Payment received for your order (₹${order.amount}). We'll get it ready for you shortly!`,
+        });
+      } catch (_) { /* order is still marked paid even if the notify send fails */ }
     }
   }
 
-  // Razorpay: payload includes payload.payment.entity.order_id and event type.
-  router.post('/razorpay', async (req, res) => {
-    const valid = payments.verifyWebhookSignature('razorpay', req.rawBody, req.headers);
-    if (!valid) return res.status(400).json({ error: 'Invalid signature' });
-    const payload = req.body;
-    const providerOrderId = payload.payload?.payment?.entity?.order_id;
-    if (!providerOrderId) return res.status(200).json({ ok: true }); // nothing to reconcile
-
-    const { data: order } = await supabase.from('wb_orders').select('id').eq('provider_order_id', providerOrderId).single();
-    if (!order) return res.status(200).json({ ok: true });
-
-    const status = payload.event === 'payment.captured' ? 'paid' : payload.event === 'payment.failed' ? 'failed' : null;
-    if (status) await handleEvent('razorpay', order.id, status);
-    res.status(200).json({ ok: true });
-  });
-
-  // Stripe: event.data.object.client_reference_id carries our own order id.
-  router.post('/stripe', async (req, res) => {
-    const valid = payments.verifyWebhookSignature('stripe', req.rawBody, req.headers);
-    if (!valid) return res.status(400).json({ error: 'Invalid signature' });
-    const event = req.body;
-    const orderId = event.data?.object?.client_reference_id;
+  // Single generic route for all providers — PaymentGatewayAPI's callback_url
+  // payload always has the same shape regardless of provider (see its README:
+  // "Webhook payload (callback_url)"), and order_id here is OUR wb_orders id
+  // (we pass it as `message` at create-order time — see payments.js).
+  router.post('/gateway', async (req, res) => {
+    // Always 200 quickly — this is just a "go check" nudge, not the source
+    // of truth, so there's nothing to reject at this layer beyond basic shape.
+    const orderId = req.body?.order_id || req.body?.message;
     if (!orderId) return res.status(200).json({ ok: true });
 
-    if (event.type === 'checkout.session.completed') await handleEvent('stripe', orderId, 'paid');
-    else if (event.type === 'checkout.session.expired') await handleEvent('stripe', orderId, 'failed');
-    res.status(200).json({ ok: true });
-  });
+    const { data: order, error } = await supabase.from('wb_orders').select('*').eq('id', orderId).single();
+    if (error || !order) return res.status(200).json({ ok: true });
+    if (order.status === 'paid') return res.status(200).json({ ok: true }); // already processed, webhooks can arrive more than once
 
-  // PayPal: event.resource.custom_id (or purchase_units[0].custom_id) carries our order id.
-  router.post('/paypal', async (req, res) => {
-    const valid = await payments.verifyWebhookSignature('paypal', req.rawBody, req.headers);
-    if (!valid) return res.status(400).json({ error: 'Invalid signature' });
-    const event = req.body;
-    const orderId = event.resource?.custom_id || event.resource?.purchase_units?.[0]?.custom_id;
-    if (!orderId) return res.status(200).json({ ok: true });
-
-    if (event.event_type === 'CHECKOUT.ORDER.APPROVED' || event.event_type === 'PAYMENT.CAPTURE.COMPLETED') {
-      await handleEvent('paypal', orderId, 'paid');
-    } else if (event.event_type === 'CHECKOUT.ORDER.VOIDED' || event.event_type === 'PAYMENT.CAPTURE.DENIED') {
-      await handleEvent('paypal', orderId, 'failed');
+    let status;
+    try {
+      status = await payments.verifyPayment({ order }); // authenticated re-check, ignores req.body's claims entirely
+    } catch (e) {
+      console.error('[payments-webhook] verifyPayment failed', order.id, e.message);
+      return res.status(200).json({ ok: true }); // poller (src/payment-poller.js) will retry
     }
-    res.status(200).json({ ok: true });
-  });
 
-  // Cashfree: unlike the other three, order_id in the payload IS our own
-  // wb_orders id directly (see createCashfreeOrder in payments.js), so no
-  // provider_order_id lookup is needed — order_id doubles as both.
-  router.post('/cashfree', async (req, res) => {
-    const valid = payments.verifyWebhookSignature('cashfree', req.rawBody, req.headers);
-    if (!valid) return res.status(400).json({ error: 'Invalid signature' });
-    const event = req.body;
-    const orderId = event.data?.order?.order_id;
-    if (!orderId) return res.status(200).json({ ok: true });
+    if (status === 'paid') await markPaidAndNotify(order);
+    else if (status === 'failed') await payments.markOrderStatus(order.id, 'failed');
+    // 'pending' -> leave as-is; poller and/or a later webhook hit will resolve it
 
-    if (event.type === 'PAYMENT_SUCCESS_WEBHOOK') await handleEvent('cashfree', orderId, 'paid');
-    else if (event.type === 'PAYMENT_FAILED_WEBHOOK') await handleEvent('cashfree', orderId, 'failed');
-    // PAYMENT_USER_DROPPED_WEBHOOK deliberately left as 'pending' — the
-    // customer may still complete payment, and the fallback poller
-    // (src/payment-poller.js) will pick up the true final state either way.
     res.status(200).json({ ok: true });
   });
 
