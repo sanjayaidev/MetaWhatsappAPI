@@ -11,10 +11,13 @@ body { font-family: 'DM Sans', sans-serif; background: #080b10; color: #e8f0fb; 
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 16px 28px; border-bottom: 1px solid #182238; }
 .brand { display: flex; align-items: center; gap: 10px; font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 800; }
 .brand-icon { width: 34px; height: 34px; background: #22d172; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
-.tabs { display: flex; gap: 6px; padding: 0 28px; border-bottom: 1px solid #182238; }
-.tab { padding: 12px 18px; font-size: 13px; font-weight: 600; color: #7a90b0; cursor: pointer; border-bottom: 2px solid transparent; }
+.topbar-right { display: flex; align-items: center; gap: 16px; }
+.tabs { display: flex; gap: 6px; padding: 0 28px; border-bottom: 1px solid #182238; overflow-x: auto; }
+.tab { padding: 12px 18px; font-size: 13px; font-weight: 600; color: #7a90b0; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
 .tab.active { color: #e8f0fb; border-bottom-color: #22d172; }
-.panel { display: none; padding: 24px 28px; max-width: 980px; }
+.tab .dot { width: 7px; height: 7px; border-radius: 50%; background: #f04f6e; display: none; }
+.tab .dot.show { display: inline-block; }
+.panel { display: none; padding: 24px 28px; max-width: 1040px; }
 .panel.active { display: block; }
 h2 { font-size: 18px; margin-bottom: 4px; }
 .sub { color: #7a90b0; font-size: 13px; margin-bottom: 20px; }
@@ -26,8 +29,11 @@ input, textarea, select { width: 100%; background: #0c1018; border: 1px solid #2
 input:focus, textarea:focus, select:focus { outline: none; border-color: #22d172; }
 button.primary { background: #22d172; color: #000; font-weight: 700; border: none; border-radius: 10px; padding: 10px 18px; cursor: pointer; font-size: 13px; }
 button.primary:hover { background: #1bbf64; }
+button.primary:disabled { background: #1a4530; color: #4d7a63; cursor: not-allowed; }
 button.ghost { background: transparent; color: #7a90b0; border: 1px solid #263550; border-radius: 10px; padding: 9px 16px; cursor: pointer; font-size: 13px; }
 button.ghost:hover { border-color: #f04f6e; color: #f04f6e; }
+button.subtle { background: rgba(90,140,255,0.1); color: #5a8cff; border: 1px solid rgba(90,140,255,0.3); border-radius: 10px; padding: 9px 16px; cursor: pointer; font-size: 13px; }
+button.subtle:hover { background: rgba(90,140,255,0.18); }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #182238; }
 th { color: #7a90b0; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
@@ -39,29 +45,84 @@ th { color: #7a90b0; font-weight: 600; font-size: 11px; text-transform: uppercas
 .checklist { max-height: 220px; overflow-y: auto; border: 1px solid #263550; border-radius: 10px; padding: 8px; }
 .checklist label { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; }
 .empty { color: #445570; font-size: 13px; padding: 24px; text-align: center; }
-.toast { position: fixed; bottom: 24px; right: 24px; background: #0f1520; border: 1px solid #263550; border-radius: 12px; padding: 12px 18px; font-size: 13px; display: none; }
+.toast { position: fixed; bottom: 24px; right: 24px; background: #0f1520; border: 1px solid #263550; border-radius: 12px; padding: 12px 18px; font-size: 13px; display: none; z-index: 200; }
 .toast.error { border-color: #f04f6e; color: #f04f6e; }
 .toast.success { border-color: #22d172; color: #22d172; }
+
+/* Channel chips/dots — shared vocabulary across Automation/Orders/Inbox so a
+   merchant learns the three colors once and reads them everywhere. */
+.ch-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.ch-dot.whatsapp { background: #25D366; }
+.ch-dot.instagram { background: linear-gradient(135deg,#f58529,#dd2a7b,#8134af); }
+.ch-dot.facebook { background: #1877F2; }
+.ch-pill { display: inline-flex; align-items: center; padding: 3px 10px 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: #0c1018; border: 1px solid #263550; text-transform: capitalize; }
+.ch-chip-picker { display: flex; gap: 8px; flex-wrap: wrap; }
+.ch-chip { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 10px; border: 1px solid #263550; background: #0c1018; font-size: 13px; cursor: pointer; user-select: none; }
+.ch-chip input { width: auto; }
+.ch-chip.checked { border-color: #22d172; background: rgba(34,209,114,0.08); }
+
+/* Automation: multiple named triggers instead of one fixed rule */
+.rule-card { background: #0c1018; border: 1px solid #263550; border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; }
+.rule-card .rule-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.rule-card .rule-name { font-weight: 700; font-size: 14px; }
+.rule-card .rule-meta { color: #7a90b0; font-size: 12px; margin-top: 4px; }
+.rule-card .rule-actions { display: flex; gap: 8px; }
+
+/* Modal (gateway onboarding wizard) */
+.modal-overlay { position: fixed; inset: 0; background: rgba(3,5,10,0.7); display: none; align-items: center; justify-content: center; z-index: 300; padding: 20px; }
+.modal-overlay.show { display: flex; }
+.modal { background: #0f1520; border: 1px solid #263550; border-radius: 18px; padding: 28px; width: 100%; max-width: 480px; }
+.modal h3 { font-size: 17px; margin-bottom: 6px; }
+.modal .sub { margin-bottom: 20px; }
+.wizard-steps { display: flex; gap: 6px; margin-bottom: 20px; }
+.wizard-steps .dotstep { flex: 1; height: 4px; border-radius: 4px; background: #263550; }
+.wizard-steps .dotstep.done { background: #22d172; }
+.step-actions { display: flex; justify-content: space-between; margin-top: 20px; }
+.gw-status-line { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.gw-status-line .light { width: 10px; height: 10px; border-radius: 50%; }
+.gw-status-line .light.on { background: #22d172; }
+.gw-status-line .light.off { background: #f04f6e; }
+.test-result { font-size: 12px; margin-top: 8px; }
+.test-result.ok { color: #22d172; }
+.test-result.bad { color: #f04f6e; }
+
+/* Inbox */
+.inbox-filters { display: flex; gap: 8px; margin-bottom: 16px; }
+.inbox-filters button { background: #0c1018; border: 1px solid #263550; color: #7a90b0; border-radius: 999px; padding: 7px 16px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.inbox-filters button.active { color: #e8f0fb; border-color: #22d172; }
+.cart-card { background: #0c1018; border: 1px solid #263550; border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; cursor: pointer; }
+.cart-card .cart-head { display: flex; justify-content: space-between; align-items: center; }
+.cart-card .cart-contact { font-weight: 700; font-size: 14px; }
+.cart-card .cart-total { color: #22d172; font-weight: 700; font-size: 14px; }
+.cart-card .cart-meta { color: #7a90b0; font-size: 12px; margin-top: 4px; }
+.cart-items { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #182238; font-size: 12px; color: #b6c4dc; }
+.cart-items.show { display: block; }
+.cart-items div { padding: 2px 0; }
 </style>
 </head>
 <body>
 
 <div class="topbar">
   <div class="brand"><div class="brand-icon">🛍️</div>Ecom Module</div>
-  <a href="/dashboard.html" style="color:#7a90b0;font-size:13px;text-decoration:none">← Back to Dashboard</a>
+  <div class="topbar-right">
+    <button class="subtle" onclick="openWizard()">Payment Gateway Setup</button>
+    <a href="/dashboard.html" style="color:#7a90b0;font-size:13px;text-decoration:none">← Back to Dashboard</a>
+  </div>
 </div>
 
 <div class="tabs">
   <div class="tab active" data-tab="products">Products</div>
   <div class="tab" data-tab="automation">Automation</div>
+  <div class="tab" data-tab="inbox">Inbox</div>
   <div class="tab" data-tab="orders">Orders</div>
+  <div class="tab" data-tab="gateway">Payment Gateway <span class="dot" id="gatewayDot"></span></div>
   <div class="tab" data-tab="settings">Settings</div>
 </div>
 
 <!-- PRODUCTS -->
 <div class="panel active" id="panel-products">
   <h2>Product Catalog</h2>
-  <p class="sub">These are the products your bot can show and sell through WhatsApp/Instagram chat — no Meta Catalog or separate store needed.</p>
+  <p class="sub">These are the products your bot can show and sell through WhatsApp, Instagram DM, and Facebook Messenger — no Meta Catalog or separate store needed.</p>
 
   <div class="card">
     <div class="row">
@@ -87,37 +148,66 @@ th { color: #7a90b0; font-weight: 600; font-size: 11px; text-transform: uppercas
 
 <!-- AUTOMATION -->
 <div class="panel" id="panel-automation">
-  <h2>Catalog Trigger</h2>
-  <p class="sub">When a customer types one of these keywords, the bot sends them your product catalog as a chat message.</p>
-  <div class="card">
+  <h2>Catalog Triggers</h2>
+  <p class="sub">When a customer sends one of a trigger's keywords, the bot sends them a product catalog — as a WhatsApp list, or a scrollable product carousel on Instagram/Facebook. Make as many triggers as you like, each scoped to whichever channels and products make sense.</p>
+
+  <div class="card" id="ruleFormCard">
     <div class="row">
-      <div class="fg"><label>Trigger keywords (comma-separated)</label><input id="a_keywords" placeholder="shop, buy, products, catalog"></div>
+      <div class="fg"><label>Trigger name</label><input id="a_name" placeholder="e.g. Shop, Sale items, New arrivals"></div>
+      <div class="fg"><label>Keywords (comma-separated)</label><input id="a_keywords" placeholder="shop, buy, products, catalog"></div>
+    </div>
+    <div class="fg">
+      <label>Send on these channels</label>
+      <div class="ch-chip-picker">
+        <label class="ch-chip" data-ch="whatsapp"><input type="checkbox" value="whatsapp" checked><span class="ch-dot whatsapp"></span>WhatsApp</label>
+        <label class="ch-chip" data-ch="instagram"><input type="checkbox" value="instagram" checked><span class="ch-dot instagram"></span>Instagram</label>
+        <label class="ch-chip" data-ch="facebook"><input type="checkbox" value="facebook" checked><span class="ch-dot facebook"></span>Facebook</label>
+      </div>
     </div>
     <div class="fg">
       <label>Products to include (leave all unchecked to show all active products)</label>
       <div class="checklist" id="productChecklist"><div class="empty">Loading…</div></div>
     </div>
-    <button class="primary" onclick="saveCatalogRule()">Save Trigger</button>
+    <div class="row">
+      <button class="primary" onclick="saveCatalogRule()" id="ruleSaveBtn">Save Trigger</button>
+      <button class="ghost" onclick="resetRuleForm()" id="ruleCancelBtn" style="display:none">Cancel edit</button>
+    </div>
   </div>
 
+  <h2 style="margin-top:8px">Your triggers</h2>
+  <div id="rulesList"><div class="empty">Loading…</div></div>
+
   <h2 style="margin-top:28px">How the rest of the flow works</h2>
-  <p class="sub">These steps happen automatically once the catalog trigger above is set — nothing else to configure.</p>
+  <p class="sub">These steps happen automatically once a trigger above fires — nothing else to configure. This part of the flow is fixed by design (not a drag-and-drop chain you build); what you configure is which keywords/channels/products kick it off.</p>
   <div class="card">
     <table>
       <tbody>
-        <tr><td style="width:140px"><b>Add to cart</b></td><td>Customer taps a product in the catalog list → added to their cart automatically.</td></tr>
+        <tr><td style="width:140px"><b>Add to cart</b></td><td>Customer taps a product in the catalog → added to their cart automatically.</td></tr>
         <tr><td><b>View Cart</b></td><td>Shown after every "Add to cart" tap, or the customer can say "cart".</td></tr>
-        <tr><td><b>Checkout</b></td><td>Tapping "Checkout" creates the order and sends a secure payment link using the provider set in Settings.</td></tr>
+        <tr><td><b>Checkout</b></td><td>Tapping "Checkout" creates the order and sends a secure payment link using your connected Payment Gateway.</td></tr>
         <tr><td><b>Confirmation</b></td><td>Once payment is confirmed, the bot automatically messages the customer back — no manual step needed.</td></tr>
       </tbody>
     </table>
   </div>
 </div>
 
+<!-- INBOX -->
+<div class="panel" id="panel-inbox">
+  <h2>Unified Inbox</h2>
+  <p class="sub">Every open or recent cart across all three channels, in one feed — tap a card to see what's in it.</p>
+  <div class="inbox-filters">
+    <button class="active" data-ch="" onclick="setInboxFilter('', this)">All</button>
+    <button data-ch="whatsapp" onclick="setInboxFilter('whatsapp', this)"><span class="ch-dot whatsapp"></span>WhatsApp</button>
+    <button data-ch="instagram" onclick="setInboxFilter('instagram', this)"><span class="ch-dot instagram"></span>Instagram</button>
+    <button data-ch="facebook" onclick="setInboxFilter('facebook', this)"><span class="ch-dot facebook"></span>Facebook</button>
+  </div>
+  <div id="inboxList"><div class="empty">Loading…</div></div>
+</div>
+
 <!-- ORDERS -->
 <div class="panel" id="panel-orders">
   <h2>Orders</h2>
-  <p class="sub">Every order placed through the ecom bot flow, across WhatsApp and Instagram.</p>
+  <p class="sub">Every order placed through the ecom bot flow, across WhatsApp, Instagram, and Facebook.</p>
   <div class="card" style="padding:0">
     <table>
       <thead><tr><th>Order</th><th>Channel</th><th>Contact</th><th>Amount</th><th>Status</th><th></th></tr></thead>
@@ -126,20 +216,79 @@ th { color: #7a90b0; font-weight: 600; font-size: 11px; text-transform: uppercas
   </div>
 </div>
 
+<!-- PAYMENT GATEWAY -->
+<div class="panel" id="panel-gateway">
+  <h2>Payment Gateway</h2>
+  <p class="sub">Connect the payment backend that handles checkout for this store. No server or console access needed — this runs entirely from here.</p>
+  <div class="card">
+    <div class="gw-status-line">
+      <span class="light off" id="gwLight"></span>
+      <span id="gwStatusText">Checking connection…</span>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <div class="fg"><label>Default provider</label>
+        <select id="s_provider"><option value="cashfree">Cashfree</option><option value="razorpay">Razorpay</option><option value="stripe">Stripe</option><option value="paypal">PayPal</option></select>
+      </div>
+    </div>
+    <div class="row">
+      <button class="primary" onclick="openWizard()" id="gwConnectBtn">Connect / Update Gateway</button>
+      <button class="ghost" onclick="saveProviderOnly()">Save Default Provider</button>
+      <button class="ghost" onclick="disconnectGateway()" id="gwDisconnectBtn" style="display:none">Disconnect</button>
+    </div>
+  </div>
+</div>
+
 <!-- SETTINGS -->
 <div class="panel" id="panel-settings">
-  <h2>Checkout Settings</h2>
-  <p class="sub">Which payment provider and currency the bot uses when a customer checks out.</p>
+  <h2>Storefront Settings</h2>
+  <p class="sub">How the bot talks to customers during checkout. Payment provider setup lives in the Payment Gateway tab.</p>
   <div class="card">
     <div class="row">
-      <div class="fg"><label>Default provider</label>
-        <select id="s_provider"><option value="stripe">Stripe</option><option value="razorpay">Razorpay</option><option value="paypal">PayPal</option><option value="cashfree">Cashfree</option></select>
-      </div>
       <div class="fg"><label>Currency</label><input id="s_currency" value="INR"></div>
+      <div class="fg"><label>Checkout button label</label><input id="s_checkout_label" placeholder="Checkout"></div>
     </div>
     <div class="fg"><label>Catalog greeting</label><input id="s_greeting" placeholder="Here's what we have available:"></div>
-    <div class="fg"><label>Checkout button label</label><input id="s_checkout_label" placeholder="Checkout"></div>
     <button class="primary" onclick="saveSettings()">Save Settings</button>
+  </div>
+</div>
+
+<!-- GATEWAY ONBOARDING WIZARD -->
+<div class="modal-overlay" id="wizardOverlay">
+  <div class="modal">
+    <div class="wizard-steps"><div class="dotstep" id="wstep1"></div><div class="dotstep" id="wstep2"></div><div class="dotstep" id="wstep3"></div></div>
+
+    <div id="wizardPage1">
+      <h3>Connect your payment gateway</h3>
+      <p class="sub">Paste in the URL of your deployed PaymentGatewayAPI and its API key. Your key is encrypted before it's stored and is never shown again after this.</p>
+      <div class="fg"><label>Gateway URL</label><input id="w_url" placeholder="https://your-gateway.vercel.app"></div>
+      <div class="fg"><label>Gateway API key</label><input id="w_key" type="password" placeholder="sk_live_…"></div>
+      <div class="step-actions">
+        <button class="ghost" onclick="closeWizard()">Cancel</button>
+        <button class="primary" onclick="wizardTestConnection()">Test Connection</button>
+      </div>
+    </div>
+
+    <div id="wizardPage2" style="display:none">
+      <h3>Testing connection…</h3>
+      <p class="sub">Confirming your gateway URL is reachable. This doesn't run a real charge — that only happens on a real customer checkout.</p>
+      <div id="wizardTestResult" class="test-result"></div>
+      <div class="step-actions">
+        <button class="ghost" onclick="wizardBackToPage1()">Back</button>
+        <button class="primary" onclick="wizardSave()" id="wizardSaveBtn" disabled>Save & Connect</button>
+      </div>
+    </div>
+
+    <div id="wizardPage3" style="display:none">
+      <h3>You're connected 🎉</h3>
+      <p class="sub">Your gateway is saved. Pick the default provider your gateway should use for new checkouts, then you're done — new orders will use this automatically.</p>
+      <div class="fg"><label>Default provider</label>
+        <select id="w_provider"><option value="cashfree">Cashfree</option><option value="razorpay">Razorpay</option><option value="stripe">Stripe</option><option value="paypal">PayPal</option></select>
+      </div>
+      <div class="step-actions">
+        <button class="ghost" onclick="closeWizard()">I'll set this later</button>
+        <button class="primary" onclick="wizardFinish()">Finish</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -167,10 +316,9 @@ async function botBuilderCall(path, opts={}){
   if(!res.ok){ const e = await res.json().catch(()=>({error:res.statusText})); throw new Error(e.error||'Request failed'); }
   return res.status===204 ? null : res.json();
 }
-
 function toast(msg, type='success'){
   const t = document.getElementById('toast');
-  t.textContent = msg; t.className = 'toast ' + type; t.style.display = 'block';
+  t.textContent = msg; t.className = 'toast '+type; t.style.display = 'block';
   setTimeout(()=> t.style.display='none', 3000);
 }
 
@@ -180,8 +328,10 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
     tab.classList.add('active');
     document.getElementById('panel-'+tab.dataset.tab).classList.add('active');
-    if (tab.dataset.tab === 'automation') loadProductChecklist();
+    if (tab.dataset.tab === 'automation') loadRulesTab();
     if (tab.dataset.tab === 'orders') loadOrders();
+    if (tab.dataset.tab === 'inbox') loadInbox();
+    if (tab.dataset.tab === 'gateway') loadGatewayStatus();
   };
 });
 
@@ -234,47 +384,173 @@ async function deleteProduct(id){
   catch (err) { toast(err.message, 'error'); }
 }
 
-/* ---------------- AUTOMATION (catalog trigger rule) ---------------- */
-const ECOM_RULE_NAME = '__ecom_catalog_trigger'; // internal marker so we always edit the same rule
-let existingCatalogRule = null;
+/* ---------------- AUTOMATION (multiple named catalog triggers) ---------------- */
+let catalogRules = [];
+let editingRuleId = null; // null = creating a new trigger
 
-async function loadProductChecklist(){
+async function loadRulesTab(){
   if (!products.length) await loadProducts();
+  await refreshRulesList();
+  renderProductChecklist([]);
+}
+
+function renderProductChecklist(selectedIds){
   const list = document.getElementById('productChecklist');
   if (!products.length) { list.innerHTML = '<div class="empty">Add products first.</div>'; return; }
-
-  let selectedIds = [];
-  try {
-    const { rules } = await botBuilderCall('/rules');
-    existingCatalogRule = (rules || []).find(r => r.name === ECOM_RULE_NAME) || null;
-    if (existingCatalogRule) {
-      document.getElementById('a_keywords').value = (existingCatalogRule.keywords || []).join(', ');
-      selectedIds = existingCatalogRule.action_config?.product_ids || [];
-    }
-  } catch (err) { toast(err.message, 'error'); }
-
   list.innerHTML = products.map(p => `
     <label><input type="checkbox" value="${p.id}" ${selectedIds.includes(p.id) ? 'checked' : ''}> ${p.name}</label>
   `).join('');
 }
 
+async function refreshRulesList(){
+  const listEl = document.getElementById('rulesList');
+  try {
+    const { rules } = await botBuilderCall('/rules');
+    catalogRules = (rules || []).filter(r => r.action_type === 'ecom_catalog');
+    if (!catalogRules.length) {
+      listEl.innerHTML = `
+        <div class="card">
+          <p class="sub" style="margin-bottom:12px">No triggers yet. Start from a sensible default, or build the form above from scratch.</p>
+          <button class="subtle" onclick="useDefaultTemplate()">Use default template ("shop / buy / catalog" → all products, all channels)</button>
+        </div>`;
+      return;
+    }
+    listEl.innerHTML = catalogRules.map(r => {
+      const channels = (r.action_config?.channels && r.action_config.channels.length) ? r.action_config.channels : ['whatsapp','instagram','facebook'];
+      const productCount = (r.action_config?.product_ids || []).length;
+      return `
+        <div class="rule-card">
+          <div class="rule-head">
+            <div>
+              <div class="rule-name">${r.name === '__ecom_catalog_trigger' ? 'Shop (default)' : escapeHtml(r.name)}</div>
+              <div class="rule-meta">
+                Keywords: ${(r.keywords||[]).join(', ') || '—'} ·
+                ${channels.map(c=>`<span class="ch-pill"><span class="ch-dot ${c}"></span>${c}</span>`).join(' ')} ·
+                ${productCount ? productCount+' product(s)' : 'all active products'}
+              </div>
+            </div>
+            <div class="rule-actions">
+              <button class="ghost" onclick="editRule('${r.id}')">Edit</button>
+              <button class="ghost" onclick="deleteRule('${r.id}')">Delete</button>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (err) { toast(err.message, 'error'); listEl.innerHTML = '<div class="empty">Couldn\'t load triggers.</div>'; }
+}
+
+function escapeHtml(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function editRule(id){
+  const r = catalogRules.find(x => x.id === id);
+  if (!r) return;
+  editingRuleId = id;
+  document.getElementById('a_name').value = r.name === '__ecom_catalog_trigger' ? 'Shop (default)' : r.name;
+  document.getElementById('a_keywords').value = (r.keywords || []).join(', ');
+  const channels = (r.action_config?.channels && r.action_config.channels.length) ? r.action_config.channels : ['whatsapp','instagram','facebook'];
+  document.querySelectorAll('.ch-chip input').forEach(el => {
+    el.checked = channels.includes(el.value);
+    el.closest('.ch-chip').classList.toggle('checked', el.checked);
+  });
+  renderProductChecklist(r.action_config?.product_ids || []);
+  document.getElementById('ruleSaveBtn').textContent = 'Update Trigger';
+  document.getElementById('ruleCancelBtn').style.display = 'inline-block';
+  document.getElementById('ruleFormCard').scrollIntoView({ behavior: 'smooth' });
+}
+
+function resetRuleForm(){
+  editingRuleId = null;
+  document.getElementById('a_name').value = '';
+  document.getElementById('a_keywords').value = '';
+  document.querySelectorAll('.ch-chip input').forEach(el => { el.checked = true; el.closest('.ch-chip').classList.add('checked'); });
+  renderProductChecklist([]);
+  document.getElementById('ruleSaveBtn').textContent = 'Save Trigger';
+  document.getElementById('ruleCancelBtn').style.display = 'none';
+}
+
+async function useDefaultTemplate(){
+  try {
+    await botBuilderCall('/rules', { method: 'POST', body: JSON.stringify({
+      name: '__ecom_catalog_trigger',
+      keywords: ['shop','buy','products','catalog'],
+      matchType: 'contains',
+      action: { type: 'ecom_catalog', config: { product_ids: [], channels: ['whatsapp','instagram','facebook'] } },
+      active: true,
+    })});
+    toast('Default trigger created');
+    refreshRulesList();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
 async function saveCatalogRule(){
+  const name = document.getElementById('a_name').value.trim() || 'Untitled trigger';
   const keywords = document.getElementById('a_keywords').value.split(',').map(s=>s.trim()).filter(Boolean);
   if (!keywords.length) { toast('Add at least one keyword', 'error'); return; }
+  const channels = Array.from(document.querySelectorAll('.ch-chip input:checked')).map(el => el.value);
+  if (!channels.length) { toast('Pick at least one channel', 'error'); return; }
   const productIds = Array.from(document.querySelectorAll('#productChecklist input:checked')).map(el => el.value);
 
   const body = {
-    name: ECOM_RULE_NAME,
-    keywords, matchType: 'contains',
-    action: { type: 'ecom_catalog', config: { product_ids: productIds } },
+    name, keywords, matchType: 'contains',
+    action: { type: 'ecom_catalog', config: { product_ids: productIds, channels } },
     active: true,
   };
   try {
-    if (existingCatalogRule) await botBuilderCall('/rules/'+existingCatalogRule.id, { method: 'PUT', body: JSON.stringify(body) });
+    if (editingRuleId) await botBuilderCall('/rules/'+editingRuleId, { method: 'PUT', body: JSON.stringify(body) });
     else await botBuilderCall('/rules', { method: 'POST', body: JSON.stringify(body) });
-    toast('Catalog trigger saved');
-    loadProductChecklist();
+    toast(editingRuleId ? 'Trigger updated' : 'Trigger created');
+    resetRuleForm();
+    refreshRulesList();
   } catch (err) { toast(err.message, 'error'); }
+}
+
+async function deleteRule(id){
+  if (!confirm('Delete this trigger?')) return;
+  try { await botBuilderCall('/rules/'+id, { method: 'DELETE' }); toast('Deleted'); refreshRulesList(); }
+  catch (err) { toast(err.message, 'error'); }
+}
+
+document.querySelectorAll('.ch-chip').forEach(chip => {
+  chip.addEventListener('click', (e) => {
+    if (e.target.tagName !== 'INPUT') { const cb = chip.querySelector('input'); cb.checked = !cb.checked; }
+    chip.classList.toggle('checked', chip.querySelector('input').checked);
+  });
+});
+
+/* ---------------- INBOX ---------------- */
+let inboxFilter = '';
+
+function setInboxFilter(ch, btn){
+  inboxFilter = ch;
+  document.querySelectorAll('.inbox-filters button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadInbox();
+}
+
+async function loadInbox(){
+  const listEl = document.getElementById('inboxList');
+  listEl.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const q = inboxFilter ? `?channel=${inboxFilter}` : '';
+    const { carts } = await apiCall('/carts' + q);
+    if (!carts.length) { listEl.innerHTML = '<div class="empty">No conversations yet — carts show up here as soon as a customer starts shopping.</div>'; return; }
+    listEl.innerHTML = carts.map((c, i) => `
+      <div class="cart-card" onclick="toggleCartItems(${i})">
+        <div class="cart-head">
+          <div class="cart-contact"><span class="ch-dot ${c.channel}"></span>${escapeHtml(c.contact_name || c.contact_id)}</div>
+          <div class="cart-total">${c.total.toFixed(2)}</div>
+        </div>
+        <div class="cart-meta">${c.status} · ${c.item_count} item(s) · updated ${new Date(c.updated_at).toLocaleString()}</div>
+        <div class="cart-items" id="cartItems${i}">
+          ${c.items.map(it => `<div>${it.quantity}× ${escapeHtml(it.name)} — ${Number(it.unit_price).toFixed(2)} each</div>`).join('') || '<div>No items</div>'}
+        </div>
+      </div>
+    `).join('');
+  } catch (err) { toast(err.message, 'error'); listEl.innerHTML = '<div class="empty">Couldn\'t load the inbox.</div>'; }
+}
+
+function toggleCartItems(i){
+  document.getElementById('cartItems'+i).classList.toggle('show');
 }
 
 /* ---------------- ORDERS ---------------- */
@@ -286,7 +562,7 @@ async function loadOrders(){
     body.innerHTML = orders.map(o => `
       <tr>
         <td>#${o.id.slice(0,8)}</td>
-        <td>${o.channel}</td>
+        <td><span class="ch-pill"><span class="ch-dot ${o.channel}"></span>${o.channel}</span></td>
         <td>${o.contact_name || o.contact_id || '—'}</td>
         <td>${o.currency} ${Number(o.amount).toFixed(2)}</td>
         <td><span class="badge ${o.status}">${o.status}</span></td>
@@ -305,11 +581,104 @@ async function updateOrderStatus(id, status){
   catch (err) { toast(err.message, 'error'); }
 }
 
+/* ---------------- PAYMENT GATEWAY tab + wizard ---------------- */
+async function loadGatewayStatus(){
+  try {
+    const status = await apiCall('/gateway/status');
+    const light = document.getElementById('gwLight');
+    const text = document.getElementById('gwStatusText');
+    const dot = document.getElementById('gatewayDot');
+    const disconnectBtn = document.getElementById('gwDisconnectBtn');
+    document.getElementById('s_provider').value = status.default_provider || 'cashfree';
+    if (status.connected) {
+      light.className = 'light on'; text.textContent = `Connected — ${status.gateway_base_url}`;
+      dot.classList.remove('show'); disconnectBtn.style.display = 'inline-block';
+    } else {
+      light.className = 'light off'; text.textContent = 'Not connected yet';
+      dot.classList.add('show'); disconnectBtn.style.display = 'none';
+    }
+    return status;
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function saveProviderOnly(){
+  try {
+    await apiCall('/settings', { method: 'PUT', body: JSON.stringify({ default_provider: document.getElementById('s_provider').value }) });
+    toast('Default provider saved');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function disconnectGateway(){
+  if (!confirm('Disconnect the current payment gateway? Checkout will stop working until you connect a new one.')) return;
+  try { await apiCall('/gateway', { method: 'DELETE' }); toast('Gateway disconnected'); loadGatewayStatus(); }
+  catch (err) { toast(err.message, 'error'); }
+}
+
+let wizardTestedOk = false;
+
+function openWizard(){
+  document.getElementById('wizardOverlay').classList.add('show');
+  wizardGoToStep(1);
+}
+function closeWizard(){ document.getElementById('wizardOverlay').classList.remove('show'); }
+function wizardGoToStep(n){
+  document.getElementById('wizardPage1').style.display = n===1 ? 'block' : 'none';
+  document.getElementById('wizardPage2').style.display = n===2 ? 'block' : 'none';
+  document.getElementById('wizardPage3').style.display = n===3 ? 'block' : 'none';
+  document.getElementById('wstep1').classList.toggle('done', n>=1);
+  document.getElementById('wstep2').classList.toggle('done', n>=2);
+  document.getElementById('wstep3').classList.toggle('done', n>=3);
+}
+function wizardBackToPage1(){ wizardGoToStep(1); }
+
+async function wizardTestConnection(){
+  const url = document.getElementById('w_url').value.trim();
+  const key = document.getElementById('w_key').value.trim();
+  if (!url || !key) { toast('Enter both the gateway URL and API key', 'error'); return; }
+  wizardGoToStep(2);
+  wizardTestedOk = false;
+  document.getElementById('wizardSaveBtn').disabled = true;
+  const resultEl = document.getElementById('wizardTestResult');
+  resultEl.textContent = 'Checking…'; resultEl.className = 'test-result';
+  try {
+    const r = await apiCall('/gateway/test', { method: 'POST', body: JSON.stringify({ gateway_base_url: url }) });
+    if (r.reachable) {
+      resultEl.textContent = `Reachable (HTTP ${r.status}). This only confirms the URL is up — save to finish connecting.`;
+      resultEl.className = 'test-result ok';
+      wizardTestedOk = true;
+      document.getElementById('wizardSaveBtn').disabled = false;
+    } else {
+      resultEl.textContent = `Couldn't reach that URL: ${r.error}`;
+      resultEl.className = 'test-result bad';
+    }
+  } catch (err) {
+    resultEl.textContent = err.message; resultEl.className = 'test-result bad';
+  }
+}
+
+async function wizardSave(){
+  const url = document.getElementById('w_url').value.trim();
+  const key = document.getElementById('w_key').value.trim();
+  try {
+    const r = await apiCall('/gateway/onboard', { method: 'POST', body: JSON.stringify({ gateway_base_url: url, gateway_api_key: key }) });
+    document.getElementById('w_provider').value = r.settings?.default_provider || 'cashfree';
+    wizardGoToStep(3);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function wizardFinish(){
+  try {
+    await apiCall('/settings', { method: 'PUT', body: JSON.stringify({ default_provider: document.getElementById('w_provider').value }) });
+    toast('Payment gateway connected');
+    closeWizard();
+    loadGatewayStatus();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
 /* ---------------- SETTINGS ---------------- */
 async function loadSettings(){
   try {
     const { settings } = await apiCall('/settings');
-    document.getElementById('s_provider').value = settings.default_provider || 'stripe';
     document.getElementById('s_currency').value = settings.currency || 'INR';
     document.getElementById('s_greeting').value = settings.catalog_greeting || '';
     document.getElementById('s_checkout_label').value = settings.checkout_button_label || '';
@@ -319,7 +688,6 @@ async function loadSettings(){
 async function saveSettings(){
   try {
     await apiCall('/settings', { method: 'PUT', body: JSON.stringify({
-      default_provider: document.getElementById('s_provider').value,
       currency: document.getElementById('s_currency').value.trim() || 'INR',
       catalog_greeting: document.getElementById('s_greeting').value.trim(),
       checkout_button_label: document.getElementById('s_checkout_label').value.trim(),
@@ -328,8 +696,14 @@ async function saveSettings(){
   } catch (err) { toast(err.message, 'error'); }
 }
 
+/* ---------------- INIT ---------------- */
 loadProducts();
 loadSettings();
+// Auto-prompt onboarding once, on first load, if no gateway is connected yet —
+// this is the "start onboarding popup" from the ecom module requirements.
+// Doesn't block the rest of the UI; the merchant can dismiss and use the
+// Payment Gateway tab's "Connect / Update Gateway" button whenever they're ready.
+loadGatewayStatus().then(status => { if (status && !status.connected) openWizard(); });
 </script>
 </body>
 </html>
