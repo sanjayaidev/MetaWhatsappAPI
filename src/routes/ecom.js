@@ -11,9 +11,12 @@
 const express = require('express');
 const createCartModule = require('../ecom/cart');
 const createPaymentsModule = require('../payments');
+const { encryptToken } = require('../crypto');
 
 module.exports = function ecomRouter(deps) {
-  const { supabase } = deps;
+  const { supabase, encryptToken: depsEncryptToken, fetch: depsFetch } = deps;
+  const encrypt = depsEncryptToken || encryptToken; // deps.encryptToken (crmDeps) takes priority; falls back to a direct require so this route still works if ecomRouter is ever wired up standalone
+  const fetch = depsFetch || require('node-fetch');
   const cart = createCartModule({ supabase });
   const payments = createPaymentsModule({ supabase });
   const router = express.Router();
@@ -22,7 +25,7 @@ module.exports = function ecomRouter(deps) {
   router.get('/settings', async (req, res) => {
     const { data, error } = await supabase.from('wb_ecom_settings').select('*').eq('user_id', req.user.id).maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
-    res.json({ settings: data || { user_id: req.user.id, default_provider: 'stripe', currency: 'INR', catalog_greeting: "Here's what we have available:", checkout_button_label: 'Checkout' } });
+    res.json({ settings: data || { user_id: req.user.id, default_provider: 'cashfree', currency: 'INR', catalog_greeting: "Here's what we have available:", checkout_button_label: 'Checkout' } });
   });
 
   router.put('/settings', async (req, res) => {
@@ -33,6 +36,94 @@ module.exports = function ecomRouter(deps) {
       .select().single();
     if (error) return res.status(500).json({ error: error.message });
     res.json({ settings: data });
+  });
+
+  // ── Payment gateway onboarding wizard ────────────────────────────────
+  // Same encrypt + upsert into wb_ecom_settings that scripts/onboard-client-
+  // gateway.js did from the console (see that file's header comment for the
+  // background) — but callable by the merchant themselves, from the UI,
+  // right after they've deployed their own PaymentGatewayAPI to Vercel and
+  // generated a GATEWAY_API_KEY. No server console / env-var access needed.
+  //
+  // GET  /gateway/status      → is a gateway connected yet? (never returns the key)
+  // POST /gateway/onboard     → { gateway_base_url, gateway_api_key } — save/replace it
+  // POST /gateway/test        → best-effort reachability check before saving
+  // DELETE /gateway           → disconnect (e.g. before pointing at a new deployment)
+  router.get('/gateway/status', async (req, res) => {
+    const { data, error } = await supabase.from('wb_ecom_settings')
+      .select('gateway_base_url, default_provider').eq('user_id', req.user.id).maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({
+      connected: !!data?.gateway_base_url,
+      gateway_base_url: data?.gateway_base_url || null,
+      default_provider: data?.default_provider || 'cashfree',
+    });
+  });
+
+  // Best-effort connectivity check for the wizard's "Test Connection" step —
+  // just confirms the URL is reachable and https, NOT that the API key is
+  // valid or that a real charge would succeed (we don't want to fire an
+  // actual test order against a live payment provider from an onboarding
+  // wizard). Full validation happens for real the first time a customer
+  // actually checks out.
+  router.post('/gateway/test', async (req, res) => {
+    const { gateway_base_url } = req.body || {};
+    let base;
+    try { base = new URL(gateway_base_url); } catch { return res.status(400).json({ error: 'Not a valid URL' }); }
+    if (base.protocol !== 'https:') return res.status(400).json({ error: 'gateway_base_url must be https' });
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const result = await fetch(base.origin, { method: 'GET', signal: controller.signal }).finally(() => clearTimeout(timeout));
+      // Any HTTP response at all (even a 404 on "/") means the deployment is
+      // up and reachable — that's all this step is meant to confirm.
+      res.json({ reachable: true, status: result.status });
+    } catch (err) {
+      res.json({ reachable: false, error: err.name === 'AbortError' ? 'Timed out reaching that URL' : err.message });
+    }
+  });
+
+  router.post('/gateway/onboard', async (req, res) => {
+    const { gateway_base_url, gateway_api_key } = req.body || {};
+    if (!gateway_base_url || !gateway_api_key) {
+      return res.status(400).json({ error: 'gateway_base_url and gateway_api_key are required' });
+    }
+    let base;
+    try { base = new URL(gateway_base_url); } catch { return res.status(400).json({ error: 'gateway_base_url is not a valid URL' }); }
+    if (base.protocol !== 'https:') return res.status(400).json({ error: 'gateway_base_url must be https' });
+
+    let encrypted;
+    try {
+      encrypted = encrypt(gateway_api_key);
+    } catch (err) {
+      // Almost always means TOKEN_ENCRYPTION_KEY isn't set/valid on this
+      // deployment — a server misconfiguration, not something the merchant
+      // filling out the wizard can fix, so say so plainly instead of a
+      // generic 500.
+      return res.status(500).json({ error: `Could not encrypt the gateway key — check TOKEN_ENCRYPTION_KEY is configured on the server (${err.message})` });
+    }
+
+    const { data, error } = await supabase.from('wb_ecom_settings')
+      .upsert({
+        user_id: req.user.id,
+        gateway_base_url: base.origin,
+        gateway_api_key_encrypted: encrypted,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' })
+      .select('gateway_base_url, default_provider, currency').single();
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Plaintext key is never stored or echoed back anywhere past this point —
+    // same guarantee the console script gave.
+    res.json({ ok: true, settings: data });
+  });
+
+  router.delete('/gateway', async (req, res) => {
+    const { error } = await supabase.from('wb_ecom_settings')
+      .update({ gateway_base_url: null, gateway_api_key_encrypted: null, updated_at: new Date().toISOString() })
+      .eq('user_id', req.user.id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
   });
 
   // ── Products ──────────────────────────────────────────────────────────
