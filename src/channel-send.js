@@ -25,16 +25,34 @@ module.exports = function createChannelSender({ supabase, decryptToken, encryptT
     return page;
   }
 
-  async function sendFacebookMessage(userId, psid, text) {
+  // Shared low-level poster for both Facebook and Instagram — they're the
+  // same Graph endpoint, same Page access token, same request/response
+  // shape (a Page's linked IG business account rides on the Page's own
+  // token). `body` must be a full Messenger send body: { recipient: { id },
+  // message: {...} }. `message` can be as simple as { text } or a richer
+  // shape — quick_replies, or an attachment (generic/button template) —
+  // exactly what src/ecom/messages.js's buildCatalogMessage/
+  // buildCartSummaryMessage/etc. already return for channel 'facebook'/
+  // 'instagram'. Exported as sendRawMessengerPayload so callers with a
+  // pre-built rich payload (the ecom bot flow) don't have to unpack it back
+  // down to plain text just to reach this function.
+  async function postMessengerPayload(userId, body) {
+    if (!body || !body.recipient?.id || !body.message) {
+      throw new Error('postMessengerPayload requires { recipient: { id }, message } — build it with src/ecom/messages.js or wrap plain text as { recipient: { id }, message: { text } }.');
+    }
     const page = await getPageAccessToken(userId);
     const res = await fetch(`https://graph.facebook.com/${META_API_VERSION}/me/messages?access_token=${encodeURIComponent(page.access_token)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipient: { id: psid }, message: { text } })
+      body: JSON.stringify(body)
     });
     const data = await res.json();
-    if (!res.ok || !data.message_id) throw new Error(data.error?.message || `Facebook Graph API ${res.status}`);
+    if (!res.ok || !data.message_id) throw new Error(data.error?.message || `Messenger Graph API ${res.status}`);
     return data.message_id;
+  }
+
+  async function sendFacebookMessage(userId, psid, text) {
+    return postMessengerPayload(userId, { recipient: { id: psid }, message: { text } });
   }
 
   // Instagram DMs use the same Graph "me/messages" call as Facebook Page
@@ -42,15 +60,7 @@ module.exports = function createChannelSender({ supabase, decryptToken, encryptT
   // id is the lead's Instagram-scoped id (IGSID), stored in wb_leads.ig_handle
   // once a lead has been matched via the IG webhook.
   async function sendInstagramMessage(userId, igsid, text) {
-    const page = await getPageAccessToken(userId);
-    const res = await fetch(`https://graph.facebook.com/${META_API_VERSION}/me/messages?access_token=${encodeURIComponent(page.access_token)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipient: { id: igsid }, message: { text } })
-    });
-    const data = await res.json();
-    if (!res.ok || !data.message_id) throw new Error(data.error?.message || `Instagram Graph API ${res.status}`);
-    return data.message_id;
+    return postMessengerPayload(userId, { recipient: { id: igsid }, message: { text } });
   }
 
   // Sends via the Gmail API using the same Google OAuth token (with
@@ -85,7 +95,14 @@ module.exports = function createChannelSender({ supabase, decryptToken, encryptT
   // Meta "interactive" object (buttons/list/cta_url — see whatsapp-interactive.js)
   // instead of dumping that JSON as literal text. Takes priority over `body`
   // but not over `template` (a template send always wins if both are passed).
-  return async function sendChannelMessage({ lead, channel, body, isAutomation = false, template = null, interactive = null }) {
+  //
+  // `messengerMessage`, when provided for the facebook/instagram channels, is
+  // a full Messenger `message` object (quick_replies, or a generic/button
+  // template attachment — the shapes src/ecom/messages.js's builders return
+  // for those channels) sent as-is instead of wrapping `body` as plain text.
+  // Same priority rule as `interactive`: only used when set, otherwise falls
+  // back to a plain-text `{ text: body }` message.
+  const sendChannelMessage = async function sendChannelMessage({ lead, channel, body, isAutomation = false, template = null, interactive = null, messengerMessage = null }) {
     let status = 'sent';
     let externalId = null;
     let sendError = null;
@@ -121,15 +138,21 @@ module.exports = function createChannelSender({ supabase, decryptToken, encryptT
       if (!lead.fb_psid) {
         sendError = 'Lead has no Facebook PSID on file (only inbound Messenger contacts can be replied to)';
       } else {
-        try { externalId = await sendFacebookMessage(lead.user_id, lead.fb_psid, body); }
-        catch (err) { sendError = err.message; }
+        try {
+          externalId = messengerMessage
+            ? await postMessengerPayload(lead.user_id, { recipient: { id: lead.fb_psid }, message: messengerMessage })
+            : await sendFacebookMessage(lead.user_id, lead.fb_psid, body);
+        } catch (err) { sendError = err.message; }
       }
     } else if (channel === 'instagram') {
       if (!lead.ig_handle) {
         sendError = 'Lead has no Instagram-scoped id on file (only inbound IG contacts can be replied to)';
       } else {
-        try { externalId = await sendInstagramMessage(lead.user_id, lead.ig_handle, body); }
-        catch (err) { sendError = err.message; }
+        try {
+          externalId = messengerMessage
+            ? await postMessengerPayload(lead.user_id, { recipient: { id: lead.ig_handle }, message: messengerMessage })
+            : await sendInstagramMessage(lead.user_id, lead.ig_handle, body);
+        } catch (err) { sendError = err.message; }
       }
     } else if (channel === 'email') {
       if (!lead.email) {
@@ -158,4 +181,21 @@ module.exports = function createChannelSender({ supabase, decryptToken, encryptT
     if (sendError) throw Object.assign(new Error(sendError), { message: msg });
     return msg;
   };
+
+  // NOTE ON EXPORTS: createChannelSender(deps) has always returned the
+  // sendChannelMessage function directly (not an object) — every existing
+  // call site (leads.js, automations.js, payments-webhook.js, sheet-poller.js,
+  // webhooks-inbound.js, server.js) does `const sendChannelMessage =
+  // createChannelSender(deps)` and calls it directly. Changing that return
+  // shape would break all of them, so instead of returning an object here,
+  // postMessengerPayload is attached as a property on the function itself —
+  // existing callers are unaffected, and the ecom bot flow (server.js) can
+  // reach it as `sendChannelMessage.sendRawMessengerPayload(userId, body)`,
+  // where `body` is exactly what src/ecom/messages.js's buildCatalogMessage/
+  // buildCartSummaryMessage/etc. already return for 'facebook'/'instagram'
+  // — no lead row required, since the ecom flow addresses contacts directly
+  // by PSID/IGSID rather than through a CRM lead record.
+  sendChannelMessage.sendRawMessengerPayload = postMessengerPayload;
+
+  return sendChannelMessage;
 };
