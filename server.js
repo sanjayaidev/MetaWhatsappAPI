@@ -2301,6 +2301,13 @@ async function handleIncomingMessengerEvent(channel, pageOrIgId, messagingEvent)
     return;
   }
 
+  // A rule can restrict itself to specific channels via action_config.channels
+  // (e.g. a "WhatsApp only" catalog trigger) — set from the ecom-builder UI's
+  // per-channel checkboxes. Omitted/empty means "all channels", matching the
+  // original behavior before per-channel scoping existed.
+  const ruleChannels = match.actionConfig?.channels;
+  if (Array.isArray(ruleChannels) && ruleChannels.length && !ruleChannels.includes(channel)) return;
+
   try {
     const productIds = match.actionConfig?.product_ids;
     let query = supabase.from('wb_products').select('*').eq('user_id', userId).eq('is_active', true).order('created_at', { ascending: false });
@@ -2504,6 +2511,9 @@ async function handleIncomingMessage(value, msg) {
         }
       } else if (match.actionType === 'ecom_catalog') {
         try {
+          const ruleChannels = match.actionConfig?.channels;
+          if (Array.isArray(ruleChannels) && ruleChannels.length && !ruleChannels.includes('whatsapp')) return;
+
           const productIds = match.actionConfig?.product_ids;
           let query = supabase.from('wb_products').select('*').eq('user_id', waAccount.user_id).eq('is_active', true).order('created_at', { ascending: false });
           if (Array.isArray(productIds) && productIds.length) query = query.in('id', productIds);
