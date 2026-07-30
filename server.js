@@ -92,6 +92,13 @@ const supabase = createClient(
 const ecomCart = createCartModule({ supabase });
 const ecomPayments = createPaymentsModule({ supabase });
 
+// Low-level Facebook/Instagram Messenger sender for the ecom bot flow (cart
+// taps, catalog carousel, checkout link — see handleEcomInteraction and
+// handleIncomingMessengerEvent below). WhatsApp ecom sends still go straight
+// through wa_accounts' own phone_number_id + token, same as before — this is
+// only used for the two channels that route through a Page access token.
+const ecomChannelSender = createChannelSender({ supabase, decryptToken, encryptToken, META_API_VERSION, fetch });
+
 // Shared with bot-engine's matchRule() below, so a bot-builder rule with a
 // sheet_lookup configured can fetch a valid Google access token the same way
 // src/routes/flows.js's Sheets endpoints already do.
@@ -1925,6 +1932,27 @@ app.post('/webhook', async (req, res) => {
   });
 
   if (!signatureValid) return;
+  // Facebook Page messages and Instagram DMs arrive with object: 'page' /
+  // 'instagram' respectively, in a completely different shape (entry[].messaging[])
+  // than WhatsApp's entry[].changes[].value.messages. Previously this handler
+  // returned immediately for anything that wasn't a WhatsApp payload, so no
+  // FB/IG inbound message — including ecom cart taps and catalog triggers —
+  // ever reached any handler. Only the ecom-relevant slice of that traffic is
+  // wired up for now (see handleIncomingMessengerEvent) — full bot-builder
+  // parity (AI auto-reply, saved templates) for these two channels is a
+  // separate, larger piece of work.
+  if (body.object === 'page' || body.object === 'instagram') {
+    const channel = body.object === 'instagram' ? 'instagram' : 'facebook';
+    for (const entry of (body.entry || [])) {
+      for (const messagingEvent of (entry.messaging || [])) {
+        handleIncomingMessengerEvent(channel, entry.id, messagingEvent).catch((err) => {
+          console.error(`[webhook] ${channel} event handling error:`, err.message);
+        });
+      }
+    }
+    return;
+  }
+
   if (body.object !== 'whatsapp_business_account') return;
 
   for (const entry of (body.entry || [])) {
@@ -2095,63 +2123,88 @@ async function logOutboundMessage({ userId, waAccountId = null, phone, contactNa
 // Handles a single incoming WhatsApp message: logs it (all types, so it shows
 // up in the Received tab) and, for plain text only, checks the account's
 // auto-reply setting, asks the configured AI model for a reply, and sends it back.
-// Handles a tap on an ecom-flow button/list row (ids like "ecom_add:<id>",
-// "ecom_view_cart", "ecom_checkout", "ecom_clear"). Runs BEFORE bot-engine's
-// keyword rules — these are direct cart actions from a specific button tap,
-// not something a keyword match should ever intercept.
-async function handleEcomInteraction({ waAccount, from, contactName, replyId }) {
-  const plainToken = decryptToken(waAccount.access_token);
-
+// Handles a tap on an ecom-flow button/list row/postback/quick-reply (ids
+// like "ecom_add:<id>", "ecom_view_cart", "ecom_checkout", "ecom_clear").
+// Runs BEFORE bot-engine's keyword rules — these are direct cart actions
+// from a specific tap, not something a keyword match should ever intercept.
+//
+// Channel-agnostic as of the FB/IG ecom rollout: WhatsApp still sends
+// directly via wa_accounts' own phone_number_id + token (unchanged, `waAccount`
+// is required for that channel); Instagram/Facebook send through
+// ecomChannelSender.sendRawMessengerPayload, which resolves the merchant's
+// Page access token itself (see src/channel-send.js) — no per-channel token
+// plumbing needed here beyond passing `userId`.
+async function handleEcomInteraction({ channel, userId, from, contactName, replyId, waAccount = null }) {
   async function send(payload) {
-    const result = await fetch(`https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${plainToken}` },
-      body: JSON.stringify(payload)
-    });
-    const responseData = await result.json().catch(() => ({}));
-    if (result.ok) {
-      const { message_type, message_body } = extractOutboundPreview(payload);
-      logOutboundMessage({
-        userId: waAccount.user_id, waAccountId: waAccount.id, phone: from,
-        contactName, messageType: message_type, messageBody: message_body,
-        waMessageId: responseData?.messages?.[0]?.id || null, source: 'bot_builder'
+    if (channel === 'whatsapp') {
+      const plainToken = decryptToken(waAccount.access_token);
+      const result = await fetch(`https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${plainToken}` },
+        body: JSON.stringify(payload)
       });
-    } else {
-      console.error('[webhook] ecom send failed:', responseData?.error?.message || result.status);
+      const responseData = await result.json().catch(() => ({}));
+      if (result.ok) {
+        const { message_type, message_body } = extractOutboundPreview(payload);
+        logOutboundMessage({
+          userId, waAccountId: waAccount.id, phone: from,
+          contactName, messageType: message_type, messageBody: message_body,
+          waMessageId: responseData?.messages?.[0]?.id || null, source: 'bot_builder'
+        });
+      } else {
+        console.error('[webhook] ecom send failed:', responseData?.error?.message || result.status);
+      }
+      return;
+    }
+
+    // instagram / facebook — `payload` here is already the full
+    // { recipient: { id }, message: {...} } shape ecom/messages.js's
+    // builders return for these channels, so it can go straight through.
+    // No wb_outbound_messages row is written for these two channels yet
+    // (that table's columns are WhatsApp-shaped — wa_account_id/wa_message_id)
+    // — a fair follow-up if unified outbound logging across channels is
+    // needed later, but not required for the cart/checkout flow to work.
+    try {
+      await ecomChannelSender.sendRawMessengerPayload(userId, payload);
+    } catch (err) {
+      console.error(`[webhook] ecom send failed (${channel}):`, err.message);
     }
   }
 
-  const { data: settings } = await supabase.from('wb_ecom_settings').select('*').eq('user_id', waAccount.user_id).maybeSingle();
+  const { data: settings } = await supabase.from('wb_ecom_settings').select('*').eq('user_id', userId).maybeSingle();
   const currency = settings?.currency || 'INR';
   const checkoutLabel = settings?.checkout_button_label || 'Checkout';
-  const provider = settings?.default_provider || 'stripe';
+  const provider = settings?.default_provider || 'cashfree';
 
   if (replyId.startsWith('ecom_add:')) {
     const productId = replyId.slice('ecom_add:'.length);
     const { data: product } = await supabase.from('wb_products').select('name').eq('id', productId).single();
-    await ecomCart.addItem(waAccount.user_id, 'whatsapp', from, productId, 1, contactName);
-    const summary = await ecomCart.getSummary(waAccount.user_id, 'whatsapp', from);
-    await send(ecomMessages.buildAddedToCartMessage(from, product?.name || 'Item', summary, currency));
+    await ecomCart.addItem(userId, channel, from, productId, 1, contactName);
+    const summary = await ecomCart.getSummary(userId, channel, from);
+    await send(ecomMessages.buildAddedToCartMessage(channel, from, product?.name || 'Item', summary, currency));
     return;
   }
 
   if (replyId === 'ecom_view_cart') {
-    const summary = await ecomCart.getSummary(waAccount.user_id, 'whatsapp', from);
-    await send(ecomMessages.buildCartSummaryMessage(from, summary, checkoutLabel, currency));
+    const summary = await ecomCart.getSummary(userId, channel, from);
+    await send(ecomMessages.buildCartSummaryMessage(channel, from, summary, checkoutLabel, currency));
     return;
   }
 
   if (replyId === 'ecom_clear') {
-    const summary = await ecomCart.getSummary(waAccount.user_id, 'whatsapp', from);
+    const summary = await ecomCart.getSummary(userId, channel, from);
     if (summary.cart) await ecomCart.clearCart(summary.cart.id);
-    await send({ messaging_product: 'whatsapp', to: from, type: 'text', text: { body: 'Cart cleared. Say "shop" to browse products again!' } });
+    const clearedText = 'Cart cleared. Say "shop" to browse products again!';
+    await send(channel === 'whatsapp'
+      ? { messaging_product: 'whatsapp', to: from, type: 'text', text: { body: clearedText } }
+      : { recipient: { id: from }, message: { text: clearedText } });
     return;
   }
 
   if (replyId === 'ecom_checkout') {
-    const { order, items } = await ecomCart.checkoutCart(waAccount.user_id, 'whatsapp', from, currency);
+    const { order, items } = await ecomCart.checkoutCart(userId, channel, from, currency);
     const checkoutResult = await ecomPayments.createCheckout({
-      order: { ...order, provider, user_id: waAccount.user_id }, items,
+      order: { ...order, provider, user_id: userId }, items,
       successUrl: `${SELF_URL}/ecom-pay.html?order_id=${order.id}&status=success`,
       cancelUrl: `${SELF_URL}/ecom-pay.html?order_id=${order.id}&status=cancel`,
     });
@@ -2160,8 +2213,113 @@ async function handleEcomInteraction({ waAccount, from, contactName, replyId }) 
     // widget, not a hosted page) — point at this repo's own /ecom-pay.html,
     // which mounts Checkout.js using the order's client_fields, instead.
     const payUrl = checkoutResult.checkout_url || `${SELF_URL}/ecom-pay.html?order_id=${order.id}`;
-    await send(ecomMessages.buildCheckoutLinkMessage(from, payUrl));
+    await send(ecomMessages.buildCheckoutLinkMessage(channel, from, payUrl));
     return;
+  }
+}
+
+// Resolves which merchant (user_id) owns an inbound Facebook Page or
+// Instagram professional-account webhook event, given the Page/IG id Meta
+// sends as entry[].id. Mirrors the WhatsApp path's phone_number_id -> wa_accounts
+// -> user_id lookup, but there's no dedicated table for this yet — Page
+// tokens are stored per-user in wb_oauth_tokens.metadata.pages (populated by
+// src/routes/flows.js's Facebook OAuth callback), so this scans that column
+// for a matching page id. Fine at today's scale; if this becomes a hot path
+// with many connected merchants, worth adding a dedicated
+// wb_page_id -> user_id index table instead of scanning on every webhook hit.
+//
+// KNOWN GAP: this only matches on the Facebook Page's own `id`. Instagram
+// webhook events are keyed by the Page's *linked Instagram professional
+// account* id, which is a different id that flows.js's OAuth callback
+// doesn't currently fetch/store (it only calls /me/accounts, not each page's
+// `instagram_business_account` field). Until flows.js is updated to also
+// capture that id, Instagram inbound events for a given merchant won't
+// resolve here — Facebook Page events will. Flagging this so it isn't
+// silently assumed to already work.
+async function resolveEcomUserFromPageId(pageOrIgId) {
+  const { data: rows, error } = await supabase.from('wb_oauth_tokens').select('user_id, metadata').eq('service', 'facebook');
+  if (error || !rows) return null;
+  for (const row of rows) {
+    const pages = row.metadata?.pages || [];
+    const match = pages.find((p) => p.id === pageOrIgId || p.instagram_business_account?.id === pageOrIgId);
+    if (match) return { userId: row.user_id, page: match };
+  }
+  return null;
+}
+
+// Handles one inbound Messenger-platform event (Facebook Page message or
+// Instagram DM — both arrive in this same `messaging[]` shape). Only the
+// ecom-specific slice of bot behavior is wired here: a tap on an ecom
+// postback/quick-reply, or a plain-text message matching an `ecom_catalog`
+// bot-builder rule. Full bot-builder parity for these two channels (AI
+// auto-reply, saved templates) is a separate, larger piece of work and is
+// NOT handled here yet — a matched non-ecom rule is logged and skipped
+// rather than silently mishandled.
+async function handleIncomingMessengerEvent(channel, pageOrIgId, messagingEvent) {
+  const resolved = await resolveEcomUserFromPageId(pageOrIgId);
+  if (!resolved) return; // no merchant connected for this Page/IG account
+  const { userId } = resolved;
+  const from = messagingEvent.sender?.id;
+  if (!from) return;
+
+  let contactName = '';
+  try {
+    const column = channel === 'instagram' ? 'ig_handle' : 'fb_psid';
+    const { data: lead } = await supabase.from('wb_leads').select('name').eq('user_id', userId).eq(column, from).maybeSingle();
+    if (lead?.name) contactName = lead.name;
+  } catch (_) { /* no matching lead, that's fine */ }
+
+  // Postback button tap (generic-template "Add to Cart" card buttons) or a
+  // quick_reply tap (Checkout/Clear cart/View Cart) — both carry the same
+  // "ecom_..." payload convention as WhatsApp's button/list reply ids.
+  const replyId = messagingEvent.postback?.payload || messagingEvent.message?.quick_reply?.payload;
+  if (replyId && replyId.startsWith('ecom_')) {
+    try {
+      await handleEcomInteraction({ channel, userId, from, contactName, replyId });
+    } catch (err) {
+      console.error(`[webhook] ecom interaction failed (${channel}):`, err.message);
+    }
+    return;
+  }
+
+  // Plain text — only checked against ecom_catalog bot-builder rules for now
+  // (see comment above); any other rule type that matches is intentionally
+  // left unhandled here rather than guessing at FB/IG-specific AI/template behavior.
+  const text = messagingEvent.message?.text;
+  if (!text || messagingEvent.message?.is_echo) return;
+
+  let match = null;
+  try {
+    match = await matchRule({ supabase, getValidGoogleAccessToken }, { userId, phone: from, text });
+  } catch (err) {
+    console.error(`[webhook] bot-engine matchRule failed (${channel}):`, err.message);
+  }
+  if (!match) return;
+
+  if (match.actionType !== 'ecom_catalog') {
+    console.log(`[webhook] ${channel} matched a non-ecom rule (actionType=${match.actionType}) — not sent; FB/IG bot-builder parity beyond ecom_catalog isn't wired up yet.`);
+    return;
+  }
+
+  try {
+    const productIds = match.actionConfig?.product_ids;
+    let query = supabase.from('wb_products').select('*').eq('user_id', userId).eq('is_active', true).order('created_at', { ascending: false });
+    if (Array.isArray(productIds) && productIds.length) query = query.in('id', productIds);
+    const { data: products } = await query;
+    if (!products?.length) {
+      console.error('[webhook] ecom_catalog rule fired but merchant has no active products');
+      return;
+    }
+
+    const { data: settings } = await supabase.from('wb_ecom_settings').select('catalog_greeting').eq('user_id', userId).maybeSingle();
+    // Messenger templates can't carry a caption the way a WhatsApp list body
+    // can — send the greeting as its own text message first (see file 1's
+    // buildCatalogGreetingMessage).
+    await ecomChannelSender.sendRawMessengerPayload(userId, ecomMessages.buildCatalogGreetingMessage(channel, from, settings?.catalog_greeting));
+    const payload = ecomMessages.buildCatalogMessage(channel, from, products, settings?.catalog_greeting);
+    await ecomChannelSender.sendRawMessengerPayload(userId, payload);
+  } catch (err) {
+    console.error(`[webhook] ecom_catalog rule failed (${channel}):`, err.message);
   }
 }
 
@@ -2226,7 +2384,7 @@ async function handleIncomingMessage(value, msg) {
   const ecomReplyId = msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id;
   if (ecomReplyId && ecomReplyId.startsWith('ecom_')) {
     try {
-      await handleEcomInteraction({ waAccount, from: msg.from, contactName, replyId: ecomReplyId });
+      await handleEcomInteraction({ channel: 'whatsapp', userId: waAccount.user_id, from: msg.from, contactName, replyId: ecomReplyId, waAccount });
     } catch (err) {
       console.error('[webhook] ecom interaction failed:', err.message);
     }
@@ -2357,7 +2515,7 @@ async function handleIncomingMessage(value, msg) {
             console.error('[webhook] ecom_catalog rule fired but merchant has no active products');
             return;
           }
-          const payload = ecomMessages.buildCatalogMessage(msg.from, products, settings?.catalog_greeting);
+          const payload = ecomMessages.buildCatalogMessage('whatsapp', msg.from, products, settings?.catalog_greeting);
           const plainToken = decryptToken(waAccount.access_token);
           const result = await fetch(`https://graph.facebook.com/${META_API_VERSION}/${waAccount.phone_number_id}/messages`, {
             method: 'POST',
