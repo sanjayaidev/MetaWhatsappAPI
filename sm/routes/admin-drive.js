@@ -36,7 +36,12 @@ function requireAdminSecret(req, res, next) {
 }
 
 function renderPage({ key, connected, error }) {
-  const safeKey = String(key || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  const rawKey = String(key || '');
+  // Encode for each context instead of stripping characters — stripping
+  // silently corrupted any secret containing e.g. base64's +/= chars,
+  // which then mismatched on every subsequent request from this page.
+  const hrefKey = encodeURIComponent(rawKey);
+  const jsKeyLiteral = JSON.stringify(rawKey).replace(/</g, '\\u003c');
   const banner = connected
     ? `<div class="banner ok">Connected via Google — refresh token saved.</div>`
     : error
@@ -71,7 +76,7 @@ function renderPage({ key, connected, error }) {
   ${banner}
   <div id="status">Checking status…</div>
 
-  <p><a class="connect-btn" href="/sm/admin/drive/authorize?key=${encodeURIComponent(safeKey)}">Connect with Google</a></p>
+  <p><a class="connect-btn" href="/sm/admin/drive/authorize?key=${hrefKey}">Connect with Google</a></p>
 
   <hr>
   <details>
@@ -83,7 +88,7 @@ function renderPage({ key, connected, error }) {
   </details>
 
   <script>
-    const KEY = ${JSON.stringify(safeKey)};
+    const KEY = ${jsKeyLiteral};
 
     async function refreshStatus() {
       const res = await fetch('/sm/api/admin/drive/status', { headers: { 'x-admin-secret': KEY } });
