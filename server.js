@@ -3051,7 +3051,7 @@ app.use('/sm/api/ai', smcAiRouter(supabase));
 // Operator-only: manually (re)connect the shared owner Google Drive used
 // for media storage. Gated by SM_DRIVE_ADMIN_SECRET inside the router
 // itself, not by smcRequireAuth — this isn't a per-user route.
-app.use('/sm/admin', smcAdminDriveRouter.pageRouter());
+app.use('/sm/admin', smcAdminDriveRouter.pageRouter(supabase));
 app.use('/sm/api/admin/drive', smcAdminDriveRouter.apiRouter(supabase));
 
 app.use('/sm', express.static(path.join(__dirname, 'sm')));
