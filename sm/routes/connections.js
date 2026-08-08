@@ -58,14 +58,9 @@ const OAUTH_CONFIGS = {
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     extraParams: { access_type: 'offline', prompt: 'consent' },
   },
-  google_drive: {
-    label: 'Google Drive',
-    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
-    scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email',
-    clientId: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    extraParams: { access_type: 'offline', prompt: 'consent' },
-  },
+  // google_drive intentionally removed: media storage now exclusively uses
+  // the one shared "owner" Drive account (smc_shared_tokens, managed
+  // manually at /sm/admin/drive) instead of a per-user OAuth connection.
 };
 
 async function upsertConnection(supabase, userId, { platform, account_name, account_id, page_id, access_token, token_expires_at }) {
@@ -353,7 +348,6 @@ const FINISHERS = {
   threads: finishThreads,
   linkedin: finishLinkedIn,
   google_sheets: (supabase, userId, code, redirectUri, config) => finishGoogle(supabase, userId, code, redirectUri, config, 'google_sheets'),
-  google_drive: (supabase, userId, code, redirectUri, config) => finishGoogle(supabase, userId, code, redirectUri, config, 'google_drive'),
 };
 
 // ===========================================================

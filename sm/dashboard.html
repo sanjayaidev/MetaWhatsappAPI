@@ -801,27 +801,9 @@
                     </div>
                 </div>
 
-                <!-- Google Drive -->
-                <div class="card connection-card h-100 shadow-sm border-0">
-                    <div class="card-body d-flex flex-column">
-                        <div class="d-flex align-items-center mb-3">
-                            <div class="icon-box bg-danger bg-opacity-10 text-danger rounded-circle p-3 me-3">
-                                <img src="/sm/assets/logos/drive.webp" alt="Google Drive" style="width:28px;height:28px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='block';"><i class="fab fa-google-drive fa-lg" style="display:none;"></i>
-                            </div>
-                            <div>
-                                <h5 class="mb-0">Google Drive</h5>
-                                <small class="text-muted">Media Storage</small>
-                            </div>
-                        </div>
-                        <p class="text-muted flex-grow-1">Store and access media files directly from your Google Drive for posts.</p>
-                        
-                        <div id="conn-status-drive" class="connection-status mt-3">
-                            <button class="btn btn-outline-danger w-100" onclick="connectPlatform('google_drive')">
-                                <i class="fas fa-link me-2"></i>Connect Account
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <!-- Google Drive: intentionally removed. Media storage now
+                     exclusively uses the shared "owner" Drive account
+                     (managed at /sm/admin/drive), not a per-user connection. -->
 
                 <!-- Facebook -->
                 <div class="card connection-card h-100 shadow-sm border-0">
@@ -2539,7 +2521,6 @@
     // ============================================================
     const PLATFORM_META = {
         google_sheets: { name: 'Google Sheets', icon: '/sm/assets/logos/sheets.png', color: '#0f9d58' },
-        google_drive: { name: 'Google Drive', icon: '/sm/assets/logos/drive.webp', color: '#4285f4' },
         facebook: { name: 'Facebook', icon: '/sm/assets/logos/facebook.webp', color: 'var(--fb)' },
         instagram: { name: 'Instagram', icon: '/sm/assets/logos/insta.webp', color: 'var(--ig)' },
         threads: { name: 'Threads', icon: '/sm/assets/logos/Threads.png', color: 'var(--threads)' },
@@ -2558,7 +2539,7 @@
         // Update each card's status based on connection state
         Object.keys(PLATFORM_META).forEach(platform => {
             const conn = connections.find(c => c.platform === platform && c.is_connected);
-            const statusDiv = document.getElementById(`conn-status-${platform === 'google_sheets' ? 'sheets' : platform === 'google_drive' ? 'drive' : platform}`);
+            const statusDiv = document.getElementById(`conn-status-${platform === 'google_sheets' ? 'sheets' : platform}`);
             if (!statusDiv) return;
             
             if (conn) {
@@ -2574,7 +2555,6 @@
             } else {
                 const meta = PLATFORM_META[platform];
                 const btnColor = platform === 'google_sheets' ? 'success' : 
-                                platform === 'google_drive' ? 'danger' : 
                                 platform === 'facebook' ? 'primary' : 'dark';
                 statusDiv.innerHTML = `
                     <button class="btn btn-outline-${btnColor} w-100" onclick="connectPlatform('${platform}')">

@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const { decrypt, signMediaToken, verifyMediaToken } = require('../lib/crypto');
 const drive = require('../lib/googleDrive');
+const ownerDriveToken = require('../lib/ownerDriveToken');
 
 // 200MB cap — plenty for IG/FB images and short-form video, keeps memory use bounded
 // since we buffer in memory before forwarding to Drive.
@@ -15,31 +16,12 @@ const PROXY_URL_TTL_MS = 365 * 24 * 60 * 60 * 1000; // 1 year — long enough th
 // One pre-connected Google account (the app operator's own Drive) backs
 // media storage for every user — set up once, outside the per-user OAuth
 // consent flow, since Drive access was never part of our verified scope
-// grant. Get this refresh token once by running the normal Google OAuth
-// consent flow for this app's own Cloud project with the operator's Google
-// account and the 'https://www.googleapis.com/auth/drive.file' scope
-// (that flow doesn't need public verification since only the operator ever
-// sees that consent screen), then set it here.
-const OWNER_REFRESH_TOKEN = process.env.GOOGLE_DRIVE_OWNER_REFRESH_TOKEN;
-
-// Exchanges the shared owner refresh token for a fresh short-lived access
-// token before every Drive call. If that exchange fails — expired/revoked
-// refresh token — surface a clear "needs reconfiguring" error instead of a
-// confusing raw Google 401 (this is an operator-level problem, not
-// something any individual user can fix by reconnecting anything).
-async function getSharedAccessToken() {
-  if (!OWNER_REFRESH_TOKEN) {
-    const e = new Error('Media storage is not configured on this server yet — set GOOGLE_DRIVE_OWNER_REFRESH_TOKEN.');
-    e.notConfigured = true;
-    throw e;
-  }
-  try {
-    return await drive.getFreshAccessToken(OWNER_REFRESH_TOKEN);
-  } catch (err) {
-    const e = new Error('The shared Google Drive connection expired or was revoked — an admin needs to reauthorize it.');
-    e.needsReconnect = true;
-    throw e;
-  }
+// grant. The refresh token lives in the smc_shared_tokens table now (one
+// row, shared by every user) instead of an env var — connect/reconnect it
+// manually from /sm/admin/drive (see routes/admin-drive.js), no redeploy
+// needed to rotate it.
+async function getSharedAccessToken(supabase) {
+  return ownerDriveToken.getValidAccessToken(supabase);
 }
 
 // ===========================================================
@@ -54,7 +36,7 @@ function router(supabase) {
       const userId = req.user.id || req.user.sub;
       if (!req.file) return res.status(400).json({ error: 'No file uploaded — attach it under the "file" field' });
 
-      const token = await getSharedAccessToken();
+      const token = await getSharedAccessToken(supabase);
 
       const uploaded = await drive.uploadFile(token, {
         buffer: req.file.buffer,
@@ -101,7 +83,7 @@ function streamRouter(supabase) {
     }
 
     try {
-      const token = await getSharedAccessToken();
+      const token = await getSharedAccessToken(supabase);
 
       const meta = await drive.getFileMeta(token, fileId);
       const upstream = await drive.getFileStream(token, fileId);
