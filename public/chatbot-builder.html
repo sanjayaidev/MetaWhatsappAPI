@@ -328,10 +328,11 @@
           
           <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;">
             <div style="flex:1;min-width:180px;">
-              <label style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;">Select Workbook:</label>
-              <select id="sheetLookupWorkbook" style="width:100%;margin-top:6px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" onchange="onSheetLookupWorkbookSelected()">
-                <option value="">Loading workbooks…</option>
-              </select>
+              <label style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;">Spreadsheet URL or ID:</label>
+              <div style="display:flex;gap:6px;margin-top:6px;">
+                <input type="text" id="sheetLookupWorkbook" placeholder="Paste sheet URL or ID" style="flex:1;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" />
+                <button type="button" class="btn btn-ghost btn-sm" onclick="onSheetLookupWorkbookSelected()">Load</button>
+              </div>
             </div>
             <div style="width:20px;text-align:center;padding-bottom:8px;"><span style="font-size:16px;color:var(--text2);">→</span></div>
             <div style="flex:1;min-width:180px;">
@@ -373,10 +374,11 @@
           <p style="font-size:12.5px;color:var(--text2);margin-bottom:15px;">Browse a doc's content here. To actually ground an AI rule's replies in a doc, open the rule in the Rules tab and pick it under "Knowledge source" — each AI rule can use a different doc.</p>
           
           <div style="margin-bottom:16px;">
-            <label style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;">Select Document:</label>
-            <select id="docsSelector" style="width:100%;margin-top:6px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" onchange="onDocSelected()">
-              <option value="">Loading documents…</option>
-            </select>
+            <label style="font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;">Document URL or ID:</label>
+            <div style="display:flex;gap:6px;margin-top:6px;">
+              <input type="text" id="docsSelector" placeholder="Paste doc URL or ID" style="flex:1;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" />
+              <button type="button" class="btn btn-ghost btn-sm" onclick="onDocSelected()">Load</button>
+            </div>
           </div>
           
           <div id="docPreview" style="display:none;">
@@ -899,9 +901,10 @@ function renderActionBody(rule){
       </div>
       <div class="field" id="rl-doc-field">
         <label>Knowledge source (Google Doc)</label>
-        <select id="rl-doc-select" style="width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
-          <option value="">Loading connection status…</option>
-        </select>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="rl-doc-select" placeholder="Paste doc URL or ID (leave empty for none)" style="flex:1;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" disabled />
+          <button type="button" class="btn btn-ghost btn-sm" id="rl-doc-load-btn">Load</button>
+        </div>
         <p class="hint">The doc's full text is added to the AI's context so it can answer using it. Managed per-rule here — the "Sheet lookup" block below covers structured data (price, stock, order status).</p>
       </div>
     `;
@@ -915,28 +918,44 @@ function renderActionBody(rule){
 
 /* ---- Per-rule Google Doc knowledge source for AI-action rules ---- */
 function renderRuleDocPicker(rule){
-  const select = document.getElementById('rl-doc-select');
-  if(!select) return;
+  const input = document.getElementById('rl-doc-select');
+  const loadBtn = document.getElementById('rl-doc-load-btn');
+  if(!input) return;
   const docsIntegration = integrations.find(i=>i.id==='docs');
   if(!rule.action.config) rule.action.config = {};
   const current = rule.action.config.knowledge_doc || null;
 
   if(!docsIntegration || !docsIntegration.connected){
-    select.innerHTML = '<option value="">Connect Google Docs in the Integrations tab first</option>';
-    select.disabled = true;
+    input.placeholder = 'Connect Google Docs in the Integrations tab first';
+    input.disabled = true;
+    if(loadBtn) loadBtn.disabled = true;
     return;
   }
-  select.disabled = false;
- const opts = '<option value="">No doc (don&#39;t use one)</option>' +
-    availableDocs.map(d=>`<option value="${d.id}" data-name="${escapeAttr(d.name)}" ${current?.docId===d.id?'selected':''}>${escapeHtml(d.name)}</option>`).join('');
-  select.innerHTML = availableDocs.length ? opts : '<option value="">No Google Docs found</option>';
+  input.disabled = false;
+  if(loadBtn) loadBtn.disabled = false;
+  input.value = current?.docId || '';
 
-  select.addEventListener('change', ()=>{
-    const docId = select.value;
+  const load = async ()=>{
+    const docId = extractGoogleFileId(input.value);
     if(!docId){ rule.action.config.knowledge_doc = null; return; }
-    const name = select.options[select.selectedIndex]?.dataset?.name || '';
-    rule.action.config.knowledge_doc = { docId, docName: name };
-  });
+    input.value = docId;
+    loadBtn.disabled = true;
+    loadBtn.textContent = 'Loading…';
+    try {
+      const data = await apiCall(`/oauth/google/doc-content/${encodeURIComponent(docId)}`);
+      if(data.error){ toast(data.error, true); rule.action.config.knowledge_doc = null; return; }
+      rule.action.config.knowledge_doc = { docId, docName: data.title || docId };
+      toast(`✅ Using "${data.title || docId}" as knowledge source`);
+    } catch(err) {
+      toast(err.message || 'Could not load document', true);
+      rule.action.config.knowledge_doc = null;
+    } finally {
+      loadBtn.disabled = false;
+      loadBtn.textContent = 'Load';
+    }
+  };
+  if(loadBtn) loadBtn.addEventListener('click', load);
+  input.addEventListener('change', ()=>{ if(!input.value.trim()) rule.action.config.knowledge_doc = null; });
 }
 
 /* ---- Per-rule Sheet lookup (multiple rules => multiple independent lookups) ---- */
@@ -965,10 +984,10 @@ function renderRuleSheetLookup(rule, actionBodyEl){
     </label>
     <p class="hint">Looks up the incoming message against a column in a sheet, then uses the matching row's value ${rule.action.type==='ai' ? 'as grounding for the AI reply' : 'to fill a {{sheet_lookup}} placeholder in the template'}.</p>
     <div id="rl-body" style="${enabled?'':'display:none;'}margin-top:8px;display:grid;gap:8px;">
-      <select id="rl-workbook" style="padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
-        <option value="">Select a workbook…</option>
-        ${availableSheets.map(s=>`<option value="${s.id}" data-name="${escapeAttr(s.name)}" ${lk?.workbookId===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
-      </select>
+      <div style="display:flex;gap:6px;">
+        <input type="text" id="rl-workbook" placeholder="Paste sheet URL or ID" value="${escapeAttr(lk?.workbookId||'')}" style="flex:1;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" />
+        <button type="button" class="btn btn-ghost btn-sm" id="rl-workbook-load-btn">Load</button>
+      </div>
       <select id="rl-worksheet" style="padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);" ${lk?.workbookId?'':'disabled'}>
         <option value="">${lk?.workbookId?'Select a sheet…':'Select workbook first'}</option>
         ${lk?.worksheet?`<option value="${escapeAttr(lk.worksheet)}" selected>${escapeHtml(lk.worksheet)}</option>`:''}
@@ -1006,26 +1025,32 @@ function renderRuleSheetLookup(rule, actionBodyEl){
     renderActionBody(rule);
   });
 
-  const workbookSel = wrap.querySelector('#rl-workbook');
+  const workbookInput = wrap.querySelector('#rl-workbook');
+  const workbookLoadBtn = wrap.querySelector('#rl-workbook-load-btn');
   const worksheetSel = wrap.querySelector('#rl-worksheet');
   const lookupColSel = wrap.querySelector('#rl-lookup-col');
   const returnColSel = wrap.querySelector('#rl-return-col');
 
-  workbookSel?.addEventListener('change', async ()=>{
+  workbookLoadBtn?.addEventListener('click', async ()=>{
     const l = ensureLookup();
-    l.workbookId = workbookSel.value;
-    l.workbookName = workbookSel.options[workbookSel.selectedIndex]?.dataset?.name || '';
+    const workbookId = extractGoogleFileId(workbookInput.value);
+    workbookInput.value = workbookId;
+    l.workbookId = workbookId;
     l.worksheet = ''; l.lookupColumn = ''; l.returnColumn = '';
     if(!l.workbookId){ renderActionBody(rule); return; }
     worksheetSel.disabled = true; worksheetSel.innerHTML = '<option value="">Loading sheets…</option>';
     try{
+      const metaData = await apiCall(`/oauth/google/sheet-meta/${encodeURIComponent(l.workbookId)}`);
+      if(metaData.error) throw new Error(metaData.error);
+      l.workbookName = metaData.name || l.workbookId;
+
       const data = await apiCall(`/oauth/google/worksheets/${encodeURIComponent(l.workbookId)}`);
       if(data.error || !data.worksheets) throw new Error(data.error || 'Failed to load sheets');
       worksheetSel.innerHTML = '<option value="">Select a sheet…</option>' + data.worksheets.map(w=>`<option value="${escapeAttr(w)}">${escapeHtml(w)}</option>`).join('');
       worksheetSel.disabled = false;
     }catch(err){
       worksheetSel.innerHTML = '<option value="">Error loading sheets</option>';
-      toast(err.message||'Could not load sheets', true);
+      toast(err.message||'Could not load sheets — check the URL/ID and that it\'s shared with your Google account', true);
     }
   });
 
@@ -1278,8 +1303,7 @@ function updateJsonPreview(t){
 /* ---------------- INTEGRATIONS ---------------- */
 let sheetLookupConfig = { workbookId: '', workbookName: '', worksheet: '', lookupColumn: '', returnColumn: '' };
 let docsConfig = { docId: '', docName: '', content: '' };
-let availableSheets = [];
-let availableDocs = [];
+
 let currentSheetColumns = [];
 
 function renderIntegrations(){
@@ -1370,10 +1394,22 @@ async function loadIntegrationsStatus(){
     });
     docs.needsDocsScope = !!status.connected && !status.has_docs_scope;
     
-    // Load available sheets and docs if connected
+    // Restore any previously-saved sheet/doc ID into the ID inputs and load
+    // it. We no longer list the user's Drive files (no Drive scope) — the
+    // user pastes a URL or ID directly instead.
     if(status.connected) {
-      loadAvailableSheets();
-      loadAvailableDocs();
+      loadSheetLookupConfig();
+      loadDocsConfig();
+      const workbookInput = document.getElementById('sheetLookupWorkbook');
+      if(workbookInput && sheetLookupConfig.workbookId){
+        workbookInput.value = sheetLookupConfig.workbookId;
+        onSheetLookupWorkbookSelected();
+      }
+      const docInput = document.getElementById('docsSelector');
+      if(docInput && docsConfig.docId){
+        docInput.value = docsConfig.docId;
+        onDocSelected();
+      }
     }
   }catch(err){
     sheets.loading = false; docs.loading = false;
@@ -1382,44 +1418,10 @@ async function loadIntegrationsStatus(){
   renderIntegrations();
 }
 
-// Sheet Lookup functions
-async function loadAvailableSheets() {
-  try {
-    const data = await apiCall('/oauth/google/sheets');
-    if(data.error || !data.sheets) {
-      console.error('Failed to load sheets:', data.error);
-      return;
-    }
-    availableSheets = data.sheets || [];
-    populateSheetLookupWorkbook();
-  } catch(err) {
-    console.error('[loadAvailableSheets]', err);
-  }
-}
-
-function populateSheetLookupWorkbook() {
-  const select = document.getElementById('sheetLookupWorkbook');
-  if(!select) return;
-  
-  if(!availableSheets.length) {
-    select.innerHTML = '<option value="">No workbooks found</option>';
-    return;
-  }
-  
-  select.innerHTML = '<option value="">Select a workbook…</option>' + 
-    availableSheets.map(s => `<option value="${s.id}" data-name="${escapeAttr(s.name)}">${escapeHtml(s.name)}</option>`).join('');
-  
-  // Restore saved selection
-  if(sheetLookupConfig.workbookId && availableSheets.some(s => s.id === sheetLookupConfig.workbookId)) {
-    select.value = sheetLookupConfig.workbookId;
-    onSheetLookupWorkbookSelected();
-  }
-}
-
 async function onSheetLookupWorkbookSelected() {
-  const select = document.getElementById('sheetLookupWorkbook');
+  const input = document.getElementById('sheetLookupWorkbook');
   const worksheetSelect = document.getElementById('sheetLookupWorksheet');
-  const workbookId = select.value;
+  const workbookId = extractGoogleFileId(input.value);
   
   if(!workbookId) {
     worksheetSelect.innerHTML = '<option value="">Select workbook first</option>';
@@ -1428,14 +1430,21 @@ async function onSheetLookupWorkbookSelected() {
     return;
   }
   
-  const workbookName = select.options[select.selectedIndex]?.dataset?.name || '';
+  input.value = workbookId;
   sheetLookupConfig.workbookId = workbookId;
-  sheetLookupConfig.workbookName = workbookName;
   
   worksheetSelect.innerHTML = '<option value="">Loading sheets…</option>';
   worksheetSelect.disabled = true;
   
   try {
+    // Confirm the ID is valid and grab a display name for it.
+    const metaData = await apiCall(`/oauth/google/sheet-meta/${encodeURIComponent(workbookId)}`);
+    if(metaData.error){
+      worksheetSelect.innerHTML = '<option value="">Sheet not found — check the URL/ID and that it\'s shared with your Google account</option>';
+      return;
+    }
+    sheetLookupConfig.workbookName = metaData.name || workbookId;
+
     const data = await apiCall(`/oauth/google/worksheets/${encodeURIComponent(workbookId)}`);
     if(data.error || !data.worksheets) {
       worksheetSelect.innerHTML = '<option value="">Failed to load sheets</option>';
@@ -1572,44 +1581,11 @@ async function testSheetLookup() {
 }
 
 // Docs functions
-async function loadAvailableDocs() {
-  try {
-    const data = await apiCall('/oauth/google/docs');
-    if(data.error || !data.docs) {
-      console.error('Failed to load docs:', data.error);
-      return;
-    }
-    availableDocs = data.docs || [];
-    populateDocsSelector();
-  } catch(err) {
-    console.error('[loadAvailableDocs]', err);
-  }
-}
-
-function populateDocsSelector() {
-  const select = document.getElementById('docsSelector');
-  if(!select) return;
-  
-  if(!availableDocs.length) {
-    select.innerHTML = '<option value="">No documents found</option>';
-    return;
-  }
-  
-  select.innerHTML = '<option value="">Select a document…</option>' + 
-    availableDocs.map(d => `<option value="${d.id}" data-name="${escapeAttr(d.name)}">${escapeHtml(d.name)}</option>`).join('');
-  
-  // Restore saved selection
-  if(docsConfig.docId && availableDocs.some(d => d.id === docsConfig.docId)) {
-    select.value = docsConfig.docId;
-    onDocSelected();
-  }
-}
-
 async function onDocSelected() {
-  const select = document.getElementById('docsSelector');
+  const input = document.getElementById('docsSelector');
   const previewEl = document.getElementById('docPreview');
   const previewText = document.getElementById('docPreviewText');
-  const docId = select.value;
+  const docId = extractGoogleFileId(input.value);
   
   if(!docId) {
     if(previewEl) previewEl.style.display = 'none';
@@ -1618,13 +1594,14 @@ async function onDocSelected() {
     return;
   }
   
-  const docName = select.options[select.selectedIndex]?.dataset?.name || '';
+  input.value = docId;
   docsConfig.docId = docId;
-  docsConfig.docName = docName;
   
   if(previewEl) previewEl.style.display = 'block';
   if(previewText) previewText.value = 'Loading document content...';
   
+  // refreshDocContent() fetches title + content in one call (doc-content
+  // endpoint), which fills in docsConfig.docName once it resolves.
   await refreshDocContent();
 }
 
@@ -1646,8 +1623,9 @@ async function refreshDocContent() {
     }
     
     docsConfig.content = data.content;
+    docsConfig.docName = data.title || docsConfig.docId;
     if(previewText) previewText.value = data.content.substring(0, 500) + (data.content.length > 500 ? '...' : '');
-    if(statusEl) statusEl.textContent = `Loaded ${data.content.length} characters`;
+    if(statusEl) statusEl.textContent = `Loaded "${docsConfig.docName}" — ${data.content.length} characters`;
   } catch(err) {
     if(previewText) previewText.value = `Error: ${err.message}`;
     if(statusEl) statusEl.textContent = '';
@@ -2034,6 +2012,16 @@ document.getElementById('btn-embedded-connect').addEventListener('click', async 
 /* ---------------- UTIL ---------------- */
 function escapeHtml(s=''){ return s.replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 function escapeAttr(s=''){ return escapeHtml(s).replace(/"/g,'&quot;'); }
+
+// Accepts either a raw Sheet/Doc ID or a full Google Sheets/Docs URL
+// (e.g. https://docs.google.com/spreadsheets/d/<ID>/edit#gid=0) and returns
+// just the ID. We rely on ID/URL input instead of a Drive file picker
+// because our approved OAuth scopes don't include Drive.
+function extractGoogleFileId(input){
+  const trimmed = (input || '').trim();
+  const match = trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  return match ? match[1] : trimmed;
+}
 
 /* ---------------- INIT ---------------- */
 if (!getAuthToken()) { window.location.href = '/chatbot-login.html'; }

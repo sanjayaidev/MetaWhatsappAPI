@@ -146,9 +146,12 @@ module.exports = function flowsRouter(deps) {
       const params = new URLSearchParams({
         client_id: clientId, redirect_uri: redirectUri, response_type: 'code',
         access_type: 'offline', prompt: 'consent',
-        scope: ['https://www.googleapis.com/auth/spreadsheets.readonly', 
-                'https://www.googleapis.com/auth/drive.metadata.readonly',
-                'https://www.googleapis.com/auth/documents.readonly',
+        // Only scopes covered by our verified OAuth consent screen. Do not add
+        // drive.* scopes here — Drive access was not part of the approved
+        // grant, which is why sheet/doc selection below is ID/URL-based
+        // instead of a Drive file-listing dropdown.
+        scope: ['https://www.googleapis.com/auth/spreadsheets',
+                'https://www.googleapis.com/auth/documents',
                 'https://www.googleapis.com/auth/gmail.send',
                 'https://www.googleapis.com/auth/userinfo.email'].join(' '),
         state
@@ -264,30 +267,33 @@ module.exports = function flowsRouter(deps) {
       email: data.metadata?.email,
       expires_at: data.expires_at,
       scopes,
-      has_docs_scope: scopes.includes('https://www.googleapis.com/auth/documents.readonly'),
+      has_docs_scope: scopes.includes('https://www.googleapis.com/auth/documents'),
       pages: data.metadata?.pages || []
     });
   });
 
-  // GET /api/oauth/google/sheets — list Google Sheets accessible to user
-  router.get('/google/sheets', verifyUser, async (req, res) => {
+  // GET /api/oauth/google/sheet-meta/:spreadsheetId — look up a spreadsheet's
+  // display name/title from its ID, so the UI can confirm the user pasted a
+  // valid ID/URL without needing Drive's file-listing API (no drive scope).
+  router.get('/google/sheet-meta/:spreadsheetId', verifyUser, async (req, res) => {
     let accessToken;
     try {
       accessToken = await getValidGoogleAccessToken(req.user.id);
     } catch (err) {
       return res.status(401).json({ error: err.message });
     }
+    const { spreadsheetId } = req.params;
 
     try {
-      // Use query parameter format instead of path parameter for better filtering
-      const sheetsRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.spreadsheet'&fields=files(id,name,mimeType)&spaces=drive`, {
+      const metaRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=properties(title)`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
-      const sheetsData = await sheetsRes.json();
-      if (!sheetsRes.ok) throw new Error(sheetsData.error?.message || 'Failed to fetch sheets');
-      // Filter to ensure only actual spreadsheets are returned
-      const sheets = (sheetsData.files || []).filter(f => f.mimeType === 'application/vnd.google-apps.spreadsheet');
-      res.json({ sheets });
+      const metaData = await metaRes.json();
+      if (!metaRes.ok) {
+        const message = metaData.error?.message || 'Failed to fetch spreadsheet';
+        return res.status(metaRes.status === 404 ? 404 : metaRes.status === 403 ? 403 : 500).json({ error: message });
+      }
+      res.json({ id: spreadsheetId, name: metaData.properties?.title || spreadsheetId });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -342,32 +348,12 @@ module.exports = function flowsRouter(deps) {
     }
   });
 
-  // GET /api/oauth/google/docs — list Google Docs accessible to user
-  router.get('/google/docs', verifyUser, async (req, res) => {
-    let accessToken;
-    try {
-      accessToken = await getValidGoogleAccessToken(req.user.id);
-    } catch (err) {
-      return res.status(401).json({ error: err.message });
-    }
-
-    try {
-      const docsRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.document'&fields=files(id,name,mimeType,modifiedTime)&spaces=drive`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      const docsData = await docsRes.json();
-      if (!docsRes.ok) throw new Error(docsData.error?.message || 'Failed to fetch docs');
-      const docs = (docsData.files || []).filter(f => f.mimeType === 'application/vnd.google-apps.document');
-      res.json({ docs });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // GET /api/oauth/google/doc-content/:docId — fetch a doc's plain text for use
-  // as AI grounding context. Requires the documents.readonly scope granted at
-  // connect time — a connection made before that scope existed will 403 here
-  // until the user disconnects and reconnects Google.
+  // GET /api/oauth/google/doc-content/:docId — fetch a doc's title + plain
+  // text for use as AI grounding context, and to confirm a pasted ID/URL is
+  // valid (no Drive file-listing call involved — needs only 'documents' scope).
+  // Requires the documents scope granted at connect time — a connection made
+  // before that scope existed will 403 here until the user disconnects and
+  // reconnects Google.
   router.get('/google/doc-content/:docId', verifyUser, async (req, res) => {
     let accessToken;
     try {
@@ -384,7 +370,7 @@ module.exports = function flowsRouter(deps) {
       const docData = await docRes.json();
       if (!docRes.ok) {
         // Docs API 403s with PERMISSION_DENIED both for "wrong doc owner" and
-        // "token doesn't have documents.readonly" — the latter is by far the
+        // "token doesn't have the documents scope" — the latter is by far the
         // more common cause given this scope only just got added, so say so.
         const message = docData.error?.message || 'Failed to fetch document';
         const status = docRes.status === 403 ? 403 : 500;

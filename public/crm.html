@@ -308,8 +308,11 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 <div id="sheetConnectedInfo" style="display:none;font-size:12.5px;color:var(--text2);margin-bottom:10px;">
   Connected to <strong id="sheetConnectedEmail" style="color:var(--text);"></strong>
   <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
-    <div style="flex:1;min-width:140px;"><label style="font-size:11px;color:var(--text3);">Select Sheet:</label>
-    <select id="sheetSelect" style="width:100%;margin-top:4px;" onchange="onSheetSelected()"></select></div>
+    <div style="flex:1;min-width:140px;"><label style="font-size:11px;color:var(--text3);">Sheet URL or ID:</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <input type="text" id="sheetSelect" placeholder="Paste sheet URL or ID" style="flex:1;" />
+      <button class="btn btn-secondary btn-sm" type="button" onclick="onSheetSelected()">Load</button>
+    </div></div>
     <div style="width:20px;text-align:center;padding-bottom:8px;"><span style="font-size:16px;color:var(--text2);">→</span></div>
     <div style="flex:1;min-width:140px;"><label style="font-size:11px;color:var(--text3);">Select Page:</label>
     <select id="worksheetSelect" style="width:100%;margin-top:4px;" onchange="saveSheetSelection()" disabled><option value="">Select sheet first</option></select></div>
@@ -612,10 +615,11 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 
 <div class="form-label">Google Sheet</div>
 <div style="display:flex;gap:8px;">
-<select id="watcherSheetSelect" style="flex:1;" onchange="onWatcherSheetSelected()"><option value="">Loading sheets…</option></select>
+<input type="text" id="watcherSheetSelect" placeholder="Paste sheet URL or ID" style="flex:1;" />
+<button class="btn btn-secondary btn-sm" type="button" onclick="onWatcherSheetSelected()">Load</button>
 <select id="watcherWorksheetSelect" style="flex:1;" onchange="onWatcherWorksheetSelected()" disabled><option value="">Select sheet first</option></select>
 </div>
-<div style="font-size:11px;color:var(--text3);margin-top:4px;">Not seeing your sheet? Connect Google Sheets under <strong>Sources</strong> first.</div>
+<div style="font-size:11px;color:var(--text3);margin-top:4px;">Paste the full sheet URL or just its ID — must be shared with your connected Google account.</div>
 
 <div class="form-label">Trigger</div>
 <select id="watcherType" onchange="renderWatcherFields()">
@@ -741,6 +745,15 @@ function showToast(msg, isError = false) {
   t._to = setTimeout(() => t.style.display = 'none', 3500);
 }
 function escapeHtml(str) { if (!str) return ''; return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// Accepts either a raw Sheet ID or a full Google Sheets URL
+// (e.g. https://docs.google.com/spreadsheets/d/<ID>/edit#gid=0) and returns
+// just the ID. Used because our approved OAuth scopes don't include Drive,
+// so sheet selection is ID/URL-based instead of a Drive file picker.
+function extractGoogleFileId(input) {
+  const trimmed = (input || '').trim();
+  const match = trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  return match ? match[1] : trimmed;
+}
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); }
@@ -1131,7 +1144,7 @@ async function loadOAuthStatuses() {
       document.getElementById('sheetDisconnectBtn').style.display = 'inline-flex';
       document.getElementById('sheetConnectedInfo').style.display = 'block';
       if (googleData.email) document.getElementById('sheetConnectedEmail').textContent = googleData.email;
-      if (isSheetTab) loadGoogleSheets();
+      if (isSheetTab) restoreSavedSheetSelection();
     } else {
       document.getElementById('sheetConnectBtn').style.display = 'inline-flex';
       document.getElementById('sheetDisconnectBtn').style.display = 'none';
@@ -1183,23 +1196,10 @@ async function disconnectSocial(platform) {
   showToast('Disconnected'); loadOAuthStatuses();
 }
 
-async function loadGoogleSheets() {
-  const data = await apiCall('/api/oauth/google/sheets');
+function restoreSavedSheetSelection() {
   const select = document.getElementById('sheetSelect');
-  if (data.error || !data.sheets) {
-    select.innerHTML = '<option value="">Failed to load sheets — try disconnecting and reconnecting</option>';
-    console.error('[loadGoogleSheets]', data.error);
-    return;
-  }
-  if (!data.sheets.length) {
-    select.innerHTML = '<option value="">No spreadsheets found in this Google account</option>';
-    return;
-  }
-  select.innerHTML = data.sheets.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
-  
-  // Restore previously selected sheet
   const savedSheetId = localStorage.getItem('crm_selected_sheet_id');
-  if (savedSheetId && data.sheets.some(s => s.id === savedSheetId)) {
+  if (select && savedSheetId) {
     select.value = savedSheetId;
     onSheetSelected();
   }
@@ -1208,7 +1208,7 @@ async function loadGoogleSheets() {
 async function onSheetSelected() {
   const sheetSelect = document.getElementById('sheetSelect');
   const worksheetSelect = document.getElementById('worksheetSelect');
-  const spreadsheetId = sheetSelect.value;
+  const spreadsheetId = extractGoogleFileId(sheetSelect.value);
   
   if (!spreadsheetId) {
     worksheetSelect.innerHTML = '<option value="">Select sheet first</option>';
@@ -1217,12 +1217,20 @@ async function onSheetSelected() {
     renderFieldMapping('sheet');
     return;
   }
+  sheetSelect.value = spreadsheetId;
   
   // Load worksheets for selected spreadsheet
   worksheetSelect.innerHTML = '<option value="">Loading pages...</option>';
   worksheetSelect.disabled = true;
   
   try {
+    const metaData = await apiCall(`/api/oauth/google/sheet-meta/${spreadsheetId}`);
+    if (metaData.error) {
+      worksheetSelect.innerHTML = '<option value="">Sheet not found — check the URL/ID and sharing</option>';
+      worksheetSelect.disabled = false;
+      return;
+    }
+
     const data = await apiCall(`/api/oauth/google/worksheets/${spreadsheetId}`);
     if (data.error || !data.worksheets) {
       worksheetSelect.innerHTML = '<option value="">Failed to load pages</option>';
@@ -1623,20 +1631,14 @@ async function openWatcherModal(id) {
   document.getElementById('watcherMessageTemplate').value = '';
   document.getElementById('watcherWorksheetSelect').innerHTML = '<option value="">Select sheet first</option>';
   document.getElementById('watcherWorksheetSelect').disabled = true;
+  document.getElementById('watcherSheetSelect').value = '';
   ['watcherNameCol','watcherPhoneCol','watcherEmailCol','watcherDateCol','watcherStatusCol','watcherSentStatusCol'].forEach(elId => document.getElementById(elId).innerHTML = '<option value="">— none —</option>');
   renderWatcherFields();
   openModal('watcherModal');
 
-  const [sheetsData, templatesData] = await Promise.all([
-    apiCall('/api/oauth/google/sheets'),
-    apiCall('/api/templates')
-  ]);
-  watcherSheetsCache = sheetsData.sheets || [];
+  const templatesData = await apiCall('/api/templates');
   watcherColumnsCache = []; // Reset columns cache for new watcher
   const sheetSelect = document.getElementById('watcherSheetSelect');
-  sheetSelect.innerHTML = watcherSheetsCache.length
-    ? watcherSheetsCache.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')
-    : '<option value="">No sheets found — connect Google Sheets under Sources</option>';
 
   watcherTemplatesCache = (templatesData.templates || []).filter(t => t.status === 'APPROVED');
   const tplSelect = document.getElementById('watcherTemplateSelect');
@@ -1657,8 +1659,11 @@ async function openWatcherModal(id) {
     document.getElementById('watcherMessageTemplate').value = w.message_template || '';
     document.getElementById('watcherRecurrenceType').value = w.recurrence_type || 'yearly';
     renderWatcherFields();
-    if (watcherSheetsCache.some(s => s.id === w.spreadsheet_id)) {
+    if (w.spreadsheet_id) {
       sheetSelect.value = w.spreadsheet_id;
+      // Cache the known name up front so it's available immediately even
+      // before onWatcherSheetSelected()'s sheet-meta lookup returns.
+      watcherSheetsCache = [{ id: w.spreadsheet_id, name: w.spreadsheet_name || w.spreadsheet_id }];
       await onWatcherSheetSelected();
       const wsSelect = document.getElementById('watcherWorksheetSelect');
       if ([...wsSelect.options].some(o => o.value === w.worksheet)) {
@@ -1690,10 +1695,23 @@ function renderWatcherFields() {
 }
 
 async function onWatcherSheetSelected() {
-  const sheetId = document.getElementById('watcherSheetSelect').value;
+  const sheetInput = document.getElementById('watcherSheetSelect');
+  const sheetId = extractGoogleFileId(sheetInput.value);
   const wsSelect = document.getElementById('watcherWorksheetSelect');
   if (!sheetId) { wsSelect.innerHTML = '<option value="">Select sheet first</option>'; wsSelect.disabled = true; return; }
+  sheetInput.value = sheetId;
   wsSelect.innerHTML = '<option value="">Loading…</option>';
+
+  const metaData = await apiCall(`/api/oauth/google/sheet-meta/${sheetId}`);
+  if (metaData.error) {
+    wsSelect.innerHTML = '<option value="">Sheet not found — check the URL/ID and sharing</option>';
+    wsSelect.disabled = false;
+    return;
+  }
+  // Cache the resolved name so saveWatcher() can store spreadsheet_name
+  // without another round trip.
+  watcherSheetsCache = [{ id: sheetId, name: metaData.name || sheetId }];
+
   const data = await apiCall(`/api/oauth/google/worksheets/${sheetId}`);
   wsSelect.disabled = false;
   wsSelect.innerHTML = (data.worksheets || []).map(w => `<option value="${escapeHtml(w)}">${escapeHtml(w)}</option>`).join('') || '<option value="">No tabs found</option>';
@@ -1706,7 +1724,7 @@ async function onWatcherSheetSelected() {
 }
 
 async function onWatcherWorksheetSelected() {
-  const sheetId = document.getElementById('watcherSheetSelect').value;
+  const sheetId = extractGoogleFileId(document.getElementById('watcherSheetSelect').value);
   const worksheet = document.getElementById('watcherWorksheetSelect').value;
   if (!sheetId || !worksheet) return;
   const data = await apiCall(`/api/oauth/google/columns/${sheetId}/${encodeURIComponent(worksheet)}`);
@@ -1781,7 +1799,7 @@ function insertWatcherFieldTag(tag) {
 }
 
 async function saveWatcher() {
-  const sheetId = document.getElementById('watcherSheetSelect').value;
+  const sheetId = extractGoogleFileId(document.getElementById('watcherSheetSelect').value);
   const worksheet = document.getElementById('watcherWorksheetSelect').value;
   if (!sheetId || !worksheet) { showToast('Pick a sheet and tab first', true); return; }
   const channel = document.getElementById('watcherChannel').value;
