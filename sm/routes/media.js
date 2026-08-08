@@ -12,38 +12,38 @@ const APP_BASE_URL = (process.env.APP_BASE_URL || process.env.RENDER_EXTERNAL_UR
 const MEDIA_PATH_PREFIX = process.env.SM_MEDIA_PATH_PREFIX || '/sm';
 const PROXY_URL_TTL_MS = 365 * 24 * 60 * 60 * 1000; // 1 year — long enough that a scheduled post never finds it expired
 
-async function getDriveConnection(supabase, userId) {
-  const { data, error } = await supabase
-    .from('smc_connections')
-    .select('*')
-    .eq('platform', 'google_drive')
-    .eq('is_connected', true)
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  return data || null;
-}
+// One pre-connected Google account (the app operator's own Drive) backs
+// media storage for every user — set up once, outside the per-user OAuth
+// consent flow, since Drive access was never part of our verified scope
+// grant. Get this refresh token once by running the normal Google OAuth
+// consent flow for this app's own Cloud project with the operator's Google
+// account and the 'https://www.googleapis.com/auth/drive.file' scope
+// (that flow doesn't need public verification since only the operator ever
+// sees that consent screen), then set it here.
+const OWNER_REFRESH_TOKEN = process.env.GOOGLE_DRIVE_OWNER_REFRESH_TOKEN;
 
-// Stored value is normally a refresh token (see finishGoogle in
-// routes/connections.js), which must be exchanged for a fresh short-lived
-// access token before every Drive call. If that exchange fails — expired/
-// revoked refresh token — surface a clear "reconnect" error instead of a
-// confusing raw Google 401.
-async function getWorkingAccessToken(conn) {
-  const stored = decrypt(conn.access_token);
+// Exchanges the shared owner refresh token for a fresh short-lived access
+// token before every Drive call. If that exchange fails — expired/revoked
+// refresh token — surface a clear "needs reconfiguring" error instead of a
+// confusing raw Google 401 (this is an operator-level problem, not
+// something any individual user can fix by reconnecting anything).
+async function getSharedAccessToken() {
+  if (!OWNER_REFRESH_TOKEN) {
+    const e = new Error('Media storage is not configured on this server yet — set GOOGLE_DRIVE_OWNER_REFRESH_TOKEN.');
+    e.notConfigured = true;
+    throw e;
+  }
   try {
-    return await drive.getFreshAccessToken(stored);
+    return await drive.getFreshAccessToken(OWNER_REFRESH_TOKEN);
   } catch (err) {
-    const e = new Error('Google Drive connection expired or was revoked — please reconnect Google Drive in the Connections tab.');
+    const e = new Error('The shared Google Drive connection expired or was revoked — an admin needs to reauthorize it.');
     e.needsReconnect = true;
     throw e;
   }
 }
 
 // ===========================================================
-// PROTECTED router: upload a file to the user's own connected Drive.
+// PROTECTED router: upload a file to the shared owner Drive.
 // Mounted behind requireAuth in server.js.
 // ===========================================================
 function router(supabase) {
@@ -54,11 +54,7 @@ function router(supabase) {
       const userId = req.user.id || req.user.sub;
       if (!req.file) return res.status(400).json({ error: 'No file uploaded — attach it under the "file" field' });
 
-      const conn = await getDriveConnection(supabase, userId);
-      if (!conn) {
-        return res.status(400).json({ error: 'Connect Google Drive first (Connections tab) before uploading media' });
-      }
-      const token = await getWorkingAccessToken(conn);
+      const token = await getSharedAccessToken();
 
       const uploaded = await drive.uploadFile(token, {
         buffer: req.file.buffer,
@@ -76,7 +72,7 @@ function router(supabase) {
         media_url: mediaUrl,
       });
     } catch (err) {
-      if (err.needsReconnect) return res.status(401).json({ error: err.message });
+      if (err.notConfigured || err.needsReconnect) return res.status(503).json({ error: err.message });
       const message = err.response?.data ? JSON.stringify(err.response.data) : err.message;
       res.status(500).json({ error: message });
     }
@@ -89,7 +85,9 @@ function router(supabase) {
 // PUBLIC router: streams the file from the owner's Drive so Meta's
 // (or LinkedIn's) servers can fetch it as a normal public image/video URL.
 // Mounted WITHOUT requireAuth — signature + expiry (see lib/crypto.js) is
-// what stops this being an open proxy to arbitrary files.
+// what stops this being an open proxy to arbitrary files. userId in the
+// path is still verified against the signature so one user's signed link
+// can't be replayed to fetch a different user's fileId.
 // ===========================================================
 function streamRouter(supabase) {
   const r = express.Router();
@@ -103,9 +101,7 @@ function streamRouter(supabase) {
     }
 
     try {
-      const conn = await getDriveConnection(supabase, userId);
-      if (!conn) return res.status(404).send('Drive account no longer connected');
-      const token = await getWorkingAccessToken(conn);
+      const token = await getSharedAccessToken();
 
       const meta = await drive.getFileMeta(token, fileId);
       const upstream = await drive.getFileStream(token, fileId);
@@ -114,7 +110,7 @@ function streamRouter(supabase) {
       if (meta.size) res.setHeader('Content-Length', meta.size);
       upstream.data.pipe(res);
     } catch (err) {
-      if (err.needsReconnect) return res.status(401).send(err.message);
+      if (err.notConfigured || err.needsReconnect) return res.status(503).send(err.message);
       res.status(500).send('Failed to stream media');
     }
   });
@@ -125,3 +121,4 @@ function streamRouter(supabase) {
 module.exports = router;
 module.exports.router = router;
 module.exports.streamRouter = streamRouter;
+module.exports.getSharedAccessToken = getSharedAccessToken;

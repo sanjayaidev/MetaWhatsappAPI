@@ -3,10 +3,11 @@ const axios = require('axios');
 const UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files';
 const API_URL = 'https://www.googleapis.com/drive/v3/files';
 
-// connections.access_token for google_drive/google_sheets actually stores the
-// long-lived REFRESH token (see finishGoogle in routes/connections.js), not a
-// usable access token — Google access tokens expire in ~1hr, so every Drive
-// call here must first mint a fresh one from the refresh token.
+// Every call here operates on ONE pre-connected "owner" Google account
+// (its refresh token lives in GOOGLE_DRIVE_OWNER_REFRESH_TOKEN, set up once
+// by the app operator — not something individual end users OAuth into).
+// Google access tokens expire in ~1hr, so every Drive call must first mint
+// a fresh one from that refresh token via getFreshAccessToken().
 async function getFreshAccessToken(refreshToken) {
   const res = await axios.post(
     'https://oauth2.googleapis.com/token',
@@ -20,11 +21,11 @@ async function getFreshAccessToken(refreshToken) {
   return res.data.access_token;
 }
 
-// Uploads a buffer to the user's own Drive via a multipart/related request
+// Uploads a buffer to the shared owner Drive via a multipart/related request
 // (metadata + raw bytes in one request — Drive's "simple multipart" upload).
-// Files land in the user's My Drive root inside a "SMClient Uploads" folder
-// (created lazily) rather than scattered loose, but nothing here makes the
-// file public — it stays private to the user's Drive.
+// Files land in a "SMClient Uploads" folder (created lazily) rather than
+// scattered loose. Nothing here makes the file public — access is only via
+// the app's own signed streaming proxy (see routes/media.js).
 async function ensureUploadsFolder(token) {
   const q = encodeURIComponent("name='SMClient Uploads' and mimeType='application/vnd.google-apps.folder' and trashed=false");
   const search = await axios.get(`${API_URL}?q=${q}&fields=files(id,name)`, {
@@ -86,4 +87,19 @@ async function getFileMeta(token, fileId) {
   return res.data;
 }
 
-module.exports = { uploadFile, getFileStream, getFileMeta, getFreshAccessToken };
+// Deletes a file from the owner's Drive once it's no longer needed (e.g.
+// after a post has been successfully published to every requested
+// platform). Swallows 404 — already-gone is a success from the caller's
+// point of view, not an error worth surfacing.
+async function deleteFile(token, fileId) {
+  try {
+    await axios.delete(`${API_URL}/${fileId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch (err) {
+    if (err.response?.status === 404) return;
+    throw err;
+  }
+}
+
+module.exports = { uploadFile, getFileStream, getFileMeta, getFreshAccessToken, deleteFile };
