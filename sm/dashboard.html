@@ -1849,7 +1849,7 @@
                 aiModelSelect.appendChild(opt);
             });
             // Set the saved model value
-            document.getElementById('aiModelStep3').value = responseData.model || 'mistralai/mistral-small-4-119b-2603';
+            document.getElementById('aiModelStep3').value = responseData.model || 'nvidia/nemotron-3-super-120b-a12b';
             document.getElementById('aiSystemPromptStep3').value = responseData.system_prompt || '';
             document.getElementById('aiTempStep3').value = responseData.temperature || 0.7;
             document.getElementById('aiMaxTokensStep3').value = responseData.max_tokens || 256;
@@ -2071,7 +2071,7 @@
                     aiModelSelect.appendChild(opt);
                 });
                 // Set default model
-                aiModelSelect.value = 'mistralai/mistral-small-4-119b-2603';
+                aiModelSelect.value = 'nvidia/nemotron-3-super-120b-a12b';
             }
         }
     });
@@ -2108,7 +2108,7 @@
                         aiModelSelect.appendChild(opt);
                     });
                     // Set default model
-                    aiModelSelect.value = 'mistralai/mistral-small-4-119b-2603';
+                    aiModelSelect.value = 'nvidia/nemotron-3-super-120b-a12b';
                 }
             }
         }
@@ -2640,11 +2640,9 @@
             console.error('Failed to load AI models:', err);
             // Fallback to default MistralAI models if API fails
             aiModels = [
-                'mistralai/mistral-small-4-119b-2603',
-                'mistralai/mistral-large-3-675b-instruct-2512',
-                'mistralai/mistral-medium-3.5-128b',
-                'mistralai/ministral-14b-instruct-2512',
-                'mistralai/mixtral-8x7b-instruct-v0.1'
+                'nvidia/nemotron-3-super-120b-a12b',
+                'nvidia/nemotron-3-ultra-550b-a55b',
+                'meta/llama-3.2-11b-vision-instruct'
             ];
             const select = document.getElementById('aiModelSelect');
             select.innerHTML = '';

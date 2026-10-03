@@ -125,7 +125,7 @@ module.exports = function chatbotRouter(deps) {
       
       // Use Mistral Small 4 119B as the default model for chatbot
       const reply = await aiGenerateReply({ 
-        model: 'mistralai/mistral-small-4-119b-2603',
+        model: DEFAULT_MODEL,
         systemPrompt, 
         userText: message.trim(),
         conversation_history 
@@ -147,7 +147,7 @@ module.exports = function chatbotRouter(deps) {
 
     // Use provided system prompt or default to Meta-valid interactive JSON mode
     let systemPrompt = system_prompt || DEFAULT_JSON_SYSTEM_PROMPT;
-    const model = 'mistralai/mistral-small-4-119b-2603';
+    const model = DEFAULT_MODEL;
 
     // Try to parse+validate a generation; returns { interactive, cleaned } or
     // throws with a descriptive message (JSON syntax error or Meta-shape error).
@@ -239,7 +239,7 @@ module.exports = function chatbotRouter(deps) {
       }
       
       const reply = await aiGenerateReply({ 
-        model: 'mistralai/mistral-small-4-119b-2603',
+        model: DEFAULT_MODEL,
         systemPrompt, 
         userText: message.trim() 
       });

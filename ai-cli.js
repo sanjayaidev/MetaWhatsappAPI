@@ -11,7 +11,7 @@ const readline = require('readline');
 const API_BASE = process.env.API_BASE || 'http://localhost:3000';
 
 // Default model
-let currentModel = 'meta/llama-3.1-70b-instruct';
+let currentModel = 'nvidia/nemotron-3-super-120b-a12b';
 
 const args = process.argv.slice(2);
 

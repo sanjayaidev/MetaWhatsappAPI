@@ -4,112 +4,39 @@
 const express = require('express');
 const router = express.Router();
 
-const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
+const core = require('../ai-core');
+const { ALLOWED_MODELS, DEFAULT_MODEL, AI_BASE_URL, isAllowedModel, getApiKey } = core;
 
 // ============================================================
-// ALL AVAILABLE AI MODELS - Working text models only (tested 2026-07-27)
-// Default model: meta/llama-3.1-70b-instruct (fast, capable, multilingual)
+// Models are configured in src/ai-core.js (the three NVIDIA models that
+// passed a live test). Override without a deploy via env AI_MODELS.
 // ============================================================
-const ALLOWED_MODELS = [
-  // Meta models - Text only
-  'meta/llama-3.1-70b-instruct',
-  'meta/llama-3.1-8b-instruct',
-  'meta/llama-3.2-11b-vision-instruct',
-  'meta/llama-3.2-3b-instruct',
-  'meta/llama-3.2-90b-vision-instruct',
-  
-  // Mistral models
-  'mistralai/mistral-medium-3.5-128b',
-  
-  // NVIDIA text models (excluding safety/content moderation)
-  'nvidia/ising-calibration-1-35b-a3b',
-  'nvidia/llama-3.1-nemotron-nano-vl-8b-v1',
-  'nvidia/llama-3.3-nemotron-super-49b-v1',
-  'nvidia/nemotron-3-nano-30b-a3b',
-  'nvidia/nemotron-3-super-120b-a12b',
-  'nvidia/nemotron-nano-12b-v2-vl',
-];
 
-// Models with excellent multilingual/regional language support
-const MULTILINGUAL_MODELS = new Set([
-  'meta/llama-3.1-70b-instruct',
-  'meta/llama-3.1-8b-instruct',
-  'mistralai/mistral-medium-3.5-128b',
-]);
+// Models with good multilingual/Hinglish output (tested)
+const MULTILINGUAL_MODELS = new Set(ALLOWED_MODELS);
 
-// Default model - Best performing text model (322ms response time)
-const DEFAULT_MODEL = 'meta/llama-3.1-70b-instruct';
+// Models that accept image attachments
+const VISION_MODELS = new Set(
+  ALLOWED_MODELS.filter((m) => /vision|-vl|vl-|omni/i.test(m))
+);
 
-// Models that support vision (file attachments)
-const VISION_MODELS = new Set([
-  'meta/llama-3.2-11b-vision-instruct',
-  'meta/llama-3.2-90b-vision-instruct',
-  'nvidia/llama-3.1-nemotron-nano-vl-8b-v1',
-  'nvidia/nemotron-nano-12b-v2-vl',
-]);
+// Fast models for quick responses (first two in the list)
+const FAST_MODELS = new Set(ALLOWED_MODELS.slice(0, 2));
 
-// Fast models for quick responses
-const FAST_MODELS = new Set([
-  'meta/llama-3.1-8b-instruct',
-  'meta/llama-3.2-3b-instruct',
-  'nvidia/ising-calibration-1-35b-a3b',
-  'nvidia/nemotron-3-nano-30b-a3b',
-]);
 
-function isAllowedModel(modelId) {
-  return ALLOWED_MODELS.includes(modelId);
-}
-
-// Reusable helper: send a chat request to NVIDIA with optional conversation history
-// and return the assistant's reply text. Used by the webhook auto-reply flow
-// as well as anything else that needs an AI response.
-async function generateReply({ model, systemPrompt, userText, temperature = 0.7, max_tokens = 512, conversation_history = [], response_format = null }) {
-  const apiKey = process.env.NVIDIA_API_KEY;
-  if (!apiKey) throw new Error('NVIDIA_API_KEY not configured');
-
-  const chosenModel = isAllowedModel(model) ? model : DEFAULT_MODEL;
-
+// Reusable helper: send a chat request and return the assistant's reply text.
+// Used by the webhook auto-reply flow and anything else that needs an AI response.
+// Has an 8s per-model timeout and falls back through ALLOWED_MODELS automatically.
+async function generateReply({ model, systemPrompt, userText, temperature = 0.7, max_tokens = 1024, conversation_history = [], response_format = null }) {
   const messages = [];
   if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
-  
-  // Add conversation history if provided
   if (Array.isArray(conversation_history) && conversation_history.length > 0) {
     messages.push(...conversation_history);
   }
-  
-  // Add current user message
   messages.push({ role: 'user', content: userText });
 
-  const payload = {
-    model: chosenModel,
-    messages,
-    temperature,
-    max_tokens,
-    top_p: 1,
-    stream: false,
-  };
-  // Optional OpenAI-style response_format (e.g. { type: 'json_object' }) —
-  // NVIDIA's endpoint is OpenAI-compatible and most instruct models honor
-  // this, constraining sampling so the output is syntactically valid JSON
-  // instead of just being asked nicely in the prompt.
-  if (response_format) payload.response_format = response_format;
-
-  const response = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData?.error?.message || `NVIDIA API error (${response.status})`);
-  }
-
-  const data = await response.json();
-  return data?.choices?.[0]?.message?.content?.trim() || '';
+  const out = await core.chat({ model, messages, temperature, max_tokens, response_format });
+  return out.text;
 }
 
 // GET /api/ai/models - List available models
@@ -123,6 +50,7 @@ router.get('/models', (req, res) => {
   });
 
   res.json({ 
+    success: true,
     models: ALLOWED_MODELS, 
     by_provider: byProvider,
     vision_models: Array.from(VISION_MODELS),
@@ -135,7 +63,7 @@ router.get('/models', (req, res) => {
 
 // POST /api/ai/chat - Send chat message
 router.post('/chat', async (req, res) => {
-  const apiKey = process.env.NVIDIA_API_KEY;
+  const apiKey = getApiKey();
   if (!apiKey) {
     return res.status(500).json({ error: 'NVIDIA_API_KEY not configured' });
   }
@@ -174,7 +102,7 @@ router.post('/chat', async (req, res) => {
       stream: Boolean(stream),
     };
 
-    const response = await fetch(`${NVIDIA_BASE_URL}/chat/completions`, {
+    const response = await fetch(`${AI_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

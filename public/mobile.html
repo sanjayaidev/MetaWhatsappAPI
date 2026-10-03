@@ -1414,7 +1414,7 @@ const API = {
           autoReply: !!s.auto_reply,
           autoReplyMode: s.auto_reply_mode || 'ai',
           systemPrompt: s.auto_reply_prompt || '',
-          model: s.auto_reply_model || 'mistralai/mistral-small-4-119b-2603',
+          model: s.auto_reply_model || 'nvidia/nemotron-3-super-120b-a12b',
           templateId: s.auto_reply_template_id || '',
           hour_limit: s.hour_limit || 0,
           day_limit: s.day_limit || 0,
@@ -1450,7 +1450,7 @@ const API = {
     if (res.success && res.models) {
       return { success: true, models: res.models };
     }
-    return { success: true, models: ['mistralai/mistral-small-4-119b-2603'] };
+    return { success: true, models: ['nvidia/nemotron-3-super-120b-a12b'] };
   },
 
   // --- Profile ---
