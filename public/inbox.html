@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Inbox</title>
+<style>
+  :root{--bg:#f0f2f5;--card:#fff;--text:#1a1a2e;--muted:#6b7280;--border:#e0e2e5;--green:#25d366;--err:#d93a55}
+  @media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#1a1d24;--text:#e8eaf0;--muted:#8b93a3;--border:#2a2f3a}}
+  *{box-sizing:border-box;margin:0}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);padding:16px;max-width:760px;margin:0 auto}
+  header{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:12px}
+  h1{font-size:20px}
+  .meta{font-size:12px;color:var(--muted)}
+  input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--text);margin-bottom:12px;font-size:15px}
+  .msg{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--green);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+  .top{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted);margin-bottom:4px}
+  .who{font-weight:600;color:var(--text)}
+  .body{white-space:pre-wrap;word-break:break-word;font-size:15px}
+  .type{font-size:11px;background:var(--bg);padding:1px 6px;border-radius:6px}
+  #err{display:none;text-align:center;padding:40px 16px;color:var(--err);font-weight:600}
+  #empty{display:none;text-align:center;color:var(--muted);padding:30px}
+</style>
+</head>
+<body>
+<header><h1>Received messages</h1><span class="meta" id="status">Loading…</span></header>
+<input id="q" type="search" placeholder="Search number, name or text">
+<div id="err"></div>
+<div id="empty">No messages yet.</div>
+<div id="list"></div>
+<script>
+(function(){
+  var pass = new URLSearchParams(location.search).get('pass') || '';
+  var all = [], timer;
+  var $ = function(id){return document.getElementById(id)};
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+  function render(){
+    var q = $('q').value.toLowerCase();
+    var rows = all.filter(function(m){return !q || (m.phone+' '+m.name+' '+m.body).toLowerCase().indexOf(q)>-1});
+    $('empty').style.display = rows.length ? 'none' : 'block';
+    $('list').innerHTML = rows.map(function(m){
+      return '<div class="msg"><div class="top"><span><span class="who">'+esc(m.name||m.phone)+'</span>'+(m.name?' · '+esc(m.phone):'')+
+        ' <span class="type">'+esc(m.type)+'</span></span><span>'+esc(new Date(m.at).toLocaleString())+'</span></div><div class="body">'+esc(m.body)+'</div></div>';
+    }).join('');
+  }
+  function fail(t){clearInterval(timer);$('err').textContent=t;$('err').style.display='block';$('list').innerHTML='';$('empty').style.display='none';$('q').style.display='none';$('status').textContent=''}
+  function load(){
+    if(!pass) return fail('This link is missing its password.');
+    fetch('/api/public/inbox?pass='+encodeURIComponent(pass),{cache:'no-store'})
+      .then(function(r){ if(r.status===403) throw new Error('403'); if(r.status===429) throw new Error('429'); if(!r.ok) throw new Error('x'); return r.json(); })
+      .then(function(d){ all=d.messages||[]; render(); $('status').textContent=all.length+' messages · updated '+new Date().toLocaleTimeString(); })
+      .catch(function(e){ if(e.message==='403') fail('This link is no longer valid.'); else $('status').textContent='Retrying…'; });
+  }
+  $('q').addEventListener('input',render);
+  load(); timer=setInterval(load,15000);
+})();
+</script>
+</body>
+</html>

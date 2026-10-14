@@ -204,6 +204,9 @@ const verifyAdmin = (req, res, next) => {
   next();
 };
 
+// Login-free read-only inbox (revocable ?pass=... link). See migrations/009_public_inbox.sql
+app.use(require('./src/routes/public-inbox')({ supabase, verifyAdmin }));
+
 // ================================================================
 // 4. STATIC & HEALTH
 // ================================================================
