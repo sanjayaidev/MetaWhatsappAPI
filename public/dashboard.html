@@ -238,7 +238,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--g
 </div>
 <div class="card">
 <div class="card-header"><div class="card-title">📋 Contact List <span id="contactCount" style="color:var(--text3);font-weight:400;">(0)</span></div><button class="btn btn-ghost btn-sm" onclick="saveContactsToDb()">💾 Save</button></div>
-<div class="table-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Group</th><th>Message</th><th></th></tr></thead><tbody id="contactsBody"></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Group</th><th>Message</th><th>Fields</th><th></th></tr></thead><tbody id="contactsBody"></tbody></table></div>
 </div>
 </div>
 <!-- ═ CAMPAIGNS ══ -->
@@ -1089,14 +1089,24 @@ async function deleteTemplate(id) { if (!confirm('Delete this template?')) retur
 async function loadContacts() { const res = await apiCall('/api/contacts'); if (res.success) { contacts = res.contacts || []; renderContacts(); renderCampaignGroups(); updateCampaignContactCount(); } }
 function renderContacts() {
   const tbody = document.getElementById('contactsBody'); document.getElementById('contactCount').textContent = `(${contacts.length})`; document.getElementById('dashContacts').textContent = contacts.length;
-  if (!contacts.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:24px;">No contacts</td></tr>'; return; }
-  tbody.innerHTML = contacts.map((c, i) => `<tr><td>${escapeHtml(c.name)}</td><td style="font-family:'DM Mono',monospace;font-size:12px;">${c.phone}</td><td><span class="badge badge-blue">${escapeHtml(c.group_name||'Default')}</span></td><td style="font-size:11px;color:var(--text3);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(c.message||'—')}</td><td><button onclick="removeContact(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:15px;">×</button></td></tr>`).join('');
+  if (!contacts.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px;">No contacts</td></tr>'; }
+  else {
+    tbody.innerHTML = contacts.map((c, i) => {
+      const cf = (c.custom_fields && typeof c.custom_fields === 'object') ? Object.entries(c.custom_fields).map(([k, v]) => `${k}: ${v}`).join(', ') : '';
+      return `<tr><td>${escapeHtml(c.name)}</td><td style="font-family:'DM Mono',monospace;font-size:12px;">${c.phone}</td><td><span class="badge badge-blue">${escapeHtml(c.group_name||'Default')}</span></td><td style="font-size:11px;color:var(--text3);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(c.message||'—')}</td><td style="font-size:11px;color:var(--text3);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(cf || '—')}</td><td><button onclick="removeContact(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:15px;">×</button></td></tr>`;
+    }).join('');
+  }
+  // Keep the Campaigns page in sync with the in-memory list right away, so freshly
+  // imported/pasted contacts show up in the group dropdown + count before "Save to DB".
+  renderCampaignGroups(); updateCampaignContactCount();
 }
 function renderCampaignGroups() {
   const select = document.getElementById('campaignGroupSelect');
   if (!select) return;
+  const prev = select.value;
   const groups = [...new Set(contacts.map(c => c.group_name?.trim() || 'Default'))].filter(Boolean);
   select.innerHTML = '<option value="">All Contacts</option>' + groups.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('');
+  if (prev && groups.includes(prev)) select.value = prev;
 }
 function updateCampaignContactCount() {
   const groupName = document.getElementById('campaignGroupSelect')?.value || '';

@@ -798,10 +798,18 @@ app.post('/api/contacts', verifyUser, async (req, res) => {
   const { contacts } = req.body;
   if (!contacts?.length) return res.json({ success: true });
   
-  // Delete existing contacts first
+  // Snapshot existing contacts so a failed insert can't leave the user with an
+  // empty list (previously: delete → insert fails → "No contacts found" in campaigns).
+  const { data: previousRows } = await supabase.from('wb_contacts').select('*').eq('user_id', req.user.id);
   await supabase.from('wb_contacts').delete().eq('user_id', req.user.id);
-  
-  const rows = contacts.map(c => ({
+
+  const seenPhones = new Set();
+  const rows = contacts.filter(c => {
+    const p = String(c.phone || '').replace(/\D/g, '');
+    if (!p || seenPhones.has(p)) return false;
+    seenPhones.add(p);
+    return true;
+  }).map(c => ({
     user_id: req.user.id,
     name: c.name || c.phone,
     phone: String(c.phone).replace(/\D/g, ''),
@@ -816,7 +824,20 @@ app.post('/api/contacts', verifyUser, async (req, res) => {
   }));
   
   const { error } = await supabase.from('wb_contacts').insert(rows);
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) {
+    console.error('[contacts] insert failed:', { code: error.code, message: error.message, details: error.details, hint: error.hint });
+    // Put the old list back so nothing is lost.
+    if (previousRows?.length) {
+      const { error: restoreErr } = await supabase.from('wb_contacts').insert(previousRows);
+      if (restoreErr) console.error('[contacts] could not restore previous contacts:', restoreErr.message);
+    }
+    const missingCol = /custom_fields/i.test(error.message || '') || error.code === 'PGRST204' || error.code === '42703';
+    return res.status(500).json({
+      error: missingCol
+        ? 'Database is missing the contacts.custom_fields column. Run migrations/010_contacts_custom_fields.sql in Supabase, then save again. (' + error.message + ')'
+        : error.message
+    });
+  }
 
   // Feed names into the persistent phone->name directory too, but only
   // for numbers that don't already have one saved — a campaign list
