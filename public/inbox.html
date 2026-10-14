@@ -42,7 +42,7 @@
     $('empty').style.display = rows.length ? 'none' : 'block';
     $('list').innerHTML = rows.map(function(m){
       return '<div class="msg"><div class="top"><span><span class="who">'+esc(m.name||m.phone)+'</span>'+(m.name?' · '+esc(m.phone):'')+
-        ' <span class="type">'+esc(m.type)+'</span></span><span>'+esc(new Date(m.at).toLocaleString())+'</span></div><div class="body">'+esc(m.body)+'</div></div>';
+        ' <span class="type">'+esc(m.type)+'</span></span><span>'+esc(new Date(m.at).toLocaleString())+'</span></div><div class="body">'+esc(m.body)+'</div>'+(m.type==='audio'?'<div class="body"><audio controls preload="none" style="width:100%;max-width:360px" src="/api/public/inbox/media/'+encodeURIComponent(m.id)+'?pass='+encodeURIComponent(pass)+'"></audio></div>':'')+'</div>';
     }).join('');
   }
   function fail(t){clearInterval(timer);$('err').textContent=t;$('err').style.display='block';$('list').innerHTML='';$('empty').style.display='none';$('q').style.display='none';$('status').textContent=''}
@@ -50,7 +50,7 @@
     if(!pass) return fail('This link is missing its password.');
     fetch('/api/public/inbox?pass='+encodeURIComponent(pass),{cache:'no-store'})
       .then(function(r){ if(r.status===403) throw new Error('403'); if(r.status===429) throw new Error('429'); if(!r.ok) throw new Error('x'); return r.json(); })
-      .then(function(d){ all=d.messages||[]; render(); $('status').textContent=all.length+' messages · updated '+new Date().toLocaleTimeString(); })
+      .then(function(d){ all=d.messages||[]; var pl=$('list').querySelector('audio'); if(!(pl&&!pl.paused&&!pl.ended)) render(); $('status').textContent=all.length+' messages · updated '+new Date().toLocaleTimeString(); })
       .catch(function(e){ if(e.message==='403') fail('This link is no longer valid.'); else $('status').textContent='Retrying…'; });
   }
   $('q').addEventListener('input',render);

@@ -205,7 +205,7 @@ const verifyAdmin = (req, res, next) => {
 };
 
 // Login-free read-only inbox (revocable ?pass=... link). See migrations/009_public_inbox.sql
-app.use(require('./src/routes/public-inbox')({ supabase, verifyAdmin }));
+app.use(require('./src/routes/public-inbox')({ supabase, verifyAdmin, loadInboundAudio, sendMediaBuffer }));
 
 // ================================================================
 // 4. STATIC & HEALTH
@@ -1305,6 +1305,96 @@ app.get('/api/messages/received', verifyUser, async (req, res) => {
   res.json({ success: true, messages: merged, unread: unread || 0 });
 });
 
+// ---- Inbound audio / voice note streaming -------------------------------
+// Meta only gives us a media id in the webhook. The real file is fetched on
+// demand: GET /{media-id} -> short-lived URL -> download with the account's
+// bearer token. The token never leaves the server. Meta keeps media ~30 days.
+async function fetchMetaMedia(waAccount, mediaId) {
+  const token = decryptToken(waAccount.access_token);
+  const metaRes = await fetch(
+    `https://graph.facebook.com/${META_API_VERSION}/${encodeURIComponent(mediaId)}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const meta = await metaRes.json().catch(() => ({}));
+  if (!metaRes.ok || !meta.url) {
+    const err = new Error(meta.error?.message || 'Could not resolve media');
+    err.status = metaRes.status === 404 ? 404 : 502;
+    throw err;
+  }
+  const fileRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!fileRes.ok) {
+    const err = new Error('Media download failed');
+    err.status = fileRes.status === 404 ? 404 : 502;
+    throw err;
+  }
+  const buffer = await fileRes.buffer();
+  return { buffer, mime: meta.mime_type || fileRes.headers.get('content-type') || 'audio/ogg' };
+}
+
+// Resolves the WhatsApp account that received this row, then downloads its audio.
+async function loadInboundAudio(row) {
+  let acct = null;
+  if (row.wa_account_id) {
+    const { data } = await supabase.from('wa_accounts').select('*')
+      .eq('id', row.wa_account_id).eq('user_id', row.user_id).maybeSingle();
+    acct = data;
+  }
+  if (!acct) {
+    const { data } = await supabase.from('wa_accounts').select('*')
+      .eq('user_id', row.user_id).eq('is_active', true).limit(1).maybeSingle();
+    acct = data;
+  }
+  if (!acct) { const e = new Error('No WhatsApp account found for this message'); e.status = 404; throw e; }
+  return fetchMetaMedia(acct, row.media_id);
+}
+
+// Sends a buffer with HTTP Range support (Safari/iOS refuse to play audio without it).
+function sendMediaBuffer(req, res, buffer, mime) {
+  const total = buffer.length;
+  res.set({
+    'Content-Type': mime,
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'private, max-age=300',
+    'X-Content-Type-Options': 'nosniff'
+  });
+  const m = req.headers.range && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+  if (m && (m[1] || m[2])) {
+    let start, end;
+    if (m[1] === '') { start = Math.max(total - parseInt(m[2], 10), 0); end = total - 1; }
+    else { start = parseInt(m[1], 10); end = m[2] === '' ? total - 1 : Math.min(parseInt(m[2], 10), total - 1); }
+    if (start > end || start >= total) {
+      res.status(416).set('Content-Range', `bytes */${total}`);
+      return res.end();
+    }
+    res.status(206).set({ 'Content-Range': `bytes ${start}-${end}/${total}`, 'Content-Length': end - start + 1 });
+    return res.end(buffer.slice(start, end + 1));
+  }
+  res.set('Content-Length', total);
+  return res.end(buffer);
+}
+
+app.get('/api/messages/received/:id/media', verifyUser, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid message id' });
+  const { data: row, error } = await supabase
+    .from('wb_inbound_messages')
+    .select('id, user_id, wa_account_id, message_type, media_id')
+    .eq('id', id)
+    .eq('user_id', req.user.id)
+    .maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!row || row.message_type !== 'audio' || !row.media_id) {
+    return res.status(404).json({ error: 'No audio stored for this message' });
+  }
+  try {
+    const { buffer, mime } = await loadInboundAudio(row);
+    sendMediaBuffer(req, res, buffer, mime);
+  } catch (err) {
+    console.error('[media] audio fetch failed:', err.message);
+    res.status(err.status || 502).json({ error: err.status === 404 ? 'Audio is no longer available (Meta keeps media ~30 days)' : 'Could not load audio' });
+  }
+});
+
 app.post('/api/messages/received/mark-read', verifyUser, async (req, res) => {
   const { error } = await supabase
     .from('wb_inbound_messages')
@@ -2060,7 +2150,7 @@ function extractMessagePreview(msg) {
     case 'video':
       return { message_type: 'video', message_body: msg.video?.caption || '🎥 Video' };
     case 'audio':
-      return { message_type: 'audio', message_body: '🎵 Audio message' };
+      return { message_type: 'audio', message_body: msg.audio?.voice ? '🎤 Voice message' : '🎵 Audio message' };
     case 'document':
       return { message_type: 'document', message_body: msg.document?.filename || '📄 Document' };
     case 'sticker':
@@ -2385,8 +2475,12 @@ async function handleIncomingMessage(value, msg) {
   const { message_type, message_body } = extractMessagePreview(msg);
 
   // Store the inbound message so it shows up in the Received tab.
+  // Voice notes / audio also keep Meta's media id so the audio can be
+  // streamed on demand (see GET /api/messages/received/:id/media). If the
+  // media_* columns haven't been migrated yet, retry without them so the
+  // message itself is never lost.
   try {
-    await supabase.from('wb_inbound_messages').insert({
+    const inboundRow = {
       user_id: waAccount.user_id,
       wa_account_id: waAccount.id,
       phone: msg.from,
@@ -2395,7 +2489,18 @@ async function handleIncomingMessage(value, msg) {
       message_body,
       wa_message_id: msg.id || null,
       created_at: new Date().toISOString()
-    });
+    };
+    const hasAudio = msg.type === 'audio' && msg.audio?.id;
+    let { error: insErr } = await supabase.from('wb_inbound_messages').insert(
+      hasAudio
+        ? { ...inboundRow, media_id: msg.audio.id, media_mime: msg.audio.mime_type || null, is_voice: !!msg.audio.voice }
+        : inboundRow
+    );
+    if (insErr && hasAudio) {
+      console.error('[webhook] insert with media fields failed, retrying without:', insErr.message);
+      ({ error: insErr } = await supabase.from('wb_inbound_messages').insert(inboundRow));
+    }
+    if (insErr) console.error('[webhook] failed to store inbound message:', insErr.message);
   } catch (e) {
     console.error('[webhook] failed to store inbound message:', e.message);
   }

@@ -2,6 +2,7 @@
 // Login-free, read-only inbox guarded by a revocable password passed as ?pass=...
 //
 //   GET  /api/public/inbox?pass=XXXX            -> messages (public)
+//   GET  /api/public/inbox/media/:id?pass=XXXX  -> streams a voice note / audio (public, same pass)
 //   POST /api/admin/public-inbox/create         -> x-admin-secret; body {user_id, label?, pass?, show_phone?}
 //   POST /api/admin/public-inbox/revoke         -> x-admin-secret; body {id} or {user_id} (revokes all)
 //   GET  /api/admin/public-inbox/list           -> x-admin-secret
@@ -30,7 +31,7 @@ function rateLimit(req, res, next) {
 }
 setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (now - v.t > 120000) hits.delete(k); }, 120000).unref();
 
-module.exports = function publicInboxRouter({ supabase, verifyAdmin }) {
+module.exports = function publicInboxRouter({ supabase, verifyAdmin, loadInboundAudio, sendMediaBuffer }) {
   const router = express.Router();
 
   router.get('/api/public/inbox', rateLimit, async (req, res) => {
@@ -65,6 +66,42 @@ module.exports = function publicInboxRouter({ supabase, verifyAdmin }) {
       at: m.created_at
     }));
     res.json({ success: true, count: messages.length, messages });
+  });
+
+  router.get('/api/public/inbox/media/:id', rateLimit, async (req, res) => {
+    res.set({ 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' });
+    const pass = String(req.query.pass || '').trim();
+    if (pass.length < 8) return res.status(403).json({ error: 'Invalid or revoked link' });
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid message id' });
+
+    const { data: key, error: kErr } = await supabase
+      .from('wb_public_inbox_keys')
+      .select('user_id')
+      .eq('pass_hash', sha256(pass))
+      .is('revoked_at', null)
+      .maybeSingle();
+    if (kErr) return res.status(500).json({ error: 'Lookup failed' });
+    if (!key) return res.status(403).json({ error: 'Invalid or revoked link' });
+
+    // Scoped to the key owner's user_id, so a pass can only ever stream audio
+    // belonging to the inbox it was issued for.
+    const { data: row, error } = await supabase
+      .from('wb_inbound_messages')
+      .select('id, user_id, wa_account_id, message_type, media_id')
+      .eq('id', id)
+      .eq('user_id', key.user_id)
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: 'Could not load message' });
+    if (!row || row.message_type !== 'audio' || !row.media_id) {
+      return res.status(404).json({ error: 'No audio stored for this message' });
+    }
+    try {
+      const { buffer, mime } = await loadInboundAudio(row);
+      sendMediaBuffer(req, res, buffer, mime);
+    } catch (err) {
+      res.status(err.status || 502).json({ error: err.status === 404 ? 'Audio is no longer available' : 'Could not load audio' });
+    }
   });
 
   router.post('/api/admin/public-inbox/create', verifyAdmin, async (req, res) => {
