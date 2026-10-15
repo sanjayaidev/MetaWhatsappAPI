@@ -3,9 +3,16 @@
 //
 //   GET  /api/public/inbox?pass=XXXX            -> messages (public)
 //   GET  /api/public/inbox/media/:id?pass=XXXX  -> streams a voice note / audio (public, same pass)
-//   POST /api/admin/public-inbox/create         -> x-admin-secret; body {user_id, label?, pass?, show_phone?}
+//   POST /api/admin/public-inbox/create         -> x-admin-secret; body {user_id, label?, pass?, show_phone?, campaign_id?}
+//   POST /api/admin/public-inbox/set-campaign   -> x-admin-secret; body {id, campaign_id|null}  (scope / un-scope a link)
 //   POST /api/admin/public-inbox/revoke         -> x-admin-secret; body {id} or {user_id} (revokes all)
 //   GET  /api/admin/public-inbox/list           -> x-admin-secret
+//
+// Campaign scoping: a key with a campaign_id only ever shows incoming messages from
+// phone numbers that were recipients of THAT campaign (matched through
+// wb_send_queue, see migrations/012). A key without one shows every inbound message
+// of its owner (the original behaviour). Scoped links fail CLOSED: if the campaign
+// is gone or the lookup fails they show nothing, never everything.
 const express = require('express');
 const crypto = require('crypto');
 
@@ -41,7 +48,7 @@ module.exports = function publicInboxRouter({ supabase, verifyAdmin, loadInbound
 
     const { data: key, error: kErr } = await supabase
       .from('wb_public_inbox_keys')
-      .select('id, user_id, show_phone')
+      .select('id, user_id, show_phone, campaign_id')
       .eq('pass_hash', sha256(pass))
       .is('revoked_at', null)
       .maybeSingle();
@@ -49,15 +56,40 @@ module.exports = function publicInboxRouter({ supabase, verifyAdmin, loadInbound
     if (!key) return res.status(403).json({ error: 'Invalid or revoked link' });
 
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
-    const { data, error } = await supabase
-      .from('wb_public_inbox')
-      .select('id, phone, contact_name, message_type, message_body, created_at')
-      .eq('user_id', key.user_id)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-    if (error) return res.status(500).json({ error: 'Could not load messages' });
+    let rows;
+    let campaign = null;
 
-    const messages = (data || []).map((m) => ({
+    if (key.campaign_id) {
+      const { data: camp, error: cErr } = await supabase
+        .from('wb_campaigns')
+        .select('id, name')
+        .eq('id', key.campaign_id)
+        .eq('user_id', key.user_id)
+        .maybeSingle();
+      if (cErr) return res.status(500).json({ error: 'Could not load messages' });
+      if (!camp) return res.json({ success: true, count: 0, messages: [], campaign: null }); // fail closed
+      campaign = { id: camp.id, name: camp.name };
+
+      const { data, error } = await supabase.rpc('wb_campaign_inbound', {
+        p_user_id: key.user_id, p_campaign_id: key.campaign_id, p_limit: limit
+      });
+      if (error) {
+        console.error('[public-inbox] wb_campaign_inbound failed (run migration 012?):', error.message);
+        return res.status(500).json({ error: 'Could not load messages' });
+      }
+      rows = data || [];
+    } else {
+      const { data, error } = await supabase
+        .from('wb_public_inbox')
+        .select('id, phone, contact_name, message_type, message_body, created_at')
+        .eq('user_id', key.user_id)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (error) return res.status(500).json({ error: 'Could not load messages' });
+      rows = data || [];
+    }
+
+    const messages = rows.map((m) => ({
       id: m.id,
       phone: key.show_phone ? m.phone : maskPhone(m.phone),
       name: m.contact_name || '',
@@ -65,7 +97,7 @@ module.exports = function publicInboxRouter({ supabase, verifyAdmin, loadInbound
       body: m.message_body,
       at: m.created_at
     }));
-    res.json({ success: true, count: messages.length, messages });
+    res.json({ success: true, count: messages.length, messages, campaign });
   });
 
   router.get('/api/public/inbox/media/:id', rateLimit, async (req, res) => {
@@ -77,7 +109,7 @@ module.exports = function publicInboxRouter({ supabase, verifyAdmin, loadInbound
 
     const { data: key, error: kErr } = await supabase
       .from('wb_public_inbox_keys')
-      .select('user_id')
+      .select('user_id, campaign_id')
       .eq('pass_hash', sha256(pass))
       .is('revoked_at', null)
       .maybeSingle();
@@ -88,13 +120,24 @@ module.exports = function publicInboxRouter({ supabase, verifyAdmin, loadInbound
     // belonging to the inbox it was issued for.
     const { data: row, error } = await supabase
       .from('wb_inbound_messages')
-      .select('id, user_id, wa_account_id, message_type, media_id')
+      .select('id, user_id, wa_account_id, phone, message_type, media_id')
       .eq('id', id)
       .eq('user_id', key.user_id)
       .maybeSingle();
     if (error) return res.status(500).json({ error: 'Could not load message' });
     if (!row || row.message_type !== 'audio' || !row.media_id) {
       return res.status(404).json({ error: 'No audio stored for this message' });
+    }
+    // A campaign-scoped link may only play voice notes from that campaign's numbers.
+    if (key.campaign_id) {
+      const { data: allowed, error: aErr } = await supabase.rpc('wb_campaign_has_phone', {
+        p_user_id: key.user_id, p_campaign_id: key.campaign_id, p_phone: row.phone
+      });
+      if (aErr) {
+        console.error('[public-inbox] wb_campaign_has_phone failed (run migration 012?):', aErr.message);
+        return res.status(500).json({ error: 'Could not load audio' });
+      }
+      if (allowed !== true) return res.status(404).json({ error: 'No audio stored for this message' });
     }
     try {
       const { buffer, mime } = await loadInboundAudio(row);
@@ -105,18 +148,36 @@ module.exports = function publicInboxRouter({ supabase, verifyAdmin, loadInbound
   });
 
   router.post('/api/admin/public-inbox/create', verifyAdmin, async (req, res) => {
-    const { user_id, label = '', show_phone = false } = req.body || {};
+    const { user_id, label = '', show_phone = false, campaign_id = null } = req.body || {};
     if (!user_id) return res.status(400).json({ error: 'user_id required' });
+    if (campaign_id) {
+      const { data: camp } = await supabase.from('wb_campaigns').select('id').eq('id', campaign_id).eq('user_id', user_id).maybeSingle();
+      if (!camp) return res.status(400).json({ error: 'campaign_id not found for this user_id' });
+    }
     const pass = req.body.pass ? String(req.body.pass) : crypto.randomBytes(18).toString('base64url');
     if (pass.length < 8) return res.status(400).json({ error: 'pass must be at least 8 characters' });
     const { data, error } = await supabase
       .from('wb_public_inbox_keys')
-      .insert({ user_id, label, show_phone: !!show_phone, pass_hash: sha256(pass) })
+      .insert({ user_id, label, show_phone: !!show_phone, pass_hash: sha256(pass), campaign_id: campaign_id || null })
       .select('id')
       .single();
     if (error) return res.status(500).json({ error: error.message });
     const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
-    res.json({ success: true, id: data.id, pass, link: `${base}/inbox.html?pass=${encodeURIComponent(pass)}` });
+    res.json({ success: true, id: data.id, campaign_id: campaign_id || null, pass, link: `${base}/inbox.html?pass=${encodeURIComponent(pass)}` });
+  });
+
+  router.post('/api/admin/public-inbox/set-campaign', verifyAdmin, async (req, res) => {
+    const { id, campaign_id = null } = req.body || {};
+    if (!id) return res.status(400).json({ error: 'id required' });
+    const { data: key } = await supabase.from('wb_public_inbox_keys').select('id, user_id').eq('id', id).maybeSingle();
+    if (!key) return res.status(404).json({ error: 'key not found' });
+    if (campaign_id) {
+      const { data: camp } = await supabase.from('wb_campaigns').select('id').eq('id', campaign_id).eq('user_id', key.user_id).maybeSingle();
+      if (!camp) return res.status(400).json({ error: 'campaign_id not found for this key\'s user' });
+    }
+    const { error } = await supabase.from('wb_public_inbox_keys').update({ campaign_id: campaign_id || null }).eq('id', id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true, id, campaign_id: campaign_id || null });
   });
 
   router.post('/api/admin/public-inbox/revoke', verifyAdmin, async (req, res) => {
@@ -132,7 +193,7 @@ module.exports = function publicInboxRouter({ supabase, verifyAdmin, loadInbound
   router.get('/api/admin/public-inbox/list', verifyAdmin, async (_req, res) => {
     const { data, error } = await supabase
       .from('wb_public_inbox_keys')
-      .select('id, user_id, label, show_phone, created_at, revoked_at')
+      .select('id, user_id, label, show_phone, campaign_id, created_at, revoked_at')
       .order('created_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     res.json({ success: true, keys: data });

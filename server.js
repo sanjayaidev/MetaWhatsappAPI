@@ -1182,7 +1182,7 @@ app.get('/api/campaigns/active', verifyUser, async (req, res) => {
 });
 
 app.get('/api/campaigns/:id/status', verifyUser, async (req, res) => {
-  const { data: campaign, error: campErr } = await supabase
+  let { data: campaign, error: campErr } = await supabase
     .from('wb_campaigns')
     .select('id, status, queue_total, queue_processed, queue_failed, sent_count, failed_count, total_contacts, user_id, schedule_at')
     .eq('id', req.params.id)
@@ -1190,11 +1190,20 @@ app.get('/api/campaigns/:id/status', verifyUser, async (req, res) => {
     .single();
   if (campErr || !campaign) return res.status(404).json({ error: 'Campaign not found' });
 
-  const { count: pending } = await supabase
-    .from('wb_send_queue')
-    .select('*', { count: 'exact', head: true })
-    .eq('campaign_id', req.params.id)
-    .eq('status', 'pending');
+  // Live counts straight from the queue — the source of truth. The counters on
+  // wb_campaigns are only a cache; if one ever lags by a row the bar would show
+  // N-1 and a running campaign would never complete. A claimed-but-unfinished
+  // row ('processing') is shown as pending so sent+pending+failed always == total.
+  let counts;
+  try { counts = await getQueueCounts(req.params.id); }
+  catch (e) { return res.status(500).json({ error: 'Could not read queue: ' + e.message }); }
+
+  // Self-heal: everything is done but the campaign row still says running.
+  if (campaign.status === 'running' && counts.outstanding === 0 && counts.total > 0) {
+    await updateCampaignProgress(req.params.id);
+    campaign = { ...campaign, status: 'completed' };
+  }
+  const pending = counts.outstanding;
 
   let gap_seconds = 0;
   let next_send_at = null;
@@ -1202,7 +1211,7 @@ app.get('/api/campaigns/:id/status', verifyUser, async (req, res) => {
     next_send_at = campaign.schedule_at;
     const scheduledMs = new Date(campaign.schedule_at).getTime() - Date.now();
     gap_seconds = scheduledMs > 0 ? Math.ceil(scheduledMs / 1000) : 0;
-  } else if (campaign.status === 'running' && campaign.sent_count > 0) {
+  } else if (campaign.status === 'running' && counts.sent > 0) {
     const { data: settings } = await supabase
       .from('wb_settings')
       .select('max_gap')
@@ -1228,40 +1237,59 @@ app.get('/api/campaigns/:id/status', verifyUser, async (req, res) => {
 
   res.json({
     success: true, status: campaign.status,
-    total: campaign.queue_total || campaign.total_contacts || 0,
-    sent: campaign.queue_processed || campaign.sent_count || 0,
-    failed: campaign.queue_failed || campaign.failed_count || 0,
+    total: counts.total || campaign.queue_total || campaign.total_contacts || 0,
+    sent: counts.sent,
+    failed: counts.failed,
     pending: pending || 0, gap_seconds, next_send_at
   });
 });
 
 app.get('/api/campaigns/:id/logs', verifyUser, async (req, res) => {
-  const { data, error } = await supabase
-    .from('wb_send_queue')
-    .select('phone, contact_name, status, wa_message_id, error_reason, created_at')
-    .eq('campaign_id', req.params.id)
-    .eq('user_id', req.user.id)
-    .order('created_at', { ascending: true });
-  if (error) return res.status(500).json({ error: error.message });
-  
-  // Enrich with delivery status from logs table
-  const logs = data || [];
-  for (const log of logs) {
-    log.delivery_status = log.status; // default/fallback until enriched below
-    if (log.wa_message_id) {
-      const { data: deliveryLog } = await supabase
-        .from('wb_campaign_logs')
-        .select('delivery_status, error_reason, delivered_at, read_at')
-        .eq('wa_message_id', log.wa_message_id)
-        .single();
-      if (deliveryLog) {
-        log.delivery_status = deliveryLog.delivery_status || log.delivery_status;
-        if (deliveryLog.error_reason) log.error_reason = deliveryLog.error_reason;
-        log.delivered_at = deliveryLog.delivered_at || null;
-        log.read_at = deliveryLog.read_at || null;
-      }
-    }
+  // Every recipient of the campaign with the exact text that was sent to them.
+  // Paged (PostgREST caps a single response at 1000 rows) and the delivery
+  // lookup is batched — it used to run one query per recipient (N+1), and used
+  // .single(), which errors outright if two log rows ever shared a message id.
+  const rows = [];
+  for (let from = 0; from < 50000; from += 1000) {
+    const { data, error } = await supabase
+      .from('wb_send_queue')
+      .select('*')
+      .eq('campaign_id', req.params.id)
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: true })
+      .range(from, from + 999);
+    if (error) return res.status(500).json({ error: error.message });
+    rows.push(...(data || []));
+    if ((data || []).length < 1000) break;
   }
+
+  const deliveryById = new Map();
+  const ids = rows.map(r => r.wa_message_id).filter(Boolean);
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await supabase
+      .from('wb_campaign_logs')
+      .select('*')
+      .in('wa_message_id', ids.slice(i, i + 200));
+    if (error) { console.error('[campaign-logs] delivery lookup failed:', error.message); break; }
+    for (const d of (data || [])) deliveryById.set(d.wa_message_id, d);
+  }
+
+  const logs = rows.map(r => {
+    const d = r.wa_message_id ? deliveryById.get(r.wa_message_id) : null;
+    return {
+      phone: r.phone,
+      contact_name: r.contact_name,
+      status: r.status,
+      wa_message_id: r.wa_message_id,
+      message_body: r.message_body || d?.message_body || '',
+      error_reason: d?.error_reason || r.error_reason || null,
+      created_at: r.created_at,
+      sent_at: r.sent_at || d?.sent_at || null,
+      delivery_status: d?.delivery_status || r.status,
+      delivered_at: d?.delivered_at || null,
+      read_at: d?.read_at || null
+    };
+  });
   res.json({ success: true, logs });
 });
 
@@ -1294,7 +1322,10 @@ app.get('/api/messages/received', verifyUser, async (req, res) => {
   const merged = [
     ...(inbound || []).map(m => ({ ...m, direction: 'in' })),
     ...(outbound || []).map(m => ({ ...m, direction: 'out' }))
-  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, limit);
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  // No .slice(limit) on the merged list: campaign sends are now logged as
+  // outbound rows, and a burst of them is newer than the latest inbound
+  // messages. Slicing here would push real inbound messages out of the response.
 
   const { count: unread } = await supabase
     .from('wb_inbound_messages')
@@ -2085,18 +2116,10 @@ app.post('/webhook', async (req, res) => {
 
         // Delivery statuses
         for (const status of (value?.statuses || [])) {
-          if (status.id) {
-            const updateData = { delivery_status: status.status };
-            if (status.status === 'delivered') updateData.delivered_at = new Date().toISOString();
-            if (status.status === 'read') updateData.read_at = new Date().toISOString();
-            if (status.errors?.[0]?.title) updateData.error_reason = status.errors[0].title;
-
-            await supabase
-              .from('wb_campaign_logs')
-              .upsert({
-                wa_message_id: status.id, ...updateData,
-                updated_at: new Date().toISOString()
-              }, { onConflict: 'wa_message_id' });
+          try {
+            await applyDeliveryStatus(status);
+          } catch (err) {
+            console.error('[webhook] delivery status handling failed:', status?.id, err.message);
           }
         }
       } else if (field === 'message_template_status_update') {
@@ -2216,9 +2239,9 @@ function extractOutboundPreview(payload) {
 // mobile.html that disappeared on refresh or wasn't visible from crm.html
 // or a second device at all. Fire-and-forget: a logging failure should
 // never block or fail the actual send.
-async function logOutboundMessage({ userId, waAccountId = null, phone, contactName = '', messageType = 'text', messageBody = '', waMessageId = null, source }) {
+async function logOutboundMessage({ userId, waAccountId = null, phone, contactName = '', messageType = 'text', messageBody = '', waMessageId = null, source, campaignId = null }) {
   try {
-    const { error } = await supabase.from('wb_outbound_messages').insert({
+    const row = {
       user_id: userId,
       wa_account_id: waAccountId,
       phone,
@@ -2226,9 +2249,16 @@ async function logOutboundMessage({ userId, waAccountId = null, phone, contactNa
       message_type: messageType,
       message_body: messageBody,
       wa_message_id: waMessageId,
-      source, // 'manual' | 'ai_auto_reply' | 'template_auto_reply' | 'bot_builder'
+      source, // 'manual' | 'ai_auto_reply' | 'template_auto_reply' | 'bot_builder' | 'campaign'
       created_at: new Date().toISOString()
-    });
+    };
+    if (campaignId) row.campaign_id = campaignId;
+    let { error } = await supabase.from('wb_outbound_messages').insert(row);
+    if (error && campaignId && isMissingColumnError(error)) {
+      warnMigrationOnce('wb_outbound_messages.campaign_id');
+      delete row.campaign_id;
+      ({ error } = await supabase.from('wb_outbound_messages').insert(row));
+    }
     if (error) console.error('[outbound-log] failed to store sent message:', error.message);
   } catch (err) {
     console.error('[outbound-log] failed to store sent message:', err.message);
@@ -2845,6 +2875,22 @@ async function processQueue() {
 
     const runningIds = runningCampaigns.map(c => c.id);
 
+    // A row left in 'processing' (server restarted / crashed between claiming
+    // it and recording the result) would otherwise block the campaign forever.
+    await recoverStaleQueueItems(runningIds);
+
+    // Finish any running campaign that has nothing left to send. This is what
+    // un-sticks a campaign whose last row was already sent but whose counters
+    // never reached the total (so it sat on "running" at N-1/N indefinitely).
+    for (const id of runningIds) {
+      const { count: outstanding, error: outErr } = await supabase
+        .from('wb_send_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('campaign_id', id)
+        .in('status', ['pending', 'processing']);
+      if (!outErr && (outstanding || 0) === 0) await updateCampaignProgress(id);
+    }
+
     // Get one pending queue item
     const { data: pending } = await supabase
       .from('wb_send_queue')
@@ -2898,17 +2944,31 @@ async function processQueue() {
         .from('wb_send_queue')
         .update({ status: 'failed', error_reason: 'No WhatsApp account connected', processed_at: new Date().toISOString() })
         .eq('id', queueItem.id);
-      await updateCampaignProgress(queueItem.campaign_id, false);
+      await recordCampaignLog({
+        campaign_id: queueItem.campaign_id, queue_id: queueItem.id, wa_message_id: null,
+        delivery_status: 'failed', phone: queueItem.phone, contact_name: queueItem.contact_name || '',
+        template_name: queueItem.template_name, message_body: '', error_reason: 'No WhatsApp account connected'
+      });
+      await updateCampaignProgress(queueItem.campaign_id);
       return { processed: 1, failed: 1 };
     }
 
     const waAccount = waAccounts[0];
 
-    // Mark as processing
-    await supabase
+    // Claim the row atomically: only one worker can flip pending -> processing.
+    // (Two overlapping runs, e.g. during a zero-downtime deploy, used to both
+    // pick the same row and send the contact two messages.)
+    const { data: claimed, error: claimErr } = await supabase
       .from('wb_send_queue')
       .update({ status: 'processing', processed_at: new Date().toISOString() })
-      .eq('id', queueItem.id);
+      .eq('id', queueItem.id)
+      .eq('status', 'pending')
+      .select('id');
+    if (claimErr) {
+      console.error('[queue] failed to claim queue item', queueItem.id, claimErr.message);
+      return { processed: 0, error: claimErr.message };
+    }
+    if (!claimed?.length) return { processed: 0, action: 'claim_lost' };
 
     // Fetch campaign placeholder mapping for this queue item.
     // placeholder_mapping is free-form JSON: { "<key>": { type, value? } }
@@ -2922,6 +2982,7 @@ async function processQueue() {
       .single();
 
     let templatePayload = { name: queueItem.template_name, language: { code: queueItem.template_language || 'en_US' } };
+    let bodyParams = [];
     if (campaignData?.placeholder_mapping && typeof campaignData.placeholder_mapping === 'object') {
       const resolveValue = (map) => {
         if (map.type === 'phone') return queueItem.phone || '';
@@ -2953,6 +3014,7 @@ async function processQueue() {
 
       if (params.length) {
         templatePayload.components = [ { type: 'BODY', parameters: params } ];
+        bodyParams = params;
       }
     }
 
@@ -2965,6 +3027,7 @@ async function processQueue() {
 
     let sendSuccess = false;
     let waMessageId = null;
+    let waId = null;
     let errorMsg = null;
 
     try {
@@ -2980,6 +3043,9 @@ async function processQueue() {
       const responseData = await result.json();
       if (result.ok && responseData.messages?.[0]?.id) {
         waMessageId = responseData.messages[0].id;
+        // Meta's canonical id for the recipient (country code included). Stored
+        // so replies can be matched back to this campaign exactly.
+        waId = responseData.contacts?.[0]?.wa_id || null;
         sendSuccess = true;
       } else {
         errorMsg = responseData.error?.message || `Meta API ${result.status}`;
@@ -2988,41 +3054,69 @@ async function processQueue() {
       errorMsg = err.message;
     }
 
-    // Update queue item. If this fails silently, the item would stay
-    // 'pending' forever and processQueue would pick the SAME contact again
-    // next cycle — sending them a duplicate message every 3 seconds,
-    // indefinitely, with the delivery already having actually succeeded.
-    const { error: queueUpdateErr } = await supabase
-      .from('wb_send_queue')
-      .update({
-        status: sendSuccess ? 'sent' : 'failed',
-        wa_message_id: waMessageId,
-        error_reason: errorMsg,
-        sent_at: sendSuccess ? new Date().toISOString() : null,
-        attempt_count: (queueItem.attempt_count || 0) + 1
-      })
-      .eq('id', queueItem.id);
+    // The exact text this recipient received (template body with their values
+    // filled in). Stored on the queue row, the campaign log and the outbound
+    // message thread.
+    let messageBody = '';
+    try {
+      const tpl = await getTemplateForSend(queueItem.user_id, queueItem.template_name);
+      messageBody = renderTemplateText(tpl, bodyParams) || `[Template: ${queueItem.template_name}]`;
+    } catch (e) {
+      messageBody = `[Template: ${queueItem.template_name}]`;
+    }
+
+    // Update queue item. If this fails silently, the item would stay in
+    // 'processing' and (after the stale timeout) be marked failed even though
+    // the delivery actually succeeded — so retry once, and fall back to the
+    // pre-migration columns if message_body / wa_id don't exist yet.
+    const queueUpdate = {
+      status: sendSuccess ? 'sent' : 'failed',
+      wa_message_id: waMessageId,
+      error_reason: errorMsg,
+      sent_at: sendSuccess ? new Date().toISOString() : null,
+      attempt_count: (queueItem.attempt_count || 0) + 1
+    };
+    const queueUpdateFull = { ...queueUpdate, message_body: messageBody, wa_id: waId };
+    let queueUpdateErr = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let { error } = await supabase.from('wb_send_queue').update(queueUpdateFull).eq('id', queueItem.id);
+      if (error && isMissingColumnError(error)) {
+        warnMigrationOnce('wb_send_queue.message_body/wa_id');
+        ({ error } = await supabase.from('wb_send_queue').update(queueUpdate).eq('id', queueItem.id));
+      }
+      queueUpdateErr = error;
+      if (!error) break;
+      await new Promise(r => setTimeout(r, 500));
+    }
     if (queueUpdateErr) {
       console.error('[queue] failed to update queue item after send', queueItem.id, queueUpdateErr);
     }
 
-    // Insert log entry if sent
-    if (sendSuccess && waMessageId) {
-      const { error: logErr } = await supabase
-        .from('wb_campaign_logs')
-        .upsert({
-          campaign_id: queueItem.campaign_id,
-          queue_id: queueItem.id,
-          wa_message_id: waMessageId,
-          delivery_status: 'sent',
-          created_at: new Date().toISOString()
-        }, { onConflict: 'wa_message_id' });
-      if (logErr) {
-        console.error('[queue] failed to write campaign log', queueItem.id, logErr);
-      }
+    // One log row per recipient — successes AND failures (previously only
+    // successes were logged, so failed sends left no trace in the log table).
+    await recordCampaignLog({
+      campaign_id: queueItem.campaign_id,
+      queue_id: queueItem.id,
+      wa_message_id: waMessageId,
+      delivery_status: sendSuccess ? 'sent' : 'failed',
+      phone: queueItem.phone,
+      contact_name: queueItem.contact_name || '',
+      template_name: queueItem.template_name,
+      message_body: messageBody,
+      error_reason: errorMsg,
+      sent_at: sendSuccess ? new Date().toISOString() : null
+    });
+
+    if (sendSuccess) {
+      // Show it in the conversation thread too (fire-and-forget).
+      logOutboundMessage({
+        userId: queueItem.user_id, waAccountId: waAccount.id, phone: queueItem.phone,
+        contactName: queueItem.contact_name || '', messageType: 'template',
+        messageBody, waMessageId, source: 'campaign', campaignId: queueItem.campaign_id
+      });
     }
 
-    await updateCampaignProgress(queueItem.campaign_id, sendSuccess);
+    await updateCampaignProgress(queueItem.campaign_id);
     return { processed: 1, sent: sendSuccess ? 1 : 0, failed: sendSuccess ? 0 : 1, phone: queueItem.phone };
   } catch (err) {
     console.error('[queue] processor error:', err.message);
@@ -3030,44 +3124,254 @@ async function processQueue() {
   }
 }
 
-async function updateCampaignProgress(campaignId, sendSuccess) {
-  const { data: campaign, error: fetchErr } = await supabase
-    .from('wb_campaigns')
-    .select('queue_processed, queue_failed, queue_total, status')
-    .eq('id', campaignId)
-    .single();
+// ---- Campaign queue helpers ----------------------------------------------
 
-  if (fetchErr) {
-    console.error('[updateCampaignProgress] failed to fetch campaign', campaignId, fetchErr);
+// Live counts for one campaign, straight from wb_send_queue.
+async function getQueueCounts(campaignId) {
+  const countBy = async (statuses) => {
+    const { count, error } = await supabase
+      .from('wb_send_queue')
+      .select('*', { count: 'exact', head: true })
+      .eq('campaign_id', campaignId)
+      .in('status', statuses);
+    if (error) throw new Error(error.message);
+    return count || 0;
+  };
+  const [sent, failed, outstanding] = await Promise.all([
+    countBy(['sent']), countBy(['failed']), countBy(['pending', 'processing'])
+  ]);
+  return { sent, failed, outstanding, total: sent + failed + outstanding };
+}
+
+// Progress is RECOMPUTED from the queue rather than incremented. The old
+// read-modify-write (+1 on a counter) lost an increment whenever a send landed
+// while the campaign was paused/stopped (it returned early without counting),
+// or whenever the counter update itself failed — leaving the campaign at N-1
+// with nothing pending, so it never reached "completed". Recounting is
+// idempotent: calling it any number of times always yields the right numbers.
+async function updateCampaignProgress(campaignId) {
+  try {
+    const counts = await getQueueCounts(campaignId);
+    const { data: campaign, error: fetchErr } = await supabase
+      .from('wb_campaigns')
+      .select('status')
+      .eq('id', campaignId)
+      .single();
+    if (fetchErr || !campaign) {
+      console.error('[updateCampaignProgress] failed to fetch campaign', campaignId, fetchErr);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const update = {
+      queue_processed: counts.sent,
+      queue_failed: counts.failed,
+      sent_count: counts.sent,
+      failed_count: counts.failed,
+      updated_at: now
+    };
+    if (counts.total > 0) update.queue_total = counts.total;
+    // Only a running campaign auto-completes; paused/draft ones keep their state.
+    if (campaign.status === 'running' && counts.outstanding === 0 && counts.total > 0) {
+      update.status = 'completed';
+      update.completed_at = now;
+    }
+
+    const { error: updateErr } = await supabase.from('wb_campaigns').update(update).eq('id', campaignId);
+    if (updateErr) console.error('[updateCampaignProgress] failed to update campaign', campaignId, updateErr);
+  } catch (err) {
+    console.error('[updateCampaignProgress] failed for campaign', campaignId, err.message);
+  }
+}
+
+// Rows stuck in 'processing' (claimed, then the server died before recording the
+// result) are closed out as failed. They are NOT retried: the message may
+// already have reached the recipient and a retry would send it twice.
+const STALE_PROCESSING_MS = 2 * 60 * 1000;
+async function recoverStaleQueueItems(campaignIds) {
+  try {
+    const cutoff = new Date(Date.now() - STALE_PROCESSING_MS).toISOString();
+    const { data: stale, error } = await supabase
+      .from('wb_send_queue')
+      .select('id, campaign_id, phone, contact_name, template_name')
+      .eq('status', 'processing')
+      .in('campaign_id', campaignIds)
+      .lt('processed_at', cutoff);
+    if (error || !stale?.length) return;
+    const reason = 'Interrupted before the result was recorded (server restart?). Not retried to avoid sending twice — check the delivery status in WhatsApp.';
+    for (const row of stale) {
+      const { data: closed } = await supabase
+        .from('wb_send_queue')
+        .update({ status: 'failed', error_reason: reason })
+        .eq('id', row.id)
+        .eq('status', 'processing')
+        .select('id');
+      if (closed?.length) {
+        console.warn('[queue] closed stale processing item', row.id);
+        await recordCampaignLog({
+          campaign_id: row.campaign_id, queue_id: row.id, wa_message_id: null,
+          delivery_status: 'failed', phone: row.phone, contact_name: row.contact_name || '',
+          template_name: row.template_name, message_body: '', error_reason: reason
+        });
+      }
+    }
+    for (const id of new Set(stale.map(r => r.campaign_id))) await updateCampaignProgress(id);
+  } catch (err) {
+    console.error('[queue] stale recovery failed:', err.message);
+  }
+}
+
+// ---- Rendered message text -------------------------------------------------
+const templateCache = new Map();
+async function getTemplateForSend(userId, name) {
+  const key = `${userId}|${name}`;
+  const hit = templateCache.get(key);
+  if (hit && Date.now() - hit.t < 60000) return hit.tpl;
+  const { data } = await supabase
+    .from('wb_templates')
+    .select('name, body, header_type, header_text, footer')
+    .eq('user_id', userId)
+    .eq('name', name)
+    .limit(1);
+  const tpl = data?.[0] || null;
+  templateCache.set(key, { tpl, t: Date.now() });
+  return tpl;
+}
+
+// Fills {{1}} / {{name}} placeholders with the values actually sent to Meta, so
+// the stored text is exactly what the recipient saw.
+function renderTemplateText(tpl, bodyParams) {
+  if (!tpl) return '';
+  const positional = [];
+  const named = {};
+  for (const p of (bodyParams || [])) {
+    if (p.parameter_name) named[p.parameter_name] = p.text;
+    else positional.push(p.text);
+  }
+  const fill = (text) => String(text || '').replace(/\{\{\s*([^}\s]+)\s*\}\}/g, (m, key) => {
+    if (/^\d+$/.test(key)) {
+      const v = positional[parseInt(key, 10) - 1];
+      return v !== undefined ? v : m;
+    }
+    return Object.prototype.hasOwnProperty.call(named, key) ? named[key] : m;
+  });
+  const parts = [];
+  if (tpl.header_text && (!tpl.header_type || String(tpl.header_type).toUpperCase() === 'TEXT')) parts.push(fill(tpl.header_text));
+  if (tpl.body) parts.push(fill(tpl.body));
+  if (tpl.footer) parts.push(tpl.footer);
+  return parts.join('\n\n');
+}
+
+// ---- Campaign log writes -----------------------------------------------------
+// Deliberately NOT upsert(..., { onConflict }). ON CONFLICT only works when a
+// unique constraint on exactly those columns exists, and otherwise fails with
+// 42P10 ("no unique or exclusion constraint matching...") or 23505 (a
+// different unique key such as queue_id was hit) — and the error was only
+// logged, so no log row was ever saved. Update-then-insert works whatever
+// unique keys the table has, and a lost race (23505) turns into an update.
+function isMissingColumnError(e) {
+  if (!e) return false;
+  return e.code === 'PGRST204' || e.code === '42703' ||
+    /could not find the '.*' column/i.test(e.message || '') ||
+    /column .* does not exist/i.test(e.message || '');
+}
+const _migrationWarned = new Set();
+function warnMigrationOnce(what) {
+  if (_migrationWarned.has(what)) return;
+  _migrationWarned.add(what);
+  console.warn(`[db] ${what} is missing — run migrations/012_campaign_logs_and_scoped_inbox.sql. Falling back to the old columns.`);
+}
+
+const CAMPAIGN_LOG_LEGACY_COLS = ['campaign_id', 'queue_id', 'wa_message_id', 'delivery_status', 'error_reason', 'created_at', 'updated_at'];
+
+async function recordCampaignLog(row) {
+  try {
+    const now = new Date().toISOString();
+    const full = { ...row, created_at: now, updated_at: now };
+    const write = async (payload) => {
+      const matchCol = payload.wa_message_id ? 'wa_message_id' : 'queue_id';
+      const matchVal = payload[matchCol];
+      if (!matchVal) return { message: 'log row has neither wa_message_id nor queue_id' };
+      // Never re-label an existing row as 'sent': the delivery webhook may have
+      // already advanced it to delivered/read.
+      const patch = { ...payload };
+      delete patch.created_at;
+      if (patch.delivery_status === 'sent') delete patch.delivery_status;
+
+      const upd = await supabase.from('wb_campaign_logs').update(patch).eq(matchCol, matchVal).select();
+      if (upd.error) return upd.error;
+      if (upd.data?.length) return null;
+
+      const ins = await supabase.from('wb_campaign_logs').insert(payload);
+      if (!ins.error) return null;
+      if (ins.error.code === '23505') {
+        const retry = await supabase.from('wb_campaign_logs').update(patch).eq(matchCol, matchVal).select();
+        if (!retry.error && retry.data?.length) return null;
+      }
+      return ins.error;
+    };
+
+    let err = await write(full);
+    if (err && isMissingColumnError(err)) {
+      warnMigrationOnce('wb_campaign_logs.phone/message_body/…');
+      const legacy = {};
+      for (const k of CAMPAIGN_LOG_LEGACY_COLS) if (full[k] !== undefined) legacy[k] = full[k];
+      err = await write(legacy);
+    }
+    if (err) console.error('[queue] failed to write campaign log', row.queue_id, { code: err.code, message: err.message, details: err.details, hint: err.hint });
+  } catch (e) {
+    console.error('[queue] failed to write campaign log', row.queue_id, e.message);
+  }
+}
+
+// Meta delivery webhook: sent -> delivered -> read (or failed). Only ever moves
+// a message forward (webhooks can arrive out of order) and ignores messages that
+// do not belong to a campaign (AI / bot / manual replies also get status
+// callbacks — the old upsert created an orphan log row for every one of them).
+const DELIVERY_RANK = { sent: 1, delivered: 2, read: 3 };
+async function applyDeliveryStatus(status) {
+  const waMessageId = status?.id;
+  if (!waMessageId) return;
+  const newStatus = status.status;
+  const now = new Date().toISOString();
+  const errTitle = status.errors?.[0]?.title || status.errors?.[0]?.message || null;
+
+  const { data: rows, error } = await supabase
+    .from('wb_campaign_logs').select('*').eq('wa_message_id', waMessageId).limit(1);
+  if (error) { console.error('[webhook] campaign log lookup failed:', error.message); return; }
+  const existing = rows?.[0];
+
+  if (!existing) {
+    // The status callback can beat the send loop's own log write. If this id
+    // belongs to a campaign queue row, create the log row now.
+    const { data: q } = await supabase
+      .from('wb_send_queue').select('*').eq('wa_message_id', waMessageId).limit(1);
+    if (!q?.length) return;
+    const item = q[0];
+    await recordCampaignLog({
+      campaign_id: item.campaign_id, queue_id: item.id, wa_message_id: waMessageId,
+      delivery_status: newStatus, phone: item.phone, contact_name: item.contact_name || '',
+      template_name: item.template_name, message_body: item.message_body || '',
+      error_reason: newStatus === 'failed' ? errTitle : null,
+      delivered_at: newStatus === 'delivered' || newStatus === 'read' ? now : null,
+      read_at: newStatus === 'read' ? now : null
+    });
     return;
   }
-  if (!campaign || campaign.status === 'paused') return;
 
-  const newProcessed = (campaign.queue_processed || 0) + (sendSuccess ? 1 : 0);
-  const newFailed = (campaign.queue_failed || 0) + (sendSuccess ? 0 : 1);
-  const newStatus = (newProcessed + newFailed) >= campaign.queue_total ? 'completed' : campaign.status;
-
-  const { error: updateErr } = await supabase
-    .from('wb_campaigns')
-    .update({
-      queue_processed: newProcessed,
-      queue_failed: newFailed,
-      status: newStatus,
-      sent_count: newProcessed,
-      failed_count: newFailed,
-      completed_at: newStatus === 'completed' ? new Date().toISOString() : null,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', campaignId);
-
-  // This update was previously fire-and-forget with no error check, so a
-  // schema mismatch or RLS block here would silently no-op: WhatsApp sends
-  // would succeed (visible in the [queue] processed console logs) while
-  // queue_processed/sent_count on wb_campaigns never actually incremented —
-  // exactly the "dashboard stuck at 0/0 with no errors anywhere" symptom.
-  if (updateErr) {
-    console.error('[updateCampaignProgress] failed to update campaign', campaignId, updateErr);
+  const patch = { updated_at: now };
+  if (newStatus === 'failed') {
+    patch.delivery_status = 'failed';
+    if (errTitle) patch.error_reason = errTitle;
+  } else if ((DELIVERY_RANK[newStatus] || 0) > (DELIVERY_RANK[existing.delivery_status] || 0)) {
+    patch.delivery_status = newStatus;
   }
+  if ((newStatus === 'delivered' || newStatus === 'read') && !existing.delivered_at) patch.delivered_at = now;
+  if (newStatus === 'read' && !existing.read_at) patch.read_at = now;
+
+  const { error: updErr } = await supabase
+    .from('wb_campaign_logs').update(patch).eq('wa_message_id', waMessageId);
+  if (updErr) console.error('[webhook] failed to update delivery status', waMessageId, updErr.message);
 }
 
 // ================================================================
